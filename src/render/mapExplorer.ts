@@ -2,6 +2,7 @@ import { Application, Container, Graphics } from 'pixi.js';
 import {
   CHUNK_SIZE,
   chunkCoord,
+  elevationAt,
   getTileAt,
   type TileType,
 } from '../gen/generator';
@@ -13,6 +14,7 @@ import {
   pixelToAxial,
   roundAxial,
 } from './hex';
+import { colorForRenderedTile } from './style';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
@@ -24,6 +26,14 @@ const DRAW_HEX_OUTLINES = false;
 const MINIMAP_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
+const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
 
 type LoadedChunk = {
   cq: number;
@@ -108,9 +118,27 @@ function createChunkContainer(seed: string, cq: number, cr: number): Container {
       const center = axialToPixel(q, r, HEX_SIZE);
       const sample = axialToSample(q, r);
       const tile = getTileAt(seed, sample.x, sample.y);
+      const elevation = elevationAt(seed, sample.x, sample.y);
+      let shorelineNeighbors = 0;
+      if (tile !== 'water' && tile !== 'river') {
+        for (const [dq, dr] of HEX_DIRECTIONS) {
+          const neighborSample = axialToSample(q + dq, r + dr);
+          const neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
+          if (neighborTile === 'water' || neighborTile === 'river') {
+            shorelineNeighbors += 1;
+          }
+        }
+      }
+
+      const renderColor = colorForRenderedTile(
+        tile,
+        TILE_COLORS[tile],
+        elevation,
+        shorelineNeighbors,
+      );
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
-      chunkGraphics.poly(points, true).fill(TILE_COLORS[tile]);
+      chunkGraphics.poly(points, true).fill(renderColor);
       if (DRAW_HEX_OUTLINES) {
         chunkGraphics.poly(points, true).stroke({
           color: 0x101010,
