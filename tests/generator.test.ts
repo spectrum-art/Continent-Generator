@@ -187,4 +187,87 @@ describe('river core', () => {
       expect(steps).toBeLessThanOrEqual(MAX_RIVER_STEPS);
     }
   });
+
+  it('keeps river coverage within target range in a 256x256 sample', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    let riverCount = 0;
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'river') {
+          riverCount += 1;
+        }
+      }
+    }
+
+    const ratio = riverCount / (size * size);
+    expect(
+      ratio,
+      `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.50% and 4.00%`,
+    ).toBeGreaterThanOrEqual(0.005);
+    expect(
+      ratio,
+      `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.50% and 4.00%`,
+    ).toBeLessThanOrEqual(0.04);
+  });
+
+  it('has at least one river component with length >= 50 in 256x256 sample', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const riverTiles = new Set<string>();
+    const visited = new Set<string>();
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'river') {
+          riverTiles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    let largest = 0;
+    for (const key of riverTiles) {
+      if (visited.has(key)) {
+        continue;
+      }
+
+      const queue = [key];
+      visited.add(key);
+      let count = 0;
+
+      while (queue.length > 0) {
+        const current = queue.shift() as string;
+        count += 1;
+        const [xStr, yStr] = current.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+
+        for (const [dx, dy] of dirs) {
+          const nextKey = `${x + dx},${y + dy}`;
+          if (!riverTiles.has(nextKey) || visited.has(nextKey)) {
+            continue;
+          }
+          visited.add(nextKey);
+          queue.push(nextKey);
+        }
+      }
+
+      if (count > largest) {
+        largest = count;
+      }
+    }
+
+    expect(largest, `largest river component length=${largest} expected >= 50`).toBeGreaterThanOrEqual(50);
+  });
 });

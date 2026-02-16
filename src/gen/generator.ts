@@ -1,11 +1,14 @@
 export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock' | 'river';
 
 export const CHUNK_SIZE = 64;
-export const RIVER_SOURCE_SPACING = 32;
-export const RIVER_SOURCE_RATE = 0.42;
-export const MIN_SOURCE_ELEVATION = 0.64;
-export const MAX_RIVER_STEPS = 220;
+export const RIVER_SOURCE_SPACING = 12;
+export const RIVER_SOURCE_RATE = 1;
+export const MIN_SOURCE_ELEVATION = 0.5;
+export const MAX_RIVER_STEPS = 360;
 export const RIVER_WATER_STOP_ELEVATION = 0.42;
+export const RIVER_UPHILL_TOLERANCE = 0.005;
+export const MAJOR_SOURCE_SPACING = 72;
+export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
 
 const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain', 'rock'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -197,7 +200,7 @@ export function riverTraceLengthFromSource(seed: string, startX: number, startY:
     if (next.x === x && next.y === y) {
       break;
     }
-    if (next.elevation >= currentElevation - RIVER_TIE_EPSILON) {
+    if (next.elevation > currentElevation + RIVER_UPHILL_TOLERANCE) {
       break;
     }
 
@@ -228,6 +231,41 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
   const gridMinY = Math.floor((startY - sourceMargin) / RIVER_SOURCE_SPACING);
   const gridMaxY = Math.floor((endY + sourceMargin) / RIVER_SOURCE_SPACING);
 
+  function traceFromSource(sourceX: number, sourceY: number): void {
+    let x = sourceX;
+    let y = sourceY;
+    let currentElevation = elevationAt(seed, x, y);
+    const seen = new Set<string>();
+
+    for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
+      const pathKey = localTileKey(x, y);
+      if (seen.has(pathKey)) {
+        break;
+      }
+      seen.add(pathKey);
+
+      if (x >= startX && x <= endX && y >= startY && y <= endY) {
+        tiles.add(localTileKey(x - startX, y - startY));
+      }
+
+      if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
+        break;
+      }
+
+      const next = chooseDownhillNeighbor(seedHash, seed, x, y);
+      if (next.x === x && next.y === y) {
+        break;
+      }
+      if (next.elevation > currentElevation + RIVER_UPHILL_TOLERANCE) {
+        break;
+      }
+
+      x = next.x;
+      y = next.y;
+      currentElevation = next.elevation;
+    }
+  }
+
   for (let gy = gridMinY; gy <= gridMaxY; gy += 1) {
     for (let gx = gridMinX; gx <= gridMaxX; gx += 1) {
       const pick = (hashCoord(seedHash, gx, gy, 7) & 0xffff) / 0xffff;
@@ -237,42 +275,67 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
 
       const offsetX = hashCoord(seedHash, gx, gy, 13) % RIVER_SOURCE_SPACING;
       const offsetY = hashCoord(seedHash, gx, gy, 29) % RIVER_SOURCE_SPACING;
-      let x = gx * RIVER_SOURCE_SPACING + offsetX;
-      let y = gy * RIVER_SOURCE_SPACING + offsetY;
-      let currentElevation = elevationAt(seed, x, y);
+      const x = gx * RIVER_SOURCE_SPACING + offsetX;
+      const y = gy * RIVER_SOURCE_SPACING + offsetY;
+      const currentElevation = elevationAt(seed, x, y);
       if (currentElevation < MIN_SOURCE_ELEVATION) {
         continue;
       }
+      traceFromSource(x, y);
+    }
+  }
 
-      const seen = new Set<string>();
-      for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
-        const pathKey = localTileKey(x, y);
-        if (seen.has(pathKey)) {
-          break;
-        }
-        seen.add(pathKey);
+  const majorMargin = MAX_RIVER_STEPS + MAJOR_SOURCE_SPACING;
+  const majorGridMinX = Math.floor((startX - majorMargin) / MAJOR_SOURCE_SPACING);
+  const majorGridMaxX = Math.floor((endX + majorMargin) / MAJOR_SOURCE_SPACING);
+  const majorGridMinY = Math.floor((startY - majorMargin) / MAJOR_SOURCE_SPACING);
+  const majorGridMaxY = Math.floor((endY + majorMargin) / MAJOR_SOURCE_SPACING);
 
-        if (x >= startX && x <= endX && y >= startY && y <= endY) {
-          tiles.add(localTileKey(x - startX, y - startY));
-        }
+  for (let gy = majorGridMinY; gy <= majorGridMaxY; gy += 1) {
+    for (let gx = majorGridMinX; gx <= majorGridMaxX; gx += 1) {
+      const offsetX = hashCoord(seedHash, gx, gy, 211) % MAJOR_SOURCE_SPACING;
+      const offsetY = hashCoord(seedHash, gx, gy, 223) % MAJOR_SOURCE_SPACING;
+      const x = gx * MAJOR_SOURCE_SPACING + offsetX;
+      const y = gy * MAJOR_SOURCE_SPACING + offsetY;
+      const elev = elevationAt(seed, x, y);
+      if (elev < MAJOR_MIN_SOURCE_ELEVATION) {
+        continue;
+      }
 
-        if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
-          break;
-        }
+      traceFromSource(x, y);
+    }
+  }
 
-        const next = chooseDownhillNeighbor(seedHash, seed, x, y);
-        if (next.x === x && next.y === y) {
-          break;
-        }
-        if (next.elevation >= currentElevation - RIVER_TIE_EPSILON) {
-          break;
-        }
+  const widened = new Set<string>();
+  for (const key of tiles) {
+    widened.add(key);
+    const [localXStr, localYStr] = key.split(',');
+    const localX = Number(localXStr);
+    const localY = Number(localYStr);
+    const worldX = startX + localX;
+    const worldY = startY + localY;
+    const dirIndex = hashCoord(seedHash, worldX, worldY, 601) % AXIAL_DIRECTIONS.length;
+    const [dx, dy] = AXIAL_DIRECTIONS[dirIndex];
+    const nx = localX + dx;
+    const ny = localY + dy;
+    if (nx >= 0 && nx < CHUNK_SIZE && ny >= 0 && ny < CHUNK_SIZE) {
+      widened.add(localTileKey(nx, ny));
+    }
 
-        x = next.x;
-        y = next.y;
-        currentElevation = next.elevation;
+    const extraPick = (hashCoord(seedHash, worldX, worldY, 607) & 0xff) / 0xff;
+    if (extraPick < 0.7) {
+      const extraDirIndex = hashCoord(seedHash, worldX, worldY, 613) % AXIAL_DIRECTIONS.length;
+      const [ex, ey] = AXIAL_DIRECTIONS[extraDirIndex];
+      const exx = localX + ex;
+      const eyy = localY + ey;
+      if (exx >= 0 && exx < CHUNK_SIZE && eyy >= 0 && eyy < CHUNK_SIZE) {
+        widened.add(localTileKey(exx, eyy));
       }
     }
+  }
+  tiles.clear();
+  for (const key of widened) {
+    tiles.add(key);
   }
 
   const built: RiverChunkData = { tiles };
