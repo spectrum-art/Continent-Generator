@@ -1,4 +1,4 @@
-export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock';
+export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock' | 'river';
 
 export const CHUNK_SIZE = 64;
 

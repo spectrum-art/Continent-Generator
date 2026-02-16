@@ -44,6 +44,7 @@ type OverlayElements = {
 
 const TILE_COLORS: Record<TileType, number> = {
   water: 0x2d6cdf,
+  river: 0x3f8ef2,
   sand: 0xe2cf89,
   grass: 0x63b359,
   forest: 0x2f7a43,
@@ -53,6 +54,7 @@ const TILE_COLORS: Record<TileType, number> = {
 
 const TILE_COLORS_CSS: Record<TileType, string> = {
   water: '#2d6cdf',
+  river: '#3f8ef2',
   sand: '#e2cf89',
   grass: '#63b359',
   forest: '#2f7a43',
