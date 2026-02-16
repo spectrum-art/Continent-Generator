@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CHUNK_SIZE,
   chunkCoord,
+  elevationAt,
   generateChunk,
   getChunkKey,
   getTileAt,
+  moistureAt,
   type TileType,
 } from '../src/gen/generator';
 
@@ -26,6 +28,30 @@ describe('generator determinism', () => {
       const c = getTileAt(seed, x, y);
       expect(a).toBe(b);
       expect(b).toBe(c);
+    }
+  });
+
+  it('returns deterministic elevation and moisture field values', () => {
+    const seed = 'field-seed';
+    const points: Array<[number, number]> = [
+      [0, 0],
+      [12.5, -7.25],
+      [-101, 88],
+      [512, -256],
+    ];
+
+    for (const [x, y] of points) {
+      const e1 = elevationAt(seed, x, y);
+      const e2 = elevationAt(seed, x, y);
+      const m1 = moistureAt(seed, x, y);
+      const m2 = moistureAt(seed, x, y);
+
+      expect(e1).toBe(e2);
+      expect(m1).toBe(m2);
+      expect(e1).toBeGreaterThanOrEqual(0);
+      expect(e1).toBeLessThanOrEqual(1);
+      expect(m1).toBeGreaterThanOrEqual(0);
+      expect(m1).toBeLessThanOrEqual(1);
     }
   });
 });
@@ -110,16 +136,16 @@ describe('chunk generation', () => {
 });
 
 describe('distribution sanity', () => {
-  it('produces at least 4 tile types over a 256x256 sample', () => {
+  it('produces at least 5 tile types over a 512x512 sample', () => {
     const seed = 'distribution';
     const found = new Set<TileType>();
 
-    for (let y = -128; y < 128; y += 1) {
-      for (let x = -128; x < 128; x += 1) {
+    for (let y = -256; y < 256; y += 1) {
+      for (let x = -256; x < 256; x += 1) {
         found.add(getTileAt(seed, x, y));
       }
     }
 
-    expect(found.size).toBeGreaterThanOrEqual(4);
+    expect(found.size).toBeGreaterThanOrEqual(5);
   });
 });

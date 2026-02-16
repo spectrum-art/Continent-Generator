@@ -41,6 +41,7 @@ const TILE_COLORS: Record<TileType, number> = {
   grass: 0x63b359,
   forest: 0x2f7a43,
   mountain: 0x8d8f98,
+  rock: 0x6a6972,
 };
 
 function clamp(value: number, min: number, max: number): number {

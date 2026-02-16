@@ -1,8 +1,8 @@
-export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain';
+export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock';
 
 export const CHUNK_SIZE = 64;
 
-const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain'];
+const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain', 'rock'];
 
 function hashString(input: string): number {
   let hash = 2166136261;
@@ -31,6 +31,19 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function rotate(x: number, y: number, radians: number): { x: number; y: number } {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  };
+}
+
 function latticeValue(seedHash: number, x: number, y: number): number {
   const latticeSeed = (seedHash ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
   return mulberry32(latticeSeed)();
@@ -55,22 +68,63 @@ function valueNoise2D(seedHash: number, x: number, y: number): number {
   return lerp(ix0, ix1, sy);
 }
 
-function toTileType(value: number): TileType {
-  if (value < 0.28) return TILE_TYPES[0];
-  if (value < 0.38) return TILE_TYPES[1];
-  if (value < 0.68) return TILE_TYPES[2];
-  if (value < 0.86) return TILE_TYPES[3];
-  return TILE_TYPES[4];
+function fractalNoise2D(
+  seedHash: number,
+  x: number,
+  y: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+): number {
+  let amplitude = 1;
+  let frequency = 1;
+  let total = 0;
+  let maxTotal = 0;
+
+  for (let octave = 0; octave < octaves; octave += 1) {
+    const octaveSeed = (seedHash + Math.imul(octave + 1, 0x9e3779b1)) >>> 0;
+    total += valueNoise2D(octaveSeed, x * frequency, y * frequency) * amplitude;
+    maxTotal += amplitude;
+    amplitude *= persistence;
+    frequency *= lacunarity;
+  }
+
+  return total / maxTotal;
+}
+
+function biomeFromFields(elevation: number, moisture: number): TileType {
+  if (elevation < 0.42) return TILE_TYPES[0];
+  if (elevation < 0.48) return TILE_TYPES[1];
+  if (elevation > 0.78) return TILE_TYPES[5];
+  if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[5];
+  if (elevation > 0.61) return TILE_TYPES[4];
+  if (moisture > 0.56) return TILE_TYPES[3];
+  return TILE_TYPES[2];
+}
+
+export function elevationAt(seed: string, x: number, y: number): number {
+  const seedHash = hashString(seed);
+  const rotated = rotate(x * 0.018, y * 0.018, 0.61);
+  const continent = fractalNoise2D(seedHash ^ 0xa53d7f19, rotated.x * 0.35, rotated.y * 0.35, 4, 0.58, 2.1);
+  const terrain = fractalNoise2D(seedHash ^ 0x7f4a7c15, rotated.x, rotated.y, 5, 0.52, 2.0);
+  const detail = fractalNoise2D(seedHash ^ 0x21f0aaad, rotated.x * 2.2, rotated.y * 2.2, 4, 0.45, 2.0);
+
+  const ridge = 1 - Math.abs(detail * 2 - 1);
+  const combined = continent * 0.5 + terrain * 0.35 + ridge * 0.15;
+  const contrasted = Math.pow(combined, 1.18);
+  return clamp01(contrasted * 1.2 - 0.18);
+}
+
+export function moistureAt(seed: string, x: number, y: number): number {
+  const seedHash = hashString(seed);
+  const rotated = rotate(x * 0.022, y * 0.022, -0.77);
+  const broad = fractalNoise2D(seedHash ^ 0xd13f3c49, rotated.x * 0.55, rotated.y * 0.55, 4, 0.56, 2.0);
+  const local = fractalNoise2D(seedHash ^ 0x2be3a5ad, rotated.x * 1.35, rotated.y * 1.35, 5, 0.48, 2.1);
+  return clamp01(broad * 0.6 + local * 0.4);
 }
 
 export function getTileAt(seed: string, x: number, y: number): TileType {
-  const seedHash = hashString(seed);
-  const scaleA = 0.06;
-  const scaleB = 0.12;
-  const base = valueNoise2D(seedHash, x * scaleA, y * scaleA);
-  const detail = valueNoise2D(seedHash ^ 0x9e3779b9, x * scaleB, y * scaleB);
-  const blended = base * 0.75 + detail * 0.25;
-  return toTileType(blended);
+  return biomeFromFields(elevationAt(seed, x, y), moistureAt(seed, x, y));
 }
 
 export function chunkCoord(n: number): number {
