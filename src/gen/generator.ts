@@ -1,8 +1,30 @@
 export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock' | 'river';
 
 export const CHUNK_SIZE = 64;
+export const RIVER_SOURCE_SPACING = 32;
+export const RIVER_SOURCE_RATE = 0.42;
+export const MIN_SOURCE_ELEVATION = 0.64;
+export const MAX_RIVER_STEPS = 220;
+export const RIVER_WATER_STOP_ELEVATION = 0.42;
 
 const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain', 'rock'];
+const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+const RIVER_CACHE_MAX_CHUNKS = 256;
+const RIVER_TIE_EPSILON = 1e-6;
+
+type RiverChunkData = {
+  tiles: Set<string>;
+};
+
+const riverChunkCache = new Map<string, RiverChunkData>();
+const riverChunkCacheOrder: string[] = [];
 
 function hashString(input: string): number {
   let hash = 2166136261;
@@ -42,6 +64,24 @@ function rotate(x: number, y: number, radians: number): { x: number; y: number }
     x: x * cos - y * sin,
     y: x * sin + y * cos,
   };
+}
+
+function hashCoord(seedHash: number, x: number, y: number, salt: number): number {
+  let h = (seedHash ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ salt) >>> 0;
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822519);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489917);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+function chunkRiverCacheKey(seed: string, cx: number, cy: number): string {
+  return `${seed}|${cx}:${cy}`;
+}
+
+function localTileKey(localX: number, localY: number): string {
+  return `${localX},${localY}`;
 }
 
 function latticeValue(seedHash: number, x: number, y: number): number {
@@ -102,6 +142,151 @@ function biomeFromFields(elevation: number, moisture: number): TileType {
   return TILE_TYPES[2];
 }
 
+function chooseDownhillNeighbor(
+  seedHash: number,
+  seed: string,
+  x: number,
+  y: number,
+): { x: number; y: number; elevation: number } {
+  let bestX = x;
+  let bestY = y;
+  let bestElevation = elevationAt(seed, x, y);
+  let bestTie = Number.MAX_SAFE_INTEGER;
+
+  for (let i = 0; i < AXIAL_DIRECTIONS.length; i += 1) {
+    const [dx, dy] = AXIAL_DIRECTIONS[i];
+    const nx = x + dx;
+    const ny = y + dy;
+    const candidateElevation = elevationAt(seed, nx, ny);
+    const tie = hashCoord(seedHash, nx, ny, i + 101);
+
+    if (
+      candidateElevation < bestElevation - RIVER_TIE_EPSILON ||
+      (Math.abs(candidateElevation - bestElevation) <= RIVER_TIE_EPSILON && tie < bestTie)
+    ) {
+      bestX = nx;
+      bestY = ny;
+      bestElevation = candidateElevation;
+      bestTie = tie;
+    }
+  }
+
+  return { x: bestX, y: bestY, elevation: bestElevation };
+}
+
+export function riverTraceLengthFromSource(seed: string, startX: number, startY: number): number {
+  const seedHash = hashString(seed);
+  const seen = new Set<string>();
+  let x = startX;
+  let y = startY;
+  let currentElevation = elevationAt(seed, x, y);
+  let steps = 0;
+
+  for (; steps < MAX_RIVER_STEPS; steps += 1) {
+    const pathKey = localTileKey(x, y);
+    if (seen.has(pathKey)) {
+      break;
+    }
+    seen.add(pathKey);
+
+    if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
+      break;
+    }
+
+    const next = chooseDownhillNeighbor(seedHash, seed, x, y);
+    if (next.x === x && next.y === y) {
+      break;
+    }
+    if (next.elevation >= currentElevation - RIVER_TIE_EPSILON) {
+      break;
+    }
+
+    x = next.x;
+    y = next.y;
+    currentElevation = next.elevation;
+  }
+
+  return steps;
+}
+
+function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
+  const cacheKey = chunkRiverCacheKey(seed, cx, cy);
+  const cached = riverChunkCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const seedHash = hashString(seed);
+  const tiles = new Set<string>();
+  const startX = cx * CHUNK_SIZE;
+  const startY = cy * CHUNK_SIZE;
+  const endX = startX + CHUNK_SIZE - 1;
+  const endY = startY + CHUNK_SIZE - 1;
+  const sourceMargin = MAX_RIVER_STEPS + RIVER_SOURCE_SPACING;
+  const gridMinX = Math.floor((startX - sourceMargin) / RIVER_SOURCE_SPACING);
+  const gridMaxX = Math.floor((endX + sourceMargin) / RIVER_SOURCE_SPACING);
+  const gridMinY = Math.floor((startY - sourceMargin) / RIVER_SOURCE_SPACING);
+  const gridMaxY = Math.floor((endY + sourceMargin) / RIVER_SOURCE_SPACING);
+
+  for (let gy = gridMinY; gy <= gridMaxY; gy += 1) {
+    for (let gx = gridMinX; gx <= gridMaxX; gx += 1) {
+      const pick = (hashCoord(seedHash, gx, gy, 7) & 0xffff) / 0xffff;
+      if (pick > RIVER_SOURCE_RATE) {
+        continue;
+      }
+
+      const offsetX = hashCoord(seedHash, gx, gy, 13) % RIVER_SOURCE_SPACING;
+      const offsetY = hashCoord(seedHash, gx, gy, 29) % RIVER_SOURCE_SPACING;
+      let x = gx * RIVER_SOURCE_SPACING + offsetX;
+      let y = gy * RIVER_SOURCE_SPACING + offsetY;
+      let currentElevation = elevationAt(seed, x, y);
+      if (currentElevation < MIN_SOURCE_ELEVATION) {
+        continue;
+      }
+
+      const seen = new Set<string>();
+      for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
+        const pathKey = localTileKey(x, y);
+        if (seen.has(pathKey)) {
+          break;
+        }
+        seen.add(pathKey);
+
+        if (x >= startX && x <= endX && y >= startY && y <= endY) {
+          tiles.add(localTileKey(x - startX, y - startY));
+        }
+
+        if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
+          break;
+        }
+
+        const next = chooseDownhillNeighbor(seedHash, seed, x, y);
+        if (next.x === x && next.y === y) {
+          break;
+        }
+        if (next.elevation >= currentElevation - RIVER_TIE_EPSILON) {
+          break;
+        }
+
+        x = next.x;
+        y = next.y;
+        currentElevation = next.elevation;
+      }
+    }
+  }
+
+  const built: RiverChunkData = { tiles };
+  riverChunkCache.set(cacheKey, built);
+  riverChunkCacheOrder.push(cacheKey);
+  while (riverChunkCacheOrder.length > RIVER_CACHE_MAX_CHUNKS) {
+    const oldest = riverChunkCacheOrder.shift();
+    if (!oldest) break;
+    riverChunkCache.delete(oldest);
+  }
+
+  return built;
+}
+
 export function elevationAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
   const rotated = rotate(x * 0.018, y * 0.018, 0.61);
@@ -124,7 +309,19 @@ export function moistureAt(seed: string, x: number, y: number): number {
 }
 
 export function getTileAt(seed: string, x: number, y: number): TileType {
-  return biomeFromFields(elevationAt(seed, x, y), moistureAt(seed, x, y));
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const cx = chunkCoord(tileX);
+  const cy = chunkCoord(tileY);
+  const riverChunk = buildRiverChunk(seed, cx, cy);
+  const localX = tileX - cx * CHUNK_SIZE;
+  const localY = tileY - cy * CHUNK_SIZE;
+  const base = biomeFromFields(elevationAt(seed, x, y), moistureAt(seed, x, y));
+
+  if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
+    return 'river';
+  }
+  return base;
 }
 
 export function chunkCoord(n: number): number {

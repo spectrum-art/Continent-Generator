@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHUNK_SIZE,
+  MAX_RIVER_STEPS,
   chunkCoord,
   elevationAt,
   generateChunk,
   getChunkKey,
   getTileAt,
   moistureAt,
+  riverTraceLengthFromSource,
   type TileType,
 } from '../src/gen/generator';
 
@@ -147,5 +149,42 @@ describe('distribution sanity', () => {
     }
 
     expect(found.size).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('river core', () => {
+  it('is deterministic for sampled river layout', () => {
+    const seed = 'default';
+    const summaryA: string[] = [];
+    const summaryB: string[] = [];
+
+    for (let y = -64; y < 64; y += 1) {
+      for (let x = -64; x < 64; x += 1) {
+        if (getTileAt(seed, x, y) === 'river') {
+          summaryA.push(`${x},${y}`);
+        }
+        if (getTileAt(seed, x, y) === 'river') {
+          summaryB.push(`${x},${y}`);
+        }
+      }
+    }
+
+    expect(summaryA.join('|')).toBe(summaryB.join('|'));
+  });
+
+  it('terminates river traces at or below MAX_RIVER_STEPS', () => {
+    const seed = 'default';
+    const candidates: Array<[number, number]> = [
+      [16, 32],
+      [64, -48],
+      [-96, 80],
+      [150, 150],
+      [-170, -130],
+    ];
+
+    for (const [x, y] of candidates) {
+      const steps = riverTraceLengthFromSource(seed, x, y);
+      expect(steps).toBeLessThanOrEqual(MAX_RIVER_STEPS);
+    }
   });
 });
