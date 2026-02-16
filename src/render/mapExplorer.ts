@@ -5,25 +5,31 @@ import {
   generateChunk,
   type TileType,
 } from '../gen/generator';
+import {
+  HEX_SIZE,
+  axialToPixel,
+  hexPolygonPoints,
+  pixelToAxial,
+  roundAxial,
+} from './hex';
 
-const TILE_SIZE = 16;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
 const ZOOM_SENSITIVITY = 0.0012;
 const CHUNK_PREFETCH_MARGIN = 1;
+const AXIAL_VIEW_PADDING = 6;
 const DEFAULT_SEED = 'default';
 
 type LoadedChunk = {
-  cx: number;
-  cy: number;
+  cq: number;
+  cr: number;
   container: Container;
 };
 
 type OverlayElements = {
   root: HTMLDivElement;
-  seedInput: HTMLInputElement;
   seedValue: HTMLSpanElement;
-  cameraValue: HTMLSpanElement;
+  axialValue: HTMLSpanElement;
   zoomValue: HTMLSpanElement;
   loadedChunksValue: HTMLSpanElement;
 };
@@ -40,27 +46,39 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function getRenderChunkKey(cx: number, cy: number): string {
-  return `${cx}:${cy}`;
+function getRenderChunkKey(cq: number, cr: number): string {
+  return `${cq}:${cr}`;
 }
 
-function createChunkContainer(seed: string, cx: number, cy: number): Container {
+function screenToWorld(world: Container, screenX: number, screenY: number): { x: number; y: number } {
+  return {
+    x: (screenX - world.position.x) / world.scale.x,
+    y: (screenY - world.position.y) / world.scale.y,
+  };
+}
+
+function createChunkContainer(seed: string, cq: number, cr: number): Container {
   const chunkContainer = new Container();
-  chunkContainer.position.set(cx * CHUNK_SIZE * TILE_SIZE, cy * CHUNK_SIZE * TILE_SIZE);
+  const baseQ = cq * CHUNK_SIZE;
+  const baseR = cr * CHUNK_SIZE;
+  const basePixel = axialToPixel(baseQ, baseR, HEX_SIZE);
+  chunkContainer.position.set(basePixel.x, basePixel.y);
 
   const chunkGraphics = new Graphics();
-  const chunkTiles = generateChunk(seed, cx, cy);
-  for (let y = 0; y < CHUNK_SIZE; y += 1) {
-    for (let x = 0; x < CHUNK_SIZE; x += 1) {
-      const px = x * TILE_SIZE;
-      const py = y * TILE_SIZE;
-      const tile = chunkTiles[y][x];
+  const chunkTiles = generateChunk(seed, cq, cr);
+  for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
+    for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
+      const q = baseQ + localQ;
+      const r = baseR + localR;
+      const center = axialToPixel(q, r, HEX_SIZE);
+      const tile = chunkTiles[localR][localQ];
+      const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
-      chunkGraphics.rect(px, py, TILE_SIZE, TILE_SIZE).fill(TILE_COLORS[tile]);
-      chunkGraphics.rect(px, py, TILE_SIZE, TILE_SIZE).stroke({
+      chunkGraphics.poly(points, true).fill(TILE_COLORS[tile]);
+      chunkGraphics.poly(points, true).stroke({
         color: 0x101010,
         width: 1,
-        alpha: 0.12,
+        alpha: 0.18,
       });
     }
   }
@@ -104,11 +122,11 @@ function createOverlay(seed: string): OverlayElements {
   seedValue.textContent = seed;
   seedValueRow.append(seedValueLabel, seedValue);
 
-  const cameraRow = document.createElement('div');
-  const cameraLabel = document.createElement('span');
-  cameraLabel.textContent = 'Camera world: ';
-  const cameraValue = document.createElement('span');
-  cameraRow.append(cameraLabel, cameraValue);
+  const axialRow = document.createElement('div');
+  const axialLabel = document.createElement('span');
+  axialLabel.textContent = 'Center axial: ';
+  const axialValue = document.createElement('span');
+  axialRow.append(axialLabel, axialValue);
 
   const zoomRow = document.createElement('div');
   const zoomLabel = document.createElement('span');
@@ -122,7 +140,7 @@ function createOverlay(seed: string): OverlayElements {
   const loadedChunksValue = document.createElement('span');
   chunksRow.append(chunksLabel, loadedChunksValue);
 
-  root.append(seedRow, seedValueRow, cameraRow, zoomRow, chunksRow);
+  root.append(seedRow, seedValueRow, axialRow, zoomRow, chunksRow);
   document.body.appendChild(root);
 
   const applySeed = () => {
@@ -137,9 +155,8 @@ function createOverlay(seed: string): OverlayElements {
 
   return {
     root,
-    seedInput,
     seedValue,
-    cameraValue,
+    axialValue,
     zoomValue,
     loadedChunksValue,
   };
@@ -179,15 +196,15 @@ export async function startMapExplorer(): Promise<void> {
     loadedChunks.clear();
   }
 
-  function loadChunk(cx: number, cy: number): void {
-    const key = getRenderChunkKey(cx, cy);
+  function loadChunk(cq: number, cr: number): void {
+    const key = getRenderChunkKey(cq, cr);
     if (loadedChunks.has(key)) {
       return;
     }
 
-    const container = createChunkContainer(activeSeed, cx, cy);
+    const container = createChunkContainer(activeSeed, cq, cr);
     world.addChild(container);
-    loadedChunks.set(key, { cx, cy, container });
+    loadedChunks.set(key, { cq, cr, container });
   }
 
   function unloadChunk(key: string): void {
@@ -202,28 +219,37 @@ export async function startMapExplorer(): Promise<void> {
   }
 
   function refreshChunks(): void {
-    const invScale = 1 / world.scale.x;
-    const minWorldX = (0 - world.position.x) * invScale;
-    const minWorldY = (0 - world.position.y) * invScale;
-    const maxWorldX = (window.innerWidth - world.position.x) * invScale;
-    const maxWorldY = (window.innerHeight - world.position.y) * invScale;
+    const corners = [
+      screenToWorld(world, 0, 0),
+      screenToWorld(world, window.innerWidth, 0),
+      screenToWorld(world, 0, window.innerHeight),
+      screenToWorld(world, window.innerWidth, window.innerHeight),
+    ];
 
-    const minTileX = Math.floor(minWorldX / TILE_SIZE);
-    const minTileY = Math.floor(minWorldY / TILE_SIZE);
-    const maxTileX = Math.floor(maxWorldX / TILE_SIZE);
-    const maxTileY = Math.floor(maxWorldY / TILE_SIZE);
+    let minQ = Number.POSITIVE_INFINITY;
+    let minR = Number.POSITIVE_INFINITY;
+    let maxQ = Number.NEGATIVE_INFINITY;
+    let maxR = Number.NEGATIVE_INFINITY;
 
-    const minChunkX = chunkCoord(minTileX) - CHUNK_PREFETCH_MARGIN;
-    const minChunkY = chunkCoord(minTileY) - CHUNK_PREFETCH_MARGIN;
-    const maxChunkX = chunkCoord(maxTileX) + CHUNK_PREFETCH_MARGIN;
-    const maxChunkY = chunkCoord(maxTileY) + CHUNK_PREFETCH_MARGIN;
+    for (const corner of corners) {
+      const axial = pixelToAxial(corner.x, corner.y, HEX_SIZE);
+      minQ = Math.min(minQ, axial.q);
+      minR = Math.min(minR, axial.r);
+      maxQ = Math.max(maxQ, axial.q);
+      maxR = Math.max(maxR, axial.r);
+    }
+
+    const minChunkQ = chunkCoord(Math.floor(minQ) - AXIAL_VIEW_PADDING) - CHUNK_PREFETCH_MARGIN;
+    const minChunkR = chunkCoord(Math.floor(minR) - AXIAL_VIEW_PADDING) - CHUNK_PREFETCH_MARGIN;
+    const maxChunkQ = chunkCoord(Math.ceil(maxQ) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
+    const maxChunkR = chunkCoord(Math.ceil(maxR) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
 
     const needed = new Set<string>();
-    for (let cy = minChunkY; cy <= maxChunkY; cy += 1) {
-      for (let cx = minChunkX; cx <= maxChunkX; cx += 1) {
-        const key = getRenderChunkKey(cx, cy);
+    for (let cr = minChunkR; cr <= maxChunkR; cr += 1) {
+      for (let cq = minChunkQ; cq <= maxChunkQ; cq += 1) {
+        const key = getRenderChunkKey(cq, cr);
         needed.add(key);
-        loadChunk(cx, cy);
+        loadChunk(cq, cr);
       }
     }
 
@@ -235,13 +261,12 @@ export async function startMapExplorer(): Promise<void> {
   }
 
   function updateOverlay(): void {
-    const centerScreenX = window.innerWidth / 2;
-    const centerScreenY = window.innerHeight / 2;
-    const cameraWorldX = (centerScreenX - world.position.x) / world.scale.x;
-    const cameraWorldY = (centerScreenY - world.position.y) / world.scale.y;
+    const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
+    const centerAxial = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
+    const roundedCenter = roundAxial(centerAxial.q, centerAxial.r);
 
     overlay.seedValue.textContent = activeSeed;
-    overlay.cameraValue.textContent = `${cameraWorldX.toFixed(1)}, ${cameraWorldY.toFixed(1)}`;
+    overlay.axialValue.textContent = `${roundedCenter.q}, ${roundedCenter.r}`;
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
   }
@@ -290,8 +315,7 @@ export async function startMapExplorer(): Promise<void> {
       const cursorY = event.clientY - rect.top;
 
       const oldScale = world.scale.x;
-      const worldX = (cursorX - world.position.x) / oldScale;
-      const worldY = (cursorY - world.position.y) / oldScale;
+      const worldPoint = screenToWorld(world, cursorX, cursorY);
       const nextScale = clamp(
         oldScale * Math.exp(-event.deltaY * ZOOM_SENSITIVITY),
         MIN_ZOOM,
@@ -300,8 +324,8 @@ export async function startMapExplorer(): Promise<void> {
 
       world.scale.set(nextScale);
       world.position.set(
-        cursorX - worldX * nextScale,
-        cursorY - worldY * nextScale,
+        cursorX - worldPoint.x * nextScale,
+        cursorY - worldPoint.y * nextScale,
       );
       cameraDirty = true;
     },

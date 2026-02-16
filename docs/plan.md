@@ -1,18 +1,19 @@
 # Map Explorer Plan
 
-## Milestone 3: Generator Rendering + Streaming
+## Milestone 4: Hex Rendering + Streaming
 
-- [x] Replace static grid renderer with generator-driven chunk tiles.
-- [x] Use fixed `TILE_SIZE` and `CHUNK_SIZE = 64` for render chunk layout.
-- [x] Keep pan/zoom camera behavior unchanged.
-- [x] Implement viewport-based chunk streaming with 1-chunk prefetch margin.
-- [x] Keep loaded chunks in `Map<string, Chunk>` with render keys `${cx}:${cy}`.
-- [x] Load missing chunks and unload out-of-range chunks during camera movement.
-- [x] Add debug overlay for seed, camera world coords, zoom, loaded chunk count.
-- [x] Add overlay seed input and regenerate visible world on seed change.
-- [x] Keep generator logic pure in `src/gen/*` and renderer logic in `src/render/*`.
-- [x] Update `docs/spec.md` for Milestone 3 acceptance criteria.
-- [x] Create commit A: `milestone3: renderer uses generator tiles (no streaming yet)`.
+- [x] Add pointy-top axial hex math helpers in `src/render/hex.ts`.
+- [x] Add unit tests for hex math round-trip and neighbor spacing.
+- [x] Keep generator module pure and unchanged in `src/gen/*`.
+- [x] Migrate renderer from square tiles to hex tiles.
+- [x] Keep deterministic sampling by mapping axial `(q, r)` to generator coordinates.
+- [x] Keep chunk streaming with `CHUNK_SIZE = 64` and prefetch margin.
+- [x] Use render chunk keys `${cq}:${cr}` and unload out-of-range chunks.
+- [x] Keep pan/zoom interaction behavior.
+- [x] Keep seed overlay input and regenerate on apply.
+- [x] Show center axial coords + zoom + loaded chunks in overlay.
+- [x] Update `docs/spec.md` acceptance criteria for hex milestone.
+- [x] Create commit A: `milestone4: hex math helpers + tests`.
 - [x] Run `npm test` and `npm run build` after commit A.
-- [x] Create commit B: `milestone3: chunk streaming load/unload + debug overlay`.
+- [x] Create commit B: `milestone4: hex rendering + streaming`.
 - [x] Run `npm test` and `npm run build` after commit B.
