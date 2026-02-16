@@ -1,15 +1,18 @@
 # Map Explorer Plan
 
-## Milestone 2: Deterministic Generator + Tests
+## Milestone 3: Generator Rendering + Streaming
 
-- [x] Add deterministic generator module under `src/gen/`.
-- [x] Define `TileType`, `CHUNK_SIZE`, and chunk utility APIs.
-- [x] Implement deterministic `getTileAt(seed, x, y)` using seeded noise/hash logic.
-- [x] Implement `generateChunk(seed, cx, cy)` as a 64x64 matrix.
-- [x] Ensure chunk generation agrees with `getTileAt` at chunk coordinates.
-- [x] Add Vitest coverage for determinism, chunk equivalence, chunk boundaries, and distribution sanity.
-- [x] Keep renderer behavior unchanged for this milestone.
-- [x] Update `docs/spec.md` acceptance criteria.
-- [x] Run `npm test` and fix failures.
-- [x] Run `npm run build` and fix failures.
-- [x] Commit changes with message: `milestone: deterministic generator + tests`.
+- [x] Replace static grid renderer with generator-driven chunk tiles.
+- [x] Use fixed `TILE_SIZE` and `CHUNK_SIZE = 64` for render chunk layout.
+- [x] Keep pan/zoom camera behavior unchanged.
+- [x] Implement viewport-based chunk streaming with 1-chunk prefetch margin.
+- [x] Keep loaded chunks in `Map<string, Chunk>` with render keys `${cx}:${cy}`.
+- [x] Load missing chunks and unload out-of-range chunks during camera movement.
+- [x] Add debug overlay for seed, camera world coords, zoom, loaded chunk count.
+- [x] Add overlay seed input and regenerate visible world on seed change.
+- [x] Keep generator logic pure in `src/gen/*` and renderer logic in `src/render/*`.
+- [x] Update `docs/spec.md` for Milestone 3 acceptance criteria.
+- [x] Create commit A: `milestone3: renderer uses generator tiles (no streaming yet)`.
+- [x] Run `npm test` and `npm run build` after commit A.
+- [x] Create commit B: `milestone3: chunk streaming load/unload + debug overlay`.
+- [x] Run `npm test` and `npm run build` after commit B.
