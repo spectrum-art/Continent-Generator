@@ -67,6 +67,22 @@ function getRenderChunkKey(cq: number, cr: number): string {
   return `${cq}:${cr}`;
 }
 
+function readSeedFromUrl(): string {
+  const url = new URL(window.location.href);
+  const param = url.searchParams.get('seed');
+  if (!param) {
+    return DEFAULT_SEED;
+  }
+  const trimmed = param.trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_SEED;
+}
+
+function writeSeedToUrl(seed: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set('seed', seed);
+  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+}
+
 function screenToWorld(world: Container, screenX: number, screenY: number): { x: number; y: number } {
   return {
     x: (screenX - world.position.x) / world.scale.x,
@@ -213,7 +229,7 @@ export async function startMapExplorer(): Promise<void> {
   app.canvas.style.display = 'block';
   document.body.appendChild(app.canvas);
 
-  const initialSeed = DEFAULT_SEED;
+  const initialSeed = readSeedFromUrl();
   const overlay = createOverlay(initialSeed);
 
   const world = new Container();
@@ -347,6 +363,7 @@ export async function startMapExplorer(): Promise<void> {
     }
     activeSeed = seedEvent.detail;
     overlay.seedInput.value = activeSeed;
+    writeSeedToUrl(activeSeed);
     clearLoadedChunks();
     cameraDirty = true;
   });
@@ -405,6 +422,8 @@ export async function startMapExplorer(): Promise<void> {
   window.addEventListener('resize', () => {
     cameraDirty = true;
   });
+
+  writeSeedToUrl(activeSeed);
 
   app.ticker.add(() => {
     if (cameraDirty) {
