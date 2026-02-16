@@ -22,7 +22,7 @@ const ZOOM_SENSITIVITY = 0.0012;
 const CHUNK_PREFETCH_MARGIN = 1;
 const AXIAL_VIEW_PADDING = 6;
 const DEFAULT_SEED = 'default';
-const DRAW_HEX_OUTLINES = false;
+const OUTLINE_ZOOM_THRESHOLD = 1.35;
 const MINIMAP_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
@@ -44,10 +44,12 @@ type LoadedChunk = {
 type OverlayElements = {
   root: HTMLDivElement;
   seedInput: HTMLInputElement;
+  outlineModeValue: HTMLSpanElement;
   seedValue: HTMLSpanElement;
   axialValue: HTMLSpanElement;
   zoomValue: HTMLSpanElement;
   loadedChunksValue: HTMLSpanElement;
+  minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
 };
@@ -103,7 +105,12 @@ function screenToWorld(world: Container, screenX: number, screenY: number): { x:
   };
 }
 
-function createChunkContainer(seed: string, cq: number, cr: number): Container {
+function createChunkContainer(
+  seed: string,
+  cq: number,
+  cr: number,
+  shouldDrawOutlines: boolean,
+): Container {
   const chunkContainer = new Container();
   const baseQ = cq * CHUNK_SIZE;
   const baseR = cr * CHUNK_SIZE;
@@ -139,7 +146,7 @@ function createChunkContainer(seed: string, cq: number, cr: number): Container {
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
       chunkGraphics.poly(points, true).fill(renderColor);
-      if (DRAW_HEX_OUTLINES) {
+      if (shouldDrawOutlines) {
         chunkGraphics.poly(points, true).stroke({
           color: 0x101010,
           width: 1,
@@ -181,6 +188,19 @@ function createOverlay(seed: string): OverlayElements {
   applyButton.style.cursor = 'pointer';
   seedRow.append(seedLabel, seedInput, applyButton);
 
+  const outlineRow = document.createElement('div');
+  outlineRow.style.marginTop = '6px';
+  const outlineLabel = document.createElement('span');
+  outlineLabel.textContent = 'Outlines: ';
+  const outlineModeValue = document.createElement('span');
+  outlineModeValue.textContent = 'auto';
+  outlineModeValue.style.marginRight = '6px';
+  const outlineToggle = document.createElement('button');
+  outlineToggle.type = 'button';
+  outlineToggle.textContent = 'Toggle';
+  outlineToggle.style.cursor = 'pointer';
+  outlineRow.append(outlineLabel, outlineModeValue, outlineToggle);
+
   const seedValueRow = document.createElement('div');
   const seedValueLabel = document.createElement('span');
   seedValueLabel.textContent = 'Active seed: ';
@@ -206,6 +226,17 @@ function createOverlay(seed: string): OverlayElements {
   const loadedChunksValue = document.createElement('span');
   chunksRow.append(chunksLabel, loadedChunksValue);
 
+  const minimapRateRow = document.createElement('div');
+  const minimapRateLabel = document.createElement('span');
+  minimapRateLabel.textContent = 'Minimap Hz: ';
+  const minimapRateValue = document.createElement('span');
+  minimapRateValue.textContent = '0.0';
+  minimapRateRow.append(minimapRateLabel, minimapRateValue);
+
+  const legendRow = document.createElement('div');
+  legendRow.style.marginTop = '6px';
+  legendRow.textContent = 'Legend: water river sand grass forest mountain rock';
+
   const minimapRow = document.createElement('div');
   minimapRow.style.marginTop = '8px';
   const minimapLabel = document.createElement('div');
@@ -220,7 +251,7 @@ function createOverlay(seed: string): OverlayElements {
   minimapCanvas.style.background = '#111';
   minimapRow.append(minimapLabel, minimapCanvas);
 
-  root.append(seedRow, seedValueRow, axialRow, zoomRow, chunksRow, minimapRow);
+  root.append(seedRow, outlineRow, seedValueRow, axialRow, zoomRow, chunksRow, minimapRateRow, legendRow, minimapRow);
   document.body.appendChild(root);
   const minimapContext = minimapCanvas.getContext('2d');
   if (!minimapContext) {
@@ -236,14 +267,24 @@ function createOverlay(seed: string): OverlayElements {
 
   seedInput.addEventListener('change', applySeed);
   applyButton.addEventListener('click', applySeed);
+  outlineToggle.addEventListener('click', () => {
+    const modes = ['auto', 'on', 'off'] as const;
+    const current = outlineModeValue.textContent ?? 'auto';
+    const idx = modes.indexOf(current as (typeof modes)[number]);
+    const next = modes[(idx + 1) % modes.length];
+    outlineModeValue.textContent = next;
+    root.dispatchEvent(new CustomEvent<string>('outlinechange', { detail: next }));
+  });
 
   return {
     root,
     seedInput,
+    outlineModeValue,
     seedValue,
     axialValue,
     zoomValue,
     loadedChunksValue,
+    minimapRateValue,
     minimapCanvas,
     minimapContext,
   };
@@ -272,10 +313,21 @@ export async function startMapExplorer(): Promise<void> {
   let activeSeed = initialSeed;
   const loadedChunks = new Map<string, LoadedChunk>();
   let cameraDirty = true;
+  let outlineMode: 'auto' | 'on' | 'off' = 'auto';
+  let renderedWithOutlines = false;
   let isDragging = false;
   let lastX = 0;
   let lastY = 0;
   let lastMinimapUpdate = 0;
+  let minimapUpdatesThisWindow = 0;
+  let minimapWindowStart = performance.now();
+  let minimapRate = 0;
+
+  function shouldDrawOutlinesAtZoom(zoom: number): boolean {
+    if (outlineMode === 'on') return true;
+    if (outlineMode === 'off') return false;
+    return zoom >= OUTLINE_ZOOM_THRESHOLD;
+  }
 
   function clearLoadedChunks(): void {
     for (const chunk of loadedChunks.values()) {
@@ -291,7 +343,7 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
 
-    const container = createChunkContainer(activeSeed, cq, cr);
+    const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines);
     world.addChild(container);
     loadedChunks.set(key, { cq, cr, container });
   }
@@ -358,6 +410,8 @@ export async function startMapExplorer(): Promise<void> {
     overlay.axialValue.textContent = `${roundedCenter.q}, ${roundedCenter.r}`;
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
+    overlay.outlineModeValue.textContent = outlineMode;
+    overlay.minimapRateValue.textContent = minimapRate.toFixed(1);
   }
 
   function updateMinimap(nowMs: number): void {
@@ -365,6 +419,13 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
     lastMinimapUpdate = nowMs;
+    minimapUpdatesThisWindow += 1;
+    const windowMs = nowMs - minimapWindowStart;
+    if (windowMs >= 1000) {
+      minimapRate = (minimapUpdatesThisWindow * 1000) / windowMs;
+      minimapUpdatesThisWindow = 0;
+      minimapWindowStart = nowMs;
+    }
 
     const ctx = overlay.minimapContext;
     const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
@@ -399,6 +460,17 @@ export async function startMapExplorer(): Promise<void> {
     writeSeedToUrl(activeSeed);
     clearLoadedChunks();
     cameraDirty = true;
+  });
+
+  overlay.root.addEventListener('outlinechange', (event: Event) => {
+    const outlineEvent = event as CustomEvent<'auto' | 'on' | 'off'>;
+    outlineMode = outlineEvent.detail;
+    const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
+    if (nextOutlineState !== renderedWithOutlines) {
+      renderedWithOutlines = nextOutlineState;
+      clearLoadedChunks();
+      cameraDirty = true;
+    }
   });
 
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -457,8 +529,16 @@ export async function startMapExplorer(): Promise<void> {
   });
 
   writeSeedToUrl(activeSeed);
+  renderedWithOutlines = shouldDrawOutlinesAtZoom(world.scale.x);
 
   app.ticker.add(() => {
+    const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
+    if (nextOutlineState !== renderedWithOutlines) {
+      renderedWithOutlines = nextOutlineState;
+      clearLoadedChunks();
+      cameraDirty = true;
+    }
+
     if (cameraDirty) {
       refreshChunks();
       cameraDirty = false;
