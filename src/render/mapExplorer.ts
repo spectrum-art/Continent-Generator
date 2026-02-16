@@ -20,6 +20,9 @@ const ZOOM_SENSITIVITY = 0.0012;
 const CHUNK_PREFETCH_MARGIN = 1;
 const AXIAL_VIEW_PADDING = 6;
 const DEFAULT_SEED = 'default';
+const MINIMAP_SIZE = 128;
+const MINIMAP_UPDATE_MS = 250;
+const MINIMAP_SAMPLE_STEP = 2;
 
 type LoadedChunk = {
   cq: number;
@@ -29,10 +32,13 @@ type LoadedChunk = {
 
 type OverlayElements = {
   root: HTMLDivElement;
+  seedInput: HTMLInputElement;
   seedValue: HTMLSpanElement;
   axialValue: HTMLSpanElement;
   zoomValue: HTMLSpanElement;
   loadedChunksValue: HTMLSpanElement;
+  minimapCanvas: HTMLCanvasElement;
+  minimapContext: CanvasRenderingContext2D;
 };
 
 const TILE_COLORS: Record<TileType, number> = {
@@ -42,6 +48,15 @@ const TILE_COLORS: Record<TileType, number> = {
   forest: 0x2f7a43,
   mountain: 0x8d8f98,
   rock: 0x6a6972,
+};
+
+const TILE_COLORS_CSS: Record<TileType, string> = {
+  water: '#2d6cdf',
+  sand: '#e2cf89',
+  grass: '#63b359',
+  forest: '#2f7a43',
+  mountain: '#8d8f98',
+  rock: '#6a6972',
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -142,8 +157,26 @@ function createOverlay(seed: string): OverlayElements {
   const loadedChunksValue = document.createElement('span');
   chunksRow.append(chunksLabel, loadedChunksValue);
 
-  root.append(seedRow, seedValueRow, axialRow, zoomRow, chunksRow);
+  const minimapRow = document.createElement('div');
+  minimapRow.style.marginTop = '8px';
+  const minimapLabel = document.createElement('div');
+  minimapLabel.textContent = 'Minimap';
+  minimapLabel.style.marginBottom = '4px';
+  const minimapCanvas = document.createElement('canvas');
+  minimapCanvas.width = MINIMAP_SIZE;
+  minimapCanvas.height = MINIMAP_SIZE;
+  minimapCanvas.style.width = `${MINIMAP_SIZE}px`;
+  minimapCanvas.style.height = `${MINIMAP_SIZE}px`;
+  minimapCanvas.style.border = '1px solid rgba(255, 255, 255, 0.3)';
+  minimapCanvas.style.background = '#111';
+  minimapRow.append(minimapLabel, minimapCanvas);
+
+  root.append(seedRow, seedValueRow, axialRow, zoomRow, chunksRow, minimapRow);
   document.body.appendChild(root);
+  const minimapContext = minimapCanvas.getContext('2d');
+  if (!minimapContext) {
+    throw new Error('Unable to create minimap canvas context.');
+  }
 
   const applySeed = () => {
     const nextSeed = seedInput.value.trim();
@@ -157,10 +190,13 @@ function createOverlay(seed: string): OverlayElements {
 
   return {
     root,
+    seedInput,
     seedValue,
     axialValue,
     zoomValue,
     loadedChunksValue,
+    minimapCanvas,
+    minimapContext,
   };
 }
 
@@ -177,18 +213,20 @@ export async function startMapExplorer(): Promise<void> {
   app.canvas.style.display = 'block';
   document.body.appendChild(app.canvas);
 
-  const overlay = createOverlay(DEFAULT_SEED);
+  const initialSeed = DEFAULT_SEED;
+  const overlay = createOverlay(initialSeed);
 
   const world = new Container();
   world.position.set(window.innerWidth / 2, window.innerHeight / 2);
   app.stage.addChild(world);
 
-  let activeSeed = DEFAULT_SEED;
+  let activeSeed = initialSeed;
   const loadedChunks = new Map<string, LoadedChunk>();
   let cameraDirty = true;
   let isDragging = false;
   let lastX = 0;
   let lastY = 0;
+  let lastMinimapUpdate = 0;
 
   function clearLoadedChunks(): void {
     for (const chunk of loadedChunks.values()) {
@@ -273,12 +311,42 @@ export async function startMapExplorer(): Promise<void> {
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
   }
 
+  function updateMinimap(nowMs: number): void {
+    if (nowMs - lastMinimapUpdate < MINIMAP_UPDATE_MS) {
+      return;
+    }
+    lastMinimapUpdate = nowMs;
+
+    const ctx = overlay.minimapContext;
+    const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
+    const centerAxialFloat = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
+    const centerAxial = roundAxial(centerAxialFloat.q, centerAxialFloat.r);
+
+    for (let py = 0; py < MINIMAP_SIZE; py += MINIMAP_SAMPLE_STEP) {
+      for (let px = 0; px < MINIMAP_SIZE; px += MINIMAP_SAMPLE_STEP) {
+        const dq = Math.floor((px - MINIMAP_SIZE / 2) / MINIMAP_SAMPLE_STEP);
+        const dr = Math.floor((py - MINIMAP_SIZE / 2) / MINIMAP_SAMPLE_STEP);
+        const q = centerAxial.q + dq;
+        const r = centerAxial.r + dr;
+        const sample = axialToSample(q, r);
+        const tile = getTileAt(activeSeed, sample.x, sample.y);
+        ctx.fillStyle = TILE_COLORS_CSS[tile];
+        ctx.fillRect(px, py, MINIMAP_SAMPLE_STEP, MINIMAP_SAMPLE_STEP);
+      }
+    }
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(MINIMAP_SIZE / 2 - 2, MINIMAP_SIZE / 2 - 2, 4, 4);
+  }
+
   overlay.root.addEventListener('seedchange', (event: Event) => {
     const seedEvent = event as CustomEvent<string>;
     if (seedEvent.detail === activeSeed) {
       return;
     }
     activeSeed = seedEvent.detail;
+    overlay.seedInput.value = activeSeed;
     clearLoadedChunks();
     cameraDirty = true;
   });
@@ -344,5 +412,6 @@ export async function startMapExplorer(): Promise<void> {
       cameraDirty = false;
     }
     updateOverlay();
+    updateMinimap(performance.now());
   });
 }
