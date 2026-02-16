@@ -20,6 +20,7 @@ const ZOOM_SENSITIVITY = 0.0012;
 const CHUNK_PREFETCH_MARGIN = 1;
 const AXIAL_VIEW_PADDING = 6;
 const DEFAULT_SEED = 'default';
+const DRAW_HEX_OUTLINES = false;
 const MINIMAP_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
@@ -108,11 +109,13 @@ function createChunkContainer(seed: string, cq: number, cr: number): Container {
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
       chunkGraphics.poly(points, true).fill(TILE_COLORS[tile]);
-      chunkGraphics.poly(points, true).stroke({
-        color: 0x101010,
-        width: 1,
-        alpha: 0.18,
-      });
+      if (DRAW_HEX_OUTLINES) {
+        chunkGraphics.poly(points, true).stroke({
+          color: 0x101010,
+          width: 1,
+          alpha: 0.18,
+        });
+      }
     }
   }
 
