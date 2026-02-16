@@ -10,6 +10,16 @@ export type PixelCoord = {
 
 export const HEX_SIZE = 14;
 const SQRT3 = Math.sqrt(3);
+const TWO_PI = Math.PI * 2;
+
+export const AXIAL_DIRECTIONS: ReadonlyArray<AxialCoord> = [
+  { q: 1, r: 0 },
+  { q: 1, r: -1 },
+  { q: 0, r: -1 },
+  { q: -1, r: 0 },
+  { q: -1, r: 1 },
+  { q: 0, r: 1 },
+];
 
 export function axialToPixel(q: number, r: number, size = HEX_SIZE): PixelCoord {
   return {
@@ -22,6 +32,13 @@ export function pixelToAxial(x: number, y: number, size = HEX_SIZE): AxialCoord 
   return {
     q: (SQRT3 / 3 * x - (1 / 3) * y) / size,
     r: ((2 / 3) * y) / size,
+  };
+}
+
+export function axialToSample(q: number, r: number): PixelCoord {
+  return {
+    x: q + r * 0.5,
+    y: r * (SQRT3 / 2),
   };
 }
 
@@ -60,4 +77,9 @@ export function hexPolygonPoints(centerX: number, centerY: number, size = HEX_SI
     points.push(centerY + size * Math.sin(angleRad));
   }
   return points;
+}
+
+export function angleFromVector(x: number, y: number): number {
+  const raw = Math.atan2(y, x);
+  return raw < 0 ? raw + TWO_PI : raw;
 }

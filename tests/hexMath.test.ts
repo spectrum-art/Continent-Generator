@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { HEX_SIZE, axialToPixel, pixelToAxial, roundAxial } from '../src/render/hex';
+import {
+  AXIAL_DIRECTIONS,
+  HEX_SIZE,
+  angleFromVector,
+  axialToPixel,
+  pixelToAxial,
+  roundAxial,
+} from '../src/render/hex';
 
 describe('hex math round trip', () => {
   it('round-trips sample axial coordinates through pixel space', () => {
@@ -43,6 +50,21 @@ describe('hex neighbor spacing', () => {
       const dy = point.y - origin.y;
       const distance = Math.hypot(dx, dy);
       expect(distance).toBeCloseTo(expectedDistance, 6);
+    }
+  });
+
+  it('keeps symmetric 60 degree neighbor directions', () => {
+    const origin = axialToPixel(0, 0);
+    const angles = AXIAL_DIRECTIONS.map((dir) => {
+      const point = axialToPixel(dir.q, dir.r);
+      return angleFromVector(point.x - origin.x, point.y - origin.y);
+    }).sort((a, b) => a - b);
+
+    for (let i = 0; i < angles.length; i += 1) {
+      const current = angles[i];
+      const next = angles[(i + 1) % angles.length];
+      const delta = i === angles.length - 1 ? next + Math.PI * 2 - current : next - current;
+      expect(delta).toBeCloseTo(Math.PI / 3, 6);
     }
   });
 });

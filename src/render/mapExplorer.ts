@@ -2,11 +2,12 @@ import { Application, Container, Graphics } from 'pixi.js';
 import {
   CHUNK_SIZE,
   chunkCoord,
-  generateChunk,
+  getTileAt,
   type TileType,
 } from '../gen/generator';
 import {
   HEX_SIZE,
+  axialToSample,
   axialToPixel,
   hexPolygonPoints,
   pixelToAxial,
@@ -65,13 +66,13 @@ function createChunkContainer(seed: string, cq: number, cr: number): Container {
   chunkContainer.position.set(basePixel.x, basePixel.y);
 
   const chunkGraphics = new Graphics();
-  const chunkTiles = generateChunk(seed, cq, cr);
   for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
     for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
       const q = baseQ + localQ;
       const r = baseR + localR;
       const center = axialToPixel(q, r, HEX_SIZE);
-      const tile = chunkTiles[localR][localQ];
+      const sample = axialToSample(q, r);
+      const tile = getTileAt(seed, sample.x, sample.y);
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
       chunkGraphics.poly(points, true).fill(TILE_COLORS[tile]);
