@@ -27,6 +27,7 @@ const OUTLINE_ZOOM_THRESHOLD = 1.35;
 const MINIMAP_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
+const MINIMAP_WORLD_UNITS_PER_PIXEL = HEX_SIZE * 0.65;
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -535,14 +536,17 @@ export async function startMapExplorer(): Promise<void> {
     const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
     const centerAxialFloat = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
     const centerAxial = roundAxial(centerAxialFloat.q, centerAxialFloat.r);
+    const centerAxialPixel = axialToPixel(centerAxial.q, centerAxial.r, HEX_SIZE);
 
     for (let py = 0; py < MINIMAP_SIZE; py += MINIMAP_SAMPLE_STEP) {
       for (let px = 0; px < MINIMAP_SIZE; px += MINIMAP_SAMPLE_STEP) {
-        const dq = Math.floor((px - MINIMAP_SIZE / 2) / MINIMAP_SAMPLE_STEP);
-        const dr = Math.floor((py - MINIMAP_SIZE / 2) / MINIMAP_SAMPLE_STEP);
-        const q = centerAxial.q + dq;
-        const r = centerAxial.r + dr;
-        const sample = axialToSample(q, r);
+        const offsetX = (px + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
+        const offsetY = (py + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
+        const worldX = centerAxialPixel.x + offsetX;
+        const worldY = centerAxialPixel.y + offsetY;
+        const mappedAxial = pixelToAxial(worldX, worldY, HEX_SIZE);
+        const mappedRounded = roundAxial(mappedAxial.q, mappedAxial.r);
+        const sample = axialToSample(mappedRounded.q, mappedRounded.r);
         const tile = getTileAt(activeSeed, sample.x, sample.y);
         ctx.fillStyle = TILE_PALETTE_CSS[tile];
         ctx.fillRect(px, py, MINIMAP_SAMPLE_STEP, MINIMAP_SAMPLE_STEP);
