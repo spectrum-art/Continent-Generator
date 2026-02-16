@@ -192,6 +192,121 @@ describe('sea level model', () => {
     expect(h).toBeGreaterThanOrEqual(0);
     expect(h).toBeLessThanOrEqual(1);
   });
+
+  it('classifies ocean/lake water deterministically', () => {
+    const seed = 'default';
+    const summaryA: string[] = [];
+    const summaryB: string[] = [];
+    for (let y = -96; y < 96; y += 1) {
+      for (let x = -96; x < 96; x += 1) {
+        const a = getTileAt(seed, x, y);
+        const b = getTileAt(seed, x, y);
+        if (a === 'water' || a === 'lake') summaryA.push(`${x},${y}:${a}`);
+        if (b === 'water' || b === 'lake') summaryB.push(`${x},${y}:${b}`);
+      }
+    }
+    expect(summaryA.join('|')).toBe(summaryB.join('|'));
+  });
+
+  it('contains at least one lake component with size >= 30 in 256x256', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const lakeTiles = new Set<string>();
+    const visited = new Set<string>();
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'lake') {
+          lakeTiles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    let largest = 0;
+    for (const key of lakeTiles) {
+      if (visited.has(key)) continue;
+      const queue = [key];
+      visited.add(key);
+      let count = 0;
+      while (queue.length > 0) {
+        const current = queue.shift() as string;
+        count += 1;
+        const [xStr, yStr] = current.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+        for (const [dx, dy] of dirs) {
+          const nextKey = `${x + dx},${y + dy}`;
+          if (!lakeTiles.has(nextKey) || visited.has(nextKey)) continue;
+          visited.add(nextKey);
+          queue.push(nextKey);
+        }
+      }
+      if (count > largest) largest = count;
+    }
+
+    expect(largest).toBeGreaterThanOrEqual(30);
+  });
+
+  it('keeps lake components non-ocean-connected inside the sampled window', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    const lakeTiles = new Set<string>();
+    const waterTiles = new Set<string>();
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        const tile = getTileAt(seed, x, y);
+        if (tile === 'lake') lakeTiles.add(`${x},${y}`);
+        if (tile === 'water') waterTiles.add(`${x},${y}`);
+      }
+    }
+
+    if (lakeTiles.size === 0) {
+      expect(lakeTiles.size).toBeGreaterThan(0);
+      return;
+    }
+
+    const start = lakeTiles.values().next().value as string;
+    const queue = [start];
+    const visited = new Set<string>([start]);
+    let touchedOcean = false;
+
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      const [xStr, yStr] = current.split(',');
+      const x = Number(xStr);
+      const y = Number(yStr);
+      for (const [dx, dy] of dirs) {
+        const nextKey = `${x + dx},${y + dy}`;
+        if (waterTiles.has(nextKey)) {
+          touchedOcean = true;
+        }
+        if (!lakeTiles.has(nextKey) || visited.has(nextKey)) continue;
+        visited.add(nextKey);
+        queue.push(nextKey);
+      }
+    }
+
+    expect(touchedOcean).toBe(false);
+  });
 });
 
 describe('river core', () => {

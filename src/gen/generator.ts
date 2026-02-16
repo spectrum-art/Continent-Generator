@@ -1,4 +1,12 @@
-export type TileType = 'water' | 'sand' | 'grass' | 'forest' | 'mountain' | 'rock' | 'river';
+export type TileType =
+  | 'water'
+  | 'lake'
+  | 'sand'
+  | 'grass'
+  | 'forest'
+  | 'mountain'
+  | 'rock'
+  | 'river';
 
 export const CHUNK_SIZE = 64;
 export const RIVER_SOURCE_SPACING = 12;
@@ -12,7 +20,7 @@ export const MAJOR_SOURCE_SPACING = 72;
 export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
 export const SHORELINE_BAND = 0.065;
 
-const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain', 'rock'];
+const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -22,14 +30,26 @@ const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [0, 1],
 ];
 const RIVER_CACHE_MAX_CHUNKS = 256;
+const HYDRO_CACHE_MAX_REGIONS = 96;
 const RIVER_TIE_EPSILON = 1e-6;
+const HYDRO_SUPER_CHUNK_SIZE = 3;
+const HYDRO_MARGIN_CHUNKS = 1;
 
 type RiverChunkData = {
   tiles: Set<string>;
 };
 
+type HydroRegionData = {
+  regionStartX: number;
+  regionStartY: number;
+  ocean: Set<string>;
+  lake: Set<string>;
+};
+
 const riverChunkCache = new Map<string, RiverChunkData>();
 const riverChunkCacheOrder: string[] = [];
+const hydroRegionCache = new Map<string, HydroRegionData>();
+const hydroRegionCacheOrder: string[] = [];
 
 function hashString(input: string): number {
   let hash = 2166136261;
@@ -85,8 +105,21 @@ function chunkRiverCacheKey(seed: string, cx: number, cy: number): string {
   return `${seed}|${cx}:${cy}`;
 }
 
+function regionHydroCacheKey(seed: string, rx: number, ry: number): string {
+  return `${seed}|${rx}:${ry}`;
+}
+
 function localTileKey(localX: number, localY: number): string {
   return `${localX},${localY}`;
+}
+
+function worldTileKey(tileX: number, tileY: number): string {
+  return `${tileX},${tileY}`;
+}
+
+function parseTileKey(key: string): [number, number] {
+  const [x, y] = key.split(',');
+  return [Number(x), Number(y)];
 }
 
 function latticeValue(seedHash: number, x: number, y: number): number {
@@ -138,7 +171,7 @@ function fractalNoise2D(
 }
 
 function biomeFromFields(elevation: number, moisture: number): TileType {
-  if (elevation < SEA_LEVEL + SHORELINE_BAND) return TILE_TYPES[1];
+  if (elevation < SEA_LEVEL + SHORELINE_BAND) return TILE_TYPES[2];
   if (elevation > 0.78) return TILE_TYPES[6];
   if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[6];
   if (elevation > 0.61) return TILE_TYPES[5];
@@ -376,6 +409,113 @@ export function isWaterCandidateAt(seed: string, x: number, y: number): boolean 
   return signedHeightAt(seed, x, y) < 0;
 }
 
+function buildHydroRegion(seed: string, regionX: number, regionY: number): HydroRegionData {
+  const cacheKey = regionHydroCacheKey(seed, regionX, regionY);
+  const cached = hydroRegionCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const regionChunkStartX = regionX * HYDRO_SUPER_CHUNK_SIZE;
+  const regionChunkStartY = regionY * HYDRO_SUPER_CHUNK_SIZE;
+  const regionTileStartX = regionChunkStartX * CHUNK_SIZE;
+  const regionTileStartY = regionChunkStartY * CHUNK_SIZE;
+  const regionTileSize = HYDRO_SUPER_CHUNK_SIZE * CHUNK_SIZE;
+  const regionTileEndX = regionTileStartX + regionTileSize - 1;
+  const regionTileEndY = regionTileStartY + regionTileSize - 1;
+
+  const marginTiles = HYDRO_MARGIN_CHUNKS * CHUNK_SIZE;
+  const roiStartX = regionTileStartX - marginTiles;
+  const roiStartY = regionTileStartY - marginTiles;
+  const roiEndX = regionTileEndX + marginTiles;
+  const roiEndY = regionTileEndY + marginTiles;
+
+  const waterCandidates = new Set<string>();
+  const oceanWorld = new Set<string>();
+  const queue: Array<[number, number]> = [];
+
+  for (let y = roiStartY; y <= roiEndY; y += 1) {
+    for (let x = roiStartX; x <= roiEndX; x += 1) {
+      if (!isWaterCandidateAt(seed, x, y)) {
+        continue;
+      }
+      const key = worldTileKey(x, y);
+      waterCandidates.add(key);
+      if (x === roiStartX || x === roiEndX || y === roiStartY || y === roiEndY) {
+        oceanWorld.add(key);
+        queue.push([x, y]);
+      }
+    }
+  }
+
+  while (queue.length > 0) {
+    const [x, y] = queue.shift() as [number, number];
+    for (const [dx, dy] of AXIAL_DIRECTIONS) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < roiStartX || nx > roiEndX || ny < roiStartY || ny > roiEndY) {
+        continue;
+      }
+      const nKey = worldTileKey(nx, ny);
+      if (!waterCandidates.has(nKey) || oceanWorld.has(nKey)) {
+        continue;
+      }
+      oceanWorld.add(nKey);
+      queue.push([nx, ny]);
+    }
+  }
+
+  const ocean = new Set<string>();
+  const lake = new Set<string>();
+  for (const key of waterCandidates) {
+    const [x, y] = parseTileKey(key);
+    if (x < regionTileStartX || x > regionTileEndX || y < regionTileStartY || y > regionTileEndY) {
+      continue;
+    }
+    const local = localTileKey(x - regionTileStartX, y - regionTileStartY);
+    if (oceanWorld.has(key)) {
+      ocean.add(local);
+    } else {
+      lake.add(local);
+    }
+  }
+
+  const built: HydroRegionData = {
+    regionStartX: regionTileStartX,
+    regionStartY: regionTileStartY,
+    ocean,
+    lake,
+  };
+  hydroRegionCache.set(cacheKey, built);
+  hydroRegionCacheOrder.push(cacheKey);
+  while (hydroRegionCacheOrder.length > HYDRO_CACHE_MAX_REGIONS) {
+    const oldest = hydroRegionCacheOrder.shift();
+    if (!oldest) break;
+    hydroRegionCache.delete(oldest);
+  }
+
+  return built;
+}
+
+function classifyWaterTile(seed: string, tileX: number, tileY: number): TileType | null {
+  if (!isWaterCandidateAt(seed, tileX, tileY)) {
+    return null;
+  }
+
+  const cx = chunkCoord(tileX);
+  const cy = chunkCoord(tileY);
+  const regionX = Math.floor(cx / HYDRO_SUPER_CHUNK_SIZE);
+  const regionY = Math.floor(cy / HYDRO_SUPER_CHUNK_SIZE);
+  const region = buildHydroRegion(seed, regionX, regionY);
+  const localX = tileX - region.regionStartX;
+  const localY = tileY - region.regionStartY;
+  const key = localTileKey(localX, localY);
+  if (region.lake.has(key)) {
+    return TILE_TYPES[1];
+  }
+  return TILE_TYPES[0];
+}
+
 export function moistureAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
   const rotated = rotate(x * 0.022, y * 0.022, -0.77);
@@ -392,13 +532,15 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
   const riverChunk = buildRiverChunk(seed, cx, cy);
   const localX = tileX - cx * CHUNK_SIZE;
   const localY = tileY - cy * CHUNK_SIZE;
+  const waterClass = classifyWaterTile(seed, tileX, tileY);
+  if (waterClass === TILE_TYPES[0] || waterClass === TILE_TYPES[1]) {
+    return waterClass;
+  }
   const elevation = heightAt(seed, x, y);
-  const base = isWaterCandidateAt(seed, x, y)
-    ? TILE_TYPES[0]
-    : biomeFromFields(elevation, moistureAt(seed, x, y));
+  const base = biomeFromFields(elevation, moistureAt(seed, x, y));
 
   if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
-    return 'river';
+    return TILE_TYPES[7];
   }
   return base;
 }

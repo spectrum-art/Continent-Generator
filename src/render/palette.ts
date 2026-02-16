@@ -2,6 +2,7 @@ import type { TileType } from '../gen/generator';
 
 export const TILE_PALETTE: Record<TileType, number> = {
   water: 0x2d6cdf,
+  lake: 0x235ab5,
   river: 0x3f8ef2,
   sand: 0xe2cf89,
   grass: 0x63b359,
@@ -16,6 +17,7 @@ function toHex(color: number): string {
 
 export const TILE_PALETTE_CSS: Record<TileType, string> = {
   water: `#${toHex(TILE_PALETTE.water)}`,
+  lake: `#${toHex(TILE_PALETTE.lake)}`,
   river: `#${toHex(TILE_PALETTE.river)}`,
   sand: `#${toHex(TILE_PALETTE.sand)}`,
   grass: `#${toHex(TILE_PALETTE.grass)}`,
@@ -26,6 +28,7 @@ export const TILE_PALETTE_CSS: Record<TileType, string> = {
 
 export const LEGEND_ORDER: TileType[] = [
   'water',
+  'lake',
   'river',
   'sand',
   'grass',
