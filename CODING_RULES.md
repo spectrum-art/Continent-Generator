@@ -9,3 +9,5 @@ Project Rules for Codex:
    - pass `npm run build`
    - end with a git commit
 6. Avoid new dependencies unless clearly justified.
+7. Do not add platform-specific packages to package.json. If a build tool fails to install, fix by reinstalling node_modules / lockfile, not by pinning platform binaries.
+8. Do not refactor unrelated code; limit changes strictly to the goal(s) at hand unless instructed otherwise.
