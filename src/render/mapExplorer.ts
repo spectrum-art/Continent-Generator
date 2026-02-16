@@ -52,6 +52,8 @@ type OverlayElements = {
   loadedChunksValue: HTMLSpanElement;
   totalGeneratedValue: HTMLSpanElement;
   stressElapsedValue: HTMLSpanElement;
+  stressChunkBandValue: HTMLSpanElement;
+  perfValue: HTMLSpanElement;
   minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
@@ -275,6 +277,20 @@ function createOverlay(seed: string): OverlayElements {
   resetStatsButton.style.marginLeft = '6px';
   generatedRow.append(generatedLabel, totalGeneratedValue, resetStatsButton);
 
+  const stressBandRow = document.createElement('div');
+  const stressBandLabel = document.createElement('span');
+  stressBandLabel.textContent = 'Stress chunk band: ';
+  const stressChunkBandValue = document.createElement('span');
+  stressChunkBandValue.textContent = 'n/a';
+  stressBandRow.append(stressBandLabel, stressChunkBandValue);
+
+  const perfRow = document.createElement('div');
+  const perfLabel = document.createElement('span');
+  perfLabel.textContent = 'Perf (EMA): ';
+  const perfValue = document.createElement('span');
+  perfValue.textContent = '0.0ms / 0.0fps';
+  perfRow.append(perfLabel, perfValue);
+
   const minimapRow = document.createElement('div');
   minimapRow.style.marginTop = '8px';
   const minimapLabel = document.createElement('div');
@@ -298,6 +314,8 @@ function createOverlay(seed: string): OverlayElements {
     chunksRow,
     generatedRow,
     stressRow,
+    stressBandRow,
+    perfRow,
     minimapRateRow,
     legendRow,
     minimapRow,
@@ -346,6 +364,8 @@ function createOverlay(seed: string): OverlayElements {
     loadedChunksValue,
     totalGeneratedValue,
     stressElapsedValue,
+    stressChunkBandValue,
+    perfValue,
     minimapRateValue,
     minimapCanvas,
     minimapContext,
@@ -380,6 +400,9 @@ export async function startMapExplorer(): Promise<void> {
   let stressEnabled = false;
   let stressElapsedMs = 0;
   let stressPathTime = 0;
+  let stressWarmupDone = false;
+  let stressChunkMin = Number.POSITIVE_INFINITY;
+  let stressChunkMax = Number.NEGATIVE_INFINITY;
   let isDragging = false;
   let lastX = 0;
   let lastY = 0;
@@ -388,6 +411,8 @@ export async function startMapExplorer(): Promise<void> {
   let minimapWindowStart = performance.now();
   let minimapRate = 0;
   let totalChunksGenerated = 0;
+  let frameMsEma = 16.7;
+  let fpsEma = 60;
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
     if (outlineMode === 'on') return true;
@@ -481,6 +506,10 @@ export async function startMapExplorer(): Promise<void> {
     overlay.outlineModeValue.textContent = outlineMode;
     overlay.stressValue.textContent = stressEnabled ? 'on' : 'off';
     overlay.stressElapsedValue.textContent = `${(stressElapsedMs / 1000).toFixed(1)}s`;
+    overlay.stressChunkBandValue.textContent = Number.isFinite(stressChunkMin)
+      ? `${stressChunkMin}..${stressChunkMax} (Δ${stressChunkMax - stressChunkMin})`
+      : 'warming';
+    overlay.perfValue.textContent = `${frameMsEma.toFixed(1)}ms / ${fpsEma.toFixed(1)}fps`;
     overlay.minimapRateValue.textContent = minimapRate.toFixed(1);
   }
 
@@ -549,6 +578,9 @@ export async function startMapExplorer(): Promise<void> {
     if (!stressEnabled) {
       stressElapsedMs = 0;
       stressPathTime = 0;
+      stressWarmupDone = false;
+      stressChunkMin = Number.POSITIVE_INFINITY;
+      stressChunkMax = Number.NEGATIVE_INFINITY;
     }
   });
 
@@ -558,6 +590,11 @@ export async function startMapExplorer(): Promise<void> {
     minimapUpdatesThisWindow = 0;
     minimapWindowStart = performance.now();
     stressElapsedMs = 0;
+    stressWarmupDone = false;
+    stressChunkMin = Number.POSITIVE_INFINITY;
+    stressChunkMax = Number.NEGATIVE_INFINITY;
+    frameMsEma = 16.7;
+    fpsEma = 60;
   });
 
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -619,6 +656,10 @@ export async function startMapExplorer(): Promise<void> {
   renderedWithOutlines = shouldDrawOutlinesAtZoom(world.scale.x);
 
   app.ticker.add((ticker) => {
+    frameMsEma = frameMsEma * 0.92 + ticker.deltaMS * 0.08;
+    const instantFps = ticker.deltaMS > 0 ? 1000 / ticker.deltaMS : 0;
+    fpsEma = fpsEma * 0.92 + instantFps * 0.08;
+
     if (stressEnabled) {
       const dtSeconds = ticker.deltaMS / 1000;
       stressElapsedMs += ticker.deltaMS;
@@ -626,10 +667,21 @@ export async function startMapExplorer(): Promise<void> {
       const orbitRadius = 220;
       const q = Math.cos(stressPathTime * 0.24) * orbitRadius;
       const r = Math.sin(stressPathTime * 0.19) * orbitRadius;
+      const targetZoom = 1 + Math.sin(stressPathTime * 0.11) * 0.12;
+      world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
       const pathWorld = axialToPixel(q, r, HEX_SIZE);
       world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
       world.position.y = window.innerHeight / 2 - pathWorld.y * world.scale.y;
       cameraDirty = true;
+
+      if (!stressWarmupDone && stressElapsedMs >= 10_000) {
+        stressWarmupDone = true;
+        stressChunkMin = loadedChunks.size;
+        stressChunkMax = loadedChunks.size;
+      } else if (stressWarmupDone) {
+        stressChunkMin = Math.min(stressChunkMin, loadedChunks.size);
+        stressChunkMax = Math.max(stressChunkMax, loadedChunks.size);
+      }
     }
 
     const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
