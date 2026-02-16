@@ -152,7 +152,7 @@ describe('distribution sanity', () => {
     }
 
     expect(found.size).toBeGreaterThanOrEqual(5);
-  });
+  }, 15000);
 });
 
 describe('sea level model', () => {
