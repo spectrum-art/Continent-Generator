@@ -6,9 +6,12 @@ import {
   chunkCoord,
   elevationAt,
   generateChunk,
+  heightAt,
+  isWaterCandidateAt,
   getChunkKey,
   getTileAt,
   moistureAt,
+  signedHeightAt,
   riverTraceLengthFromSource,
   type TileType,
 } from '../src/gen/generator';
@@ -149,6 +152,45 @@ describe('distribution sanity', () => {
     }
 
     expect(found.size).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('sea level model', () => {
+  it('keeps deterministic land/water mask summary hash', () => {
+    const seed = 'default';
+    let summaryA = '';
+    let summaryB = '';
+    for (let y = -64; y < 64; y += 1) {
+      for (let x = -64; x < 64; x += 1) {
+        summaryA += isWaterCandidateAt(seed, x, y) ? '1' : '0';
+        summaryB += isWaterCandidateAt(seed, x, y) ? '1' : '0';
+      }
+    }
+    expect(summaryA).toBe(summaryB);
+  });
+
+  it('keeps water coverage in a sane 20%-60% band over 256x256', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    let water = 0;
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (isWaterCandidateAt(seed, x, y)) water += 1;
+      }
+    }
+    const ratio = water / (size * size);
+    expect(ratio).toBeGreaterThanOrEqual(0.2);
+    expect(ratio).toBeLessThanOrEqual(0.6);
+  });
+
+  it('exposes consistent height and signed height relationship', () => {
+    const seed = 'default';
+    const h = heightAt(seed, 10, -15);
+    const s = signedHeightAt(seed, 10, -15);
+    expect(h - s).toBeGreaterThan(0);
+    expect(h).toBeGreaterThanOrEqual(0);
+    expect(h).toBeLessThanOrEqual(1);
   });
 });
 

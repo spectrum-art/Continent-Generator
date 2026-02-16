@@ -5,10 +5,12 @@ export const RIVER_SOURCE_SPACING = 12;
 export const RIVER_SOURCE_RATE = 1;
 export const MIN_SOURCE_ELEVATION = 0.5;
 export const MAX_RIVER_STEPS = 360;
-export const RIVER_WATER_STOP_ELEVATION = 0.42;
+export const SEA_LEVEL = 0.28;
+export const RIVER_WATER_STOP_ELEVATION = SEA_LEVEL;
 export const RIVER_UPHILL_TOLERANCE = 0.005;
 export const MAJOR_SOURCE_SPACING = 72;
 export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
+export const SHORELINE_BAND = 0.065;
 
 const TILE_TYPES: TileType[] = ['water', 'sand', 'grass', 'forest', 'mountain', 'rock'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -136,13 +138,12 @@ function fractalNoise2D(
 }
 
 function biomeFromFields(elevation: number, moisture: number): TileType {
-  if (elevation < 0.42) return TILE_TYPES[0];
-  if (elevation < 0.48) return TILE_TYPES[1];
-  if (elevation > 0.78) return TILE_TYPES[5];
-  if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[5];
-  if (elevation > 0.61) return TILE_TYPES[4];
-  if (moisture > 0.56) return TILE_TYPES[3];
-  return TILE_TYPES[2];
+  if (elevation < SEA_LEVEL + SHORELINE_BAND) return TILE_TYPES[1];
+  if (elevation > 0.78) return TILE_TYPES[6];
+  if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[6];
+  if (elevation > 0.61) return TILE_TYPES[5];
+  if (moisture > 0.56) return TILE_TYPES[4];
+  return TILE_TYPES[3];
 }
 
 function chooseDownhillNeighbor(
@@ -363,6 +364,18 @@ export function elevationAt(seed: string, x: number, y: number): number {
   return clamp01(contrasted * 1.2 - 0.18);
 }
 
+export function heightAt(seed: string, x: number, y: number): number {
+  return elevationAt(seed, x, y);
+}
+
+export function signedHeightAt(seed: string, x: number, y: number): number {
+  return heightAt(seed, x, y) - SEA_LEVEL;
+}
+
+export function isWaterCandidateAt(seed: string, x: number, y: number): boolean {
+  return signedHeightAt(seed, x, y) < 0;
+}
+
 export function moistureAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
   const rotated = rotate(x * 0.022, y * 0.022, -0.77);
@@ -379,7 +392,10 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
   const riverChunk = buildRiverChunk(seed, cx, cy);
   const localX = tileX - cx * CHUNK_SIZE;
   const localY = tileY - cy * CHUNK_SIZE;
-  const base = biomeFromFields(elevationAt(seed, x, y), moistureAt(seed, x, y));
+  const elevation = heightAt(seed, x, y);
+  const base = isWaterCandidateAt(seed, x, y)
+    ? TILE_TYPES[0]
+    : biomeFromFields(elevation, moistureAt(seed, x, y));
 
   if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
     return 'river';
