@@ -45,10 +45,13 @@ type OverlayElements = {
   root: HTMLDivElement;
   seedInput: HTMLInputElement;
   outlineModeValue: HTMLSpanElement;
+  stressValue: HTMLSpanElement;
   seedValue: HTMLSpanElement;
   axialValue: HTMLSpanElement;
   zoomValue: HTMLSpanElement;
   loadedChunksValue: HTMLSpanElement;
+  totalGeneratedValue: HTMLSpanElement;
+  stressElapsedValue: HTMLSpanElement;
   minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
@@ -237,6 +240,41 @@ function createOverlay(seed: string): OverlayElements {
   legendRow.style.marginTop = '6px';
   legendRow.textContent = 'Legend: water river sand grass forest mountain rock';
 
+  const stressRow = document.createElement('div');
+  stressRow.style.marginTop = '6px';
+  const stressLabel = document.createElement('span');
+  stressLabel.textContent = 'Stress: ';
+  const stressValue = document.createElement('span');
+  stressValue.textContent = 'off';
+  stressValue.style.marginRight = '6px';
+  const stressToggle = document.createElement('button');
+  stressToggle.type = 'button';
+  stressToggle.textContent = 'Toggle';
+  stressToggle.style.cursor = 'pointer';
+  const stressElapsedLabel = document.createElement('span');
+  stressElapsedLabel.textContent = ' elapsed ';
+  const stressElapsedValue = document.createElement('span');
+  stressElapsedValue.textContent = '0.0s';
+  stressRow.append(
+    stressLabel,
+    stressValue,
+    stressToggle,
+    stressElapsedLabel,
+    stressElapsedValue,
+  );
+
+  const generatedRow = document.createElement('div');
+  const generatedLabel = document.createElement('span');
+  generatedLabel.textContent = 'Total chunks generated: ';
+  const totalGeneratedValue = document.createElement('span');
+  totalGeneratedValue.textContent = '0';
+  const resetStatsButton = document.createElement('button');
+  resetStatsButton.type = 'button';
+  resetStatsButton.textContent = 'Reset stats';
+  resetStatsButton.style.cursor = 'pointer';
+  resetStatsButton.style.marginLeft = '6px';
+  generatedRow.append(generatedLabel, totalGeneratedValue, resetStatsButton);
+
   const minimapRow = document.createElement('div');
   minimapRow.style.marginTop = '8px';
   const minimapLabel = document.createElement('div');
@@ -251,7 +289,19 @@ function createOverlay(seed: string): OverlayElements {
   minimapCanvas.style.background = '#111';
   minimapRow.append(minimapLabel, minimapCanvas);
 
-  root.append(seedRow, outlineRow, seedValueRow, axialRow, zoomRow, chunksRow, minimapRateRow, legendRow, minimapRow);
+  root.append(
+    seedRow,
+    outlineRow,
+    seedValueRow,
+    axialRow,
+    zoomRow,
+    chunksRow,
+    generatedRow,
+    stressRow,
+    minimapRateRow,
+    legendRow,
+    minimapRow,
+  );
   document.body.appendChild(root);
   const minimapContext = minimapCanvas.getContext('2d');
   if (!minimapContext) {
@@ -275,15 +325,27 @@ function createOverlay(seed: string): OverlayElements {
     outlineModeValue.textContent = next;
     root.dispatchEvent(new CustomEvent<string>('outlinechange', { detail: next }));
   });
+  stressToggle.addEventListener('click', () => {
+    const current = stressValue.textContent === 'on';
+    const next = !current;
+    stressValue.textContent = next ? 'on' : 'off';
+    root.dispatchEvent(new CustomEvent<boolean>('stresstoggle', { detail: next }));
+  });
+  resetStatsButton.addEventListener('click', () => {
+    root.dispatchEvent(new CustomEvent('resetstats'));
+  });
 
   return {
     root,
     seedInput,
     outlineModeValue,
+    stressValue,
     seedValue,
     axialValue,
     zoomValue,
     loadedChunksValue,
+    totalGeneratedValue,
+    stressElapsedValue,
     minimapRateValue,
     minimapCanvas,
     minimapContext,
@@ -315,6 +377,9 @@ export async function startMapExplorer(): Promise<void> {
   let cameraDirty = true;
   let outlineMode: 'auto' | 'on' | 'off' = 'auto';
   let renderedWithOutlines = false;
+  let stressEnabled = false;
+  let stressElapsedMs = 0;
+  let stressPathTime = 0;
   let isDragging = false;
   let lastX = 0;
   let lastY = 0;
@@ -322,6 +387,7 @@ export async function startMapExplorer(): Promise<void> {
   let minimapUpdatesThisWindow = 0;
   let minimapWindowStart = performance.now();
   let minimapRate = 0;
+  let totalChunksGenerated = 0;
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
     if (outlineMode === 'on') return true;
@@ -346,6 +412,7 @@ export async function startMapExplorer(): Promise<void> {
     const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines);
     world.addChild(container);
     loadedChunks.set(key, { cq, cr, container });
+    totalChunksGenerated += 1;
   }
 
   function unloadChunk(key: string): void {
@@ -410,7 +477,10 @@ export async function startMapExplorer(): Promise<void> {
     overlay.axialValue.textContent = `${roundedCenter.q}, ${roundedCenter.r}`;
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
+    overlay.totalGeneratedValue.textContent = `${totalChunksGenerated}`;
     overlay.outlineModeValue.textContent = outlineMode;
+    overlay.stressValue.textContent = stressEnabled ? 'on' : 'off';
+    overlay.stressElapsedValue.textContent = `${(stressElapsedMs / 1000).toFixed(1)}s`;
     overlay.minimapRateValue.textContent = minimapRate.toFixed(1);
   }
 
@@ -473,6 +543,23 @@ export async function startMapExplorer(): Promise<void> {
     }
   });
 
+  overlay.root.addEventListener('stresstoggle', (event: Event) => {
+    const stressEvent = event as CustomEvent<boolean>;
+    stressEnabled = stressEvent.detail;
+    if (!stressEnabled) {
+      stressElapsedMs = 0;
+      stressPathTime = 0;
+    }
+  });
+
+  overlay.root.addEventListener('resetstats', () => {
+    totalChunksGenerated = 0;
+    minimapRate = 0;
+    minimapUpdatesThisWindow = 0;
+    minimapWindowStart = performance.now();
+    stressElapsedMs = 0;
+  });
+
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     isDragging = true;
     lastX = event.clientX;
@@ -531,7 +618,20 @@ export async function startMapExplorer(): Promise<void> {
   writeSeedToUrl(activeSeed);
   renderedWithOutlines = shouldDrawOutlinesAtZoom(world.scale.x);
 
-  app.ticker.add(() => {
+  app.ticker.add((ticker) => {
+    if (stressEnabled) {
+      const dtSeconds = ticker.deltaMS / 1000;
+      stressElapsedMs += ticker.deltaMS;
+      stressPathTime += dtSeconds;
+      const orbitRadius = 220;
+      const q = Math.cos(stressPathTime * 0.24) * orbitRadius;
+      const r = Math.sin(stressPathTime * 0.19) * orbitRadius;
+      const pathWorld = axialToPixel(q, r, HEX_SIZE);
+      world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
+      world.position.y = window.innerHeight / 2 - pathWorld.y * world.scale.y;
+      cameraDirty = true;
+    }
+
     const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
     if (nextOutlineState !== renderedWithOutlines) {
       renderedWithOutlines = nextOutlineState;
