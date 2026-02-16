@@ -15,6 +15,7 @@ import {
   roundAxial,
 } from './hex';
 import { colorForRenderedTile } from './style';
+import { LEGEND_ORDER, TILE_PALETTE, TILE_PALETTE_CSS } from './palette';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
@@ -57,26 +58,6 @@ type OverlayElements = {
   minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
-};
-
-const TILE_COLORS: Record<TileType, number> = {
-  water: 0x2d6cdf,
-  river: 0x3f8ef2,
-  sand: 0xe2cf89,
-  grass: 0x63b359,
-  forest: 0x2f7a43,
-  mountain: 0x8d8f98,
-  rock: 0x6a6972,
-};
-
-const TILE_COLORS_CSS: Record<TileType, string> = {
-  water: '#2d6cdf',
-  river: '#3f8ef2',
-  sand: '#e2cf89',
-  grass: '#63b359',
-  forest: '#2f7a43',
-  mountain: '#8d8f98',
-  rock: '#6a6972',
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -144,7 +125,7 @@ function createChunkContainer(
 
       const renderColor = colorForRenderedTile(
         tile,
-        TILE_COLORS[tile],
+        TILE_PALETTE[tile],
         elevation,
         shorelineNeighbors,
       );
@@ -240,7 +221,31 @@ function createOverlay(seed: string): OverlayElements {
 
   const legendRow = document.createElement('div');
   legendRow.style.marginTop = '6px';
-  legendRow.textContent = 'Legend: water river sand grass forest mountain rock';
+  const legendTitle = document.createElement('div');
+  legendTitle.textContent = 'Legend';
+  legendTitle.style.marginBottom = '4px';
+  legendRow.appendChild(legendTitle);
+
+  for (const tile of LEGEND_ORDER) {
+    const item = document.createElement('div');
+    item.style.display = 'flex';
+    item.style.alignItems = 'center';
+    item.style.gap = '6px';
+    item.style.marginBottom = '2px';
+
+    const swatch = document.createElement('span');
+    swatch.style.display = 'inline-block';
+    swatch.style.width = '10px';
+    swatch.style.height = '10px';
+    swatch.style.border = '1px solid rgba(255,255,255,0.35)';
+    swatch.style.background = TILE_PALETTE_CSS[tile];
+
+    const label = document.createElement('span');
+    label.textContent = tile;
+
+    item.append(swatch, label);
+    legendRow.appendChild(item);
+  }
 
   const stressRow = document.createElement('div');
   stressRow.style.marginTop = '6px';
@@ -539,7 +544,7 @@ export async function startMapExplorer(): Promise<void> {
         const r = centerAxial.r + dr;
         const sample = axialToSample(q, r);
         const tile = getTileAt(activeSeed, sample.x, sample.y);
-        ctx.fillStyle = TILE_COLORS_CSS[tile];
+        ctx.fillStyle = TILE_PALETTE_CSS[tile];
         ctx.fillRect(px, py, MINIMAP_SAMPLE_STEP, MINIMAP_SAMPLE_STEP);
       }
     }
