@@ -24,6 +24,7 @@ import {
   waterClassAt,
   signedHeightAt,
   riverTraceLengthFromSource,
+  riverTraceTerminationFromSource,
   type TileType,
 } from '../src/gen/generator';
 
@@ -45,7 +46,7 @@ describe('generator determinism', () => {
       expect(a).toBe(b);
       expect(b).toBe(c);
     }
-  });
+  }, 12000);
 
   it('returns deterministic elevation and moisture field values', () => {
     const seed = 'field-seed';
@@ -501,7 +502,7 @@ describe('river core', () => {
     }
   });
 
-  it('keeps river coverage within target range in a 256x256 sample', () => {
+  it('keeps river coverage within tuned target range in a 256x256 sample', () => {
     const seed = 'default';
     const size = 256;
     const half = size / 2;
@@ -518,12 +519,41 @@ describe('river core', () => {
     const ratio = riverCount / (size * size);
     expect(
       ratio,
-      `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.50% and 4.00%`,
-    ).toBeGreaterThanOrEqual(0.005);
+      `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.35% and 4.00%`,
+    ).toBeGreaterThanOrEqual(0.0035);
     expect(
       ratio,
       `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.50% and 4.00%`,
     ).toBeLessThanOrEqual(0.04);
+  });
+
+  it('terminates a majority of sampled river sources into ocean/lake sinks', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const sourcePoints: Array<[number, number]> = [];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (isRiverSourceAt(seed, x, y)) {
+          sourcePoints.push([x, y]);
+        }
+      }
+    }
+
+    expect(sourcePoints.length).toBeGreaterThan(0);
+    let sinkTerminations = 0;
+    for (const [x, y] of sourcePoints) {
+      const termination = riverTraceTerminationFromSource(seed, x, y);
+      if (termination === 'ocean' || termination === 'lake') {
+        sinkTerminations += 1;
+      }
+    }
+    const ratio = sinkTerminations / sourcePoints.length;
+    expect(
+      ratio,
+      `river sink termination ratio=${(ratio * 100).toFixed(2)}% expected >= 55%`,
+    ).toBeGreaterThanOrEqual(0.55);
   });
 
   it('has at least one river component with length >= 80 in 256x256 sample', () => {

@@ -9,21 +9,26 @@ export type TileType =
   | 'river';
 
 export const CHUNK_SIZE = 64;
-export const RIVER_SOURCE_SPACING = 14;
-export const RIVER_SOURCE_RATE = 1;
-export const MIN_SOURCE_ELEVATION = 0.5;
-export const MAX_RIVER_STEPS = 360;
-export const SEA_LEVEL = 0.28;
+export const RIVER_SOURCE_SPACING = 22;
+export const RIVER_SOURCE_RATE = 0.78;
+export const MIN_SOURCE_ELEVATION = 0.54;
+export const MIN_SOURCE_FLOW = 0.16;
+export const RIVER_SOURCE_MARGIN = 176;
+export const MAX_RIVER_STEPS = 420;
+export const SEA_LEVEL = 0.45;
 export const RIVER_WATER_STOP_ELEVATION = SEA_LEVEL;
 export const RIVER_UPHILL_TOLERANCE = 0.005;
-export const MAJOR_SOURCE_SPACING = 72;
-export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
-export const MIN_RIVER_LENGTH = 11;
-export const MIN_RIVER_ELEVATION_DROP = 0.03;
+export const MAJOR_SOURCE_SPACING = 84;
+export const MAJOR_MIN_SOURCE_ELEVATION = 0.67;
+export const MIN_RIVER_LENGTH = 12;
+export const MIN_RIVER_ELEVATION_DROP = 0.02;
+export const MAX_RIVER_COMPONENT_SOURCES = 110;
 export const SHORELINE_BAND = 0.052;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 128;
 export const MIN_LAKE_COMPONENT_TILES = 40;
+export const MAX_LAKE_COMPACTNESS = 220;
+export const LAKE_TENDRIL_PRUNE_PASSES = 3;
 
 const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -129,6 +134,16 @@ function parseTileKey(key: string): [number, number] {
   return [Number(x), Number(y)];
 }
 
+function countHexNeighborsInSet(x: number, y: number, tiles: Set<string>): number {
+  let count = 0;
+  for (const [dx, dy] of AXIAL_DIRECTIONS) {
+    if (tiles.has(worldTileKey(x + dx, y + dy))) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function latticeValue(seedHash: number, x: number, y: number): number {
   const latticeSeed = (seedHash ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
   return mulberry32(latticeSeed)();
@@ -178,10 +193,10 @@ function fractalNoise2D(
 }
 
 function landBiomeFromFields(elevation: number, moisture: number): TileType {
-  if (elevation > 0.78) return TILE_TYPES[6];
-  if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[6];
-  if (elevation > 0.61) return TILE_TYPES[5];
-  if (moisture > 0.56) return TILE_TYPES[4];
+  if (elevation > 0.84) return TILE_TYPES[6];
+  if (elevation > 0.71 && moisture < 0.36) return TILE_TYPES[6];
+  if (elevation > 0.67) return TILE_TYPES[5];
+  if (moisture > 0.61) return TILE_TYPES[4];
   return TILE_TYPES[3];
 }
 
@@ -217,22 +232,72 @@ function chooseDownhillNeighbor(
   return { x: bestX, y: bestY, elevation: bestElevation };
 }
 
-export function riverTraceLengthFromSource(seed: string, startX: number, startY: number): number {
-  const seedHash = hashString(seed);
-  const seen = new Set<string>();
+function riverSourcePotentialAt(seed: string, x: number, y: number): number {
+  const center = elevationAt(seed, x, y);
+  let downhill = 0;
+  let uphill = 0;
+  for (const [dx, dy] of AXIAL_DIRECTIONS) {
+    const neighbor = elevationAt(seed, x + dx, y + dy);
+    const delta = center - neighbor;
+    if (delta > 0) {
+      downhill += delta;
+    } else {
+      uphill += -delta;
+    }
+  }
+  const valleyPotential = (1 + uphill * 10) / (0.4 + downhill * 12);
+  return clamp01(Math.log2(1 + valleyPotential * 2.4) / 3.2);
+}
+
+type RiverTraceResult = {
+  path: Array<[number, number]>;
+  endElevation: number;
+  terminatedWater: boolean;
+  terminatedLake: boolean;
+  mergedIntoRiver: boolean;
+};
+
+function traceRiverPath(
+  seedHash: number,
+  seed: string,
+  startX: number,
+  startY: number,
+  existingRiverWorld: Set<string> | null,
+): RiverTraceResult {
   let x = startX;
   let y = startY;
   let currentElevation = elevationAt(seed, x, y);
-  let steps = 0;
+  const seen = new Set<string>();
+  const path: Array<[number, number]> = [];
+  let terminatedWater = false;
+  let terminatedLake = false;
+  let mergedIntoRiver = false;
 
-  for (; steps < MAX_RIVER_STEPS; steps += 1) {
-    const pathKey = localTileKey(x, y);
-    if (seen.has(pathKey)) {
+  for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
+    const key = worldTileKey(x, y);
+    if (seen.has(key)) {
       break;
     }
-    seen.add(pathKey);
+    seen.add(key);
+    path.push([x, y]);
+
+    if (existingRiverWorld && path.length > 1 && existingRiverWorld.has(key)) {
+      mergedIntoRiver = true;
+      break;
+    }
+
+    if (signedHeightAt(seed, x, y) <= 0) {
+      const waterClass = classifyWaterTile(seed, x, y);
+      if (waterClass === TILE_TYPES[1]) {
+        terminatedLake = true;
+      } else {
+        terminatedWater = true;
+      }
+      break;
+    }
 
     if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
+      terminatedWater = true;
       break;
     }
 
@@ -249,7 +314,37 @@ export function riverTraceLengthFromSource(seed: string, startX: number, startY:
     currentElevation = next.elevation;
   }
 
-  return steps;
+  return {
+    path,
+    endElevation: currentElevation,
+    terminatedWater,
+    terminatedLake,
+    mergedIntoRiver,
+  };
+}
+
+export function riverTraceLengthFromSource(seed: string, startX: number, startY: number): number {
+  const seedHash = hashString(seed);
+  return traceRiverPath(seedHash, seed, startX, startY, null).path.length;
+}
+
+export function riverTraceTerminationFromSource(
+  seed: string,
+  startX: number,
+  startY: number,
+): 'ocean' | 'lake' | 'merged' | 'stalled' {
+  const seedHash = hashString(seed);
+  const trace = traceRiverPath(seedHash, seed, startX, startY, null);
+  if (trace.terminatedWater) {
+    return 'ocean';
+  }
+  if (trace.terminatedLake) {
+    return 'lake';
+  }
+  if (trace.mergedIntoRiver) {
+    return 'merged';
+  }
+  return 'stalled';
 }
 
 function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
@@ -260,70 +355,19 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
   }
 
   const seedHash = hashString(seed);
-  const tiles = new Set<string>();
+  const riverWorldTiles = new Set<string>();
   const sources = new Set<string>();
   const startX = cx * CHUNK_SIZE;
   const startY = cy * CHUNK_SIZE;
   const endX = startX + CHUNK_SIZE - 1;
   const endY = startY + CHUNK_SIZE - 1;
-  const sourceMargin = MAX_RIVER_STEPS + RIVER_SOURCE_SPACING;
+  type SourceCandidate = { x: number; y: number; score: number; tie: number };
+  const candidates: SourceCandidate[] = [];
+  const sourceMargin = RIVER_SOURCE_MARGIN;
   const gridMinX = Math.floor((startX - sourceMargin) / RIVER_SOURCE_SPACING);
   const gridMaxX = Math.floor((endX + sourceMargin) / RIVER_SOURCE_SPACING);
   const gridMinY = Math.floor((startY - sourceMargin) / RIVER_SOURCE_SPACING);
   const gridMaxY = Math.floor((endY + sourceMargin) / RIVER_SOURCE_SPACING);
-
-  function traceFromSource(sourceX: number, sourceY: number): void {
-    let x = sourceX;
-    let y = sourceY;
-    let currentElevation = elevationAt(seed, x, y);
-    const startElevation = currentElevation;
-    const seen = new Set<string>();
-    const tracedPath: Array<[number, number]> = [];
-
-    for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
-      const pathKey = localTileKey(x, y);
-      if (seen.has(pathKey)) {
-        break;
-      }
-      seen.add(pathKey);
-      tracedPath.push([x, y]);
-
-      if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
-        break;
-      }
-
-      const next = chooseDownhillNeighbor(seedHash, seed, x, y);
-      if (next.x === x && next.y === y) {
-        break;
-      }
-      if (next.elevation > currentElevation + RIVER_UPHILL_TOLERANCE) {
-        break;
-      }
-
-      x = next.x;
-      y = next.y;
-      currentElevation = next.elevation;
-    }
-
-    if (tracedPath.length < MIN_RIVER_LENGTH) {
-      return;
-    }
-
-    const elevationDrop = startElevation - currentElevation;
-    if (elevationDrop < MIN_RIVER_ELEVATION_DROP) {
-      return;
-    }
-
-    if (sourceX >= startX && sourceX <= endX && sourceY >= startY && sourceY <= endY) {
-      sources.add(localTileKey(sourceX - startX, sourceY - startY));
-    }
-
-    for (const [pathX, pathY] of tracedPath) {
-      if (pathX >= startX && pathX <= endX && pathY >= startY && pathY <= endY) {
-        tiles.add(localTileKey(pathX - startX, pathY - startY));
-      }
-    }
-  }
 
   for (let gy = gridMinY; gy <= gridMaxY; gy += 1) {
     for (let gx = gridMinX; gx <= gridMaxX; gx += 1) {
@@ -336,15 +380,22 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       const offsetY = hashCoord(seedHash, gx, gy, 29) % RIVER_SOURCE_SPACING;
       const x = gx * RIVER_SOURCE_SPACING + offsetX;
       const y = gy * RIVER_SOURCE_SPACING + offsetY;
-      const currentElevation = elevationAt(seed, x, y);
-      if (currentElevation < MIN_SOURCE_ELEVATION) {
+      const elev = elevationAt(seed, x, y);
+      if (elev < MIN_SOURCE_ELEVATION) {
         continue;
       }
-      traceFromSource(x, y);
+      const sourcePotential = riverSourcePotentialAt(seed, x, y);
+      if (sourcePotential < MIN_SOURCE_FLOW) {
+        continue;
+      }
+      const score =
+        elev * 1.2 + sourcePotential * 1.45 + ((hashCoord(seedHash, x, y, 203) & 0xff) / 255) * 0.2;
+      const tie = hashCoord(seedHash, x, y, 181);
+      candidates.push({ x, y, score, tie });
     }
   }
 
-  const majorMargin = MAX_RIVER_STEPS + MAJOR_SOURCE_SPACING;
+  const majorMargin = RIVER_SOURCE_MARGIN;
   const majorGridMinX = Math.floor((startX - majorMargin) / MAJOR_SOURCE_SPACING);
   const majorGridMaxX = Math.floor((endX + majorMargin) / MAJOR_SOURCE_SPACING);
   const majorGridMinY = Math.floor((startY - majorMargin) / MAJOR_SOURCE_SPACING);
@@ -360,33 +411,126 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       if (elev < MAJOR_MIN_SOURCE_ELEVATION) {
         continue;
       }
-
-      traceFromSource(x, y);
+      const sourcePotential = riverSourcePotentialAt(seed, x, y);
+      const score =
+        elev * 1.35 +
+        sourcePotential * 1.15 +
+        ((hashCoord(seedHash, x, y, 227) & 0xff) / 255) * 0.12;
+      const tie = hashCoord(seedHash, x, y, 229);
+      candidates.push({ x, y, score, tie });
     }
   }
 
-  const widened = new Set<string>(tiles);
-  for (const key of tiles) {
-    const [localXStr, localYStr] = key.split(',');
-    const localX = Number(localXStr);
-    const localY = Number(localYStr);
-    const worldX = startX + localX;
-    const worldY = startY + localY;
-    const widenPick = (hashCoord(seedHash, worldX, worldY, 809) & 0xff) / 0xff;
-    if (widenPick > 0.92) {
+  candidates.sort((a, b) => {
+    if (Math.abs(a.score - b.score) > 1e-9) {
+      return b.score - a.score;
+    }
+    if (a.tie !== b.tie) {
+      return a.tie - b.tie;
+    }
+    if (a.x !== b.x) {
+      return a.x - b.x;
+    }
+    return a.y - b.y;
+  });
+
+  const claimedSources = new Set<string>();
+  let acceptedSources = 0;
+  for (const candidate of candidates) {
+    if (acceptedSources >= MAX_RIVER_COMPONENT_SOURCES) {
+      break;
+    }
+    const candidateKey = worldTileKey(candidate.x, candidate.y);
+    if (claimedSources.has(candidateKey)) {
       continue;
     }
-    const dirIndex = hashCoord(seedHash, worldX, worldY, 811) % AXIAL_DIRECTIONS.length;
-    const [dx, dy] = AXIAL_DIRECTIONS[dirIndex];
-    const nx = localX + dx;
-    const ny = localY + dy;
-    if (nx >= 0 && nx < CHUNK_SIZE && ny >= 0 && ny < CHUNK_SIZE) {
-      widened.add(localTileKey(nx, ny));
+    claimedSources.add(candidateKey);
+
+    const trace = traceRiverPath(seedHash, seed, candidate.x, candidate.y, riverWorldTiles);
+    const startElevation = elevationAt(seed, candidate.x, candidate.y);
+    const pathWithoutWater = trace.path.filter(([px, py]) => signedHeightAt(seed, px, py) >= 0);
+    if (pathWithoutWater.length < MIN_RIVER_LENGTH) {
+      continue;
+    }
+    const elevationDrop = startElevation - trace.endElevation;
+    if (elevationDrop < MIN_RIVER_ELEVATION_DROP) {
+      continue;
+    }
+    if (!trace.terminatedWater && !trace.terminatedLake && !trace.mergedIntoRiver) {
+      const isStrongInlandTrace =
+        pathWithoutWater.length >= MIN_RIVER_LENGTH * 2 &&
+        elevationDrop >= MIN_RIVER_ELEVATION_DROP * 1.9;
+      if (!isStrongInlandTrace) {
+        continue;
+      }
+    }
+
+    acceptedSources += 1;
+    if (candidate.x >= startX && candidate.x <= endX && candidate.y >= startY && candidate.y <= endY) {
+      sources.add(localTileKey(candidate.x - startX, candidate.y - startY));
+    }
+
+    for (let i = 0; i < pathWithoutWater.length; i += 1) {
+      const [px, py] = pathWithoutWater[i];
+      riverWorldTiles.add(worldTileKey(px, py));
+
+      const widenHash = hashCoord(seedHash, px, py, 907 + i);
+      const shouldWidenPrimary =
+        pathWithoutWater.length >= 24 &&
+        (widenHash & 0xff) < 182 &&
+        i >= Math.floor(pathWithoutWater.length * 0.3);
+      if (!shouldWidenPrimary) {
+        continue;
+      }
+
+      const primaryDir = widenHash % AXIAL_DIRECTIONS.length;
+      const [dx1, dy1] = AXIAL_DIRECTIONS[primaryDir];
+      const w1x = px + dx1;
+      const w1y = py + dy1;
+      if (signedHeightAt(seed, w1x, w1y) >= 0) {
+        riverWorldTiles.add(worldTileKey(w1x, w1y));
+      }
+
+      const shouldWidenSecondary =
+        pathWithoutWater.length >= 42 &&
+        i >= Math.floor(pathWithoutWater.length * 0.55) &&
+        ((widenHash >>> 8) & 0xff) < 96;
+      if (!shouldWidenSecondary) {
+        continue;
+      }
+      const secondaryDir = (primaryDir + 1 + ((widenHash >>> 16) & 1)) % AXIAL_DIRECTIONS.length;
+      const [dx2, dy2] = AXIAL_DIRECTIONS[secondaryDir];
+      const w2x = px + dx2;
+      const w2y = py + dy2;
+      if (signedHeightAt(seed, w2x, w2y) >= 0) {
+        riverWorldTiles.add(worldTileKey(w2x, w2y));
+      }
     }
   }
-  tiles.clear();
-  for (const key of widened) {
-    tiles.add(key);
+
+  const widenedWorldTiles = new Set<string>(riverWorldTiles);
+  for (const key of riverWorldTiles) {
+    const [x, y] = parseTileKey(key);
+    const elevation = elevationAt(seed, x, y);
+    const widths = elevation < 0.62 ? 3 : 2;
+    let dir = hashCoord(seedHash, x, y, 941) % AXIAL_DIRECTIONS.length;
+    for (let i = 0; i < widths; i += 1) {
+      const [dx, dy] = AXIAL_DIRECTIONS[dir];
+      const nx = x + dx;
+      const ny = y + dy;
+      if (signedHeightAt(seed, nx, ny) >= 0) {
+        widenedWorldTiles.add(worldTileKey(nx, ny));
+      }
+      dir = (dir + 1 + ((hashCoord(seedHash, x, y, 947 + i) >>> 7) & 1)) % AXIAL_DIRECTIONS.length;
+    }
+  }
+
+  const tiles = new Set<string>();
+  for (const key of widenedWorldTiles) {
+    const [pathX, pathY] = parseTileKey(key);
+    if (pathX >= startX && pathX <= endX && pathY >= startY && pathY <= endY) {
+      tiles.add(localTileKey(pathX - startX, pathY - startY));
+    }
   }
 
   const built: RiverChunkData = { tiles, sources };
@@ -403,15 +547,55 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
 
 export function elevationAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
-  const rotated = rotate(x * 0.018, y * 0.018, 0.61);
-  const continent = fractalNoise2D(seedHash ^ 0xa53d7f19, rotated.x * 0.35, rotated.y * 0.35, 4, 0.58, 2.1);
-  const terrain = fractalNoise2D(seedHash ^ 0x7f4a7c15, rotated.x, rotated.y, 5, 0.52, 2.0);
-  const detail = fractalNoise2D(seedHash ^ 0x21f0aaad, rotated.x * 2.2, rotated.y * 2.2, 4, 0.45, 2.0);
+  const scaledX = x * 0.016;
+  const scaledY = y * 0.016;
+  const warpX =
+    fractalNoise2D(seedHash ^ 0x1a4d0f1f, scaledX * 0.52, scaledY * 0.52, 3, 0.57, 2.05) - 0.5;
+  const warpY =
+    fractalNoise2D(seedHash ^ 0xb7e1812d, scaledX * 0.52, scaledY * 0.52, 3, 0.57, 2.05) - 0.5;
+  const domainX = scaledX + warpX * 1.6;
+  const domainY = scaledY + warpY * 1.6;
 
+  const continentBasis = rotate(domainX, domainY, 0.33);
+  const terrainBasis = rotate(domainX, domainY, -1.07);
+  const ridgeBasis = rotate(domainX, domainY, 1.74);
+
+  const continent = fractalNoise2D(
+    seedHash ^ 0xa53d7f19,
+    continentBasis.x * 0.28,
+    continentBasis.y * 0.28,
+    4,
+    0.58,
+    2.05,
+  );
+  const terrain = fractalNoise2D(
+    seedHash ^ 0x7f4a7c15,
+    terrainBasis.x * 0.92,
+    terrainBasis.y * 0.92,
+    5,
+    0.52,
+    2.0,
+  );
+  const detail = fractalNoise2D(
+    seedHash ^ 0x21f0aaad,
+    ridgeBasis.x * 2.1,
+    ridgeBasis.y * 2.1,
+    4,
+    0.46,
+    2.02,
+  );
   const ridge = 1 - Math.abs(detail * 2 - 1);
-  const combined = continent * 0.5 + terrain * 0.35 + ridge * 0.15;
-  const contrasted = Math.pow(combined, 1.18);
-  return clamp01(contrasted * 1.2 - 0.18);
+  const broadSlope = fractalNoise2D(
+    seedHash ^ 0x11ab04f3,
+    domainX * 0.4,
+    domainY * 0.4,
+    3,
+    0.6,
+    2.0,
+  );
+  const combined = continent * 0.5 + terrain * 0.32 + ridge * 0.12 + broadSlope * 0.06;
+  const contrasted = smoothstep(clamp01((combined - 0.06) * 1.18));
+  return clamp01(contrasted * 1.05);
 }
 
 export function heightAt(seed: string, x: number, y: number): number {
@@ -511,16 +695,75 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
       }
     }
 
-    if (basinTiles.length >= MIN_LAKE_COMPONENT_TILES) {
+    const basinTileSet = new Set<string>(basinTiles);
+    for (let pass = 0; pass < LAKE_TENDRIL_PRUNE_PASSES; pass += 1) {
+      const prune: string[] = [];
+      for (const lakeKey of basinTileSet) {
+        const [lx, ly] = parseTileKey(lakeKey);
+        if (countHexNeighborsInSet(lx, ly, basinTileSet) <= 1) {
+          prune.push(lakeKey);
+        }
+      }
+      if (prune.length === 0) {
+        break;
+      }
+      for (const keyToRemove of prune) {
+        basinTileSet.delete(keyToRemove);
+      }
+    }
+
+    const localVisited = new Set<string>();
+    for (const basinKey of basinTileSet) {
+      if (localVisited.has(basinKey)) {
+        continue;
+      }
+      const componentQueue = [basinKey];
+      const component: string[] = [];
+      localVisited.add(basinKey);
+      while (componentQueue.length > 0) {
+        const current = componentQueue.shift() as string;
+        component.push(current);
+        const [cx, cy] = parseTileKey(current);
+        for (const [dx, dy] of AXIAL_DIRECTIONS) {
+          const neighborKey = worldTileKey(cx + dx, cy + dy);
+          if (!basinTileSet.has(neighborKey) || localVisited.has(neighborKey)) {
+            continue;
+          }
+          localVisited.add(neighborKey);
+          componentQueue.push(neighborKey);
+        }
+      }
+
+      if (component.length < MIN_LAKE_COMPONENT_TILES) {
+        for (const keyToOcean of component) {
+          oceanWorld.add(keyToOcean);
+        }
+        continue;
+      }
+
+      const componentSet = new Set<string>(component);
+      let perimeter = 0;
+      for (const compKey of component) {
+        const [cx, cy] = parseTileKey(compKey);
+        for (const [dx, dy] of AXIAL_DIRECTIONS) {
+          if (!componentSet.has(worldTileKey(cx + dx, cy + dy))) {
+            perimeter += 1;
+          }
+        }
+      }
+      const compactness = (perimeter * perimeter) / Math.max(component.length, 1);
+      if (compactness > MAX_LAKE_COMPACTNESS) {
+        for (const keyToOcean of component) {
+          oceanWorld.add(keyToOcean);
+        }
+        continue;
+      }
+
       const basinId = nextLakeBasinId;
       nextLakeBasinId += 1;
-      for (const lakeKey of basinTiles) {
+      for (const lakeKey of component) {
         lakeWorld.add(lakeKey);
         lakeBasinIdWorld.set(lakeKey, basinId);
-      }
-    } else {
-      for (const shallowKey of basinTiles) {
-        oceanWorld.add(shallowKey);
       }
     }
   }
@@ -646,19 +889,26 @@ export function lakeBasinIdAt(seed: string, x: number, y: number): number | null
 export function flowAccumulationAt(seed: string, x: number, y: number): number {
   const tileX = Math.round(x);
   const tileY = Math.round(y);
+  const seedHash = hashString(seed);
   const centerElevation = elevationAt(seed, tileX, tileY);
   let slopeOut = 0;
-  let slopeIn = 0;
+  let upstream = 0;
   for (const [dx, dy] of AXIAL_DIRECTIONS) {
-    const neighborElevation = elevationAt(seed, tileX + dx, tileY + dy);
+    const nx = tileX + dx;
+    const ny = tileY + dy;
+    const neighborElevation = elevationAt(seed, nx, ny);
     const delta = centerElevation - neighborElevation;
     if (delta > 0) {
       slopeOut += delta;
     } else {
-      slopeIn += -delta;
+      upstream += -delta;
+    }
+    const downhill = chooseDownhillNeighbor(seedHash, seed, nx, ny);
+    if (downhill.x === tileX && downhill.y === tileY) {
+      upstream += 0.85;
     }
   }
-  const seedHash = hashString(seed);
+  const valleyWeight = clamp01((SEA_LEVEL + 0.22 - centerElevation) / 0.46);
   const localNoise = fractalNoise2D(
     seedHash ^ 0x5173a1bd,
     tileX * 0.045,
@@ -667,8 +917,10 @@ export function flowAccumulationAt(seed: string, x: number, y: number): number {
     0.57,
     2.05,
   );
-  const potential = (1 + slopeIn * 48) / (0.12 + slopeOut * 24);
-  return clamp01(Math.log2(1 + potential * (0.6 + localNoise * 0.8)) / 6);
+  const numerator = 1 + upstream * 16 + valleyWeight * 3.5 + localNoise * 0.75;
+  const denominator = 0.25 + slopeOut * 9;
+  const normalized = numerator / denominator;
+  return clamp01(Math.log2(1 + normalized * 4.3) / 4.7);
 }
 
 export function isRiverSourceAt(seed: string, x: number, y: number): boolean {
@@ -695,6 +947,24 @@ export function oceanNeighborCountAt(seed: string, x: number, y: number): number
   return count;
 }
 
+function oceanRingCountAt(seed: string, tileX: number, tileY: number, radius: number): number {
+  let count = 0;
+  for (let dq = -radius; dq <= radius; dq += 1) {
+    for (let dr = -radius; dr <= radius; dr += 1) {
+      const ds = -dq - dr;
+      const distance = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(ds));
+      if (distance !== radius) {
+        continue;
+      }
+      const neighbor = classifyWaterTile(seed, tileX + dq, tileY + dr);
+      if (neighbor === TILE_TYPES[0]) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
 export function waterShadeScalarFromMacro(
   seed: string,
   tileX: number,
@@ -709,15 +979,25 @@ export function waterShadeScalarFromMacro(
 
   const seedHash = hashString(seed);
   const depth = clamp01((SEA_LEVEL - heightAt(seed, tileX, tileY)) / Math.max(SEA_LEVEL, 0.0001));
+  const basisA = rotate(tileX * 0.055, tileY * 0.055, 0.37);
+  const basisB = rotate(tileX * 0.038, tileY * 0.038, -1.12);
   const macroNoise = fractalNoise2D(
     seedHash ^ 0x6e624eb7,
-    tileX * 0.06,
-    tileY * 0.06,
+    basisA.x,
+    basisA.y,
     3,
     0.54,
     2.12,
   );
-  let scalar = clamp01(depth * 0.72 + macroNoise * 0.28);
+  const lowFreqNoise = fractalNoise2D(
+    seedHash ^ 0x51b0a89d,
+    basisB.x * 0.6,
+    basisB.y * 0.6,
+    2,
+    0.6,
+    2.0,
+  );
+  let scalar = clamp01(depth * 0.8 + macroNoise * 0.14 + lowFreqNoise * 0.06);
   if (waterClass === TILE_TYPES[1]) {
     scalar = clamp01(scalar * 0.86);
   }
@@ -734,10 +1014,20 @@ export function waterShadeScalarAt(seed: string, x: number, y: number): number |
 
 export function moistureAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
-  const rotated = rotate(x * 0.022, y * 0.022, -0.77);
-  const broad = fractalNoise2D(seedHash ^ 0xd13f3c49, rotated.x * 0.55, rotated.y * 0.55, 4, 0.56, 2.0);
-  const local = fractalNoise2D(seedHash ^ 0x2be3a5ad, rotated.x * 1.35, rotated.y * 1.35, 5, 0.48, 2.1);
-  return clamp01(broad * 0.6 + local * 0.4);
+  const rotatedA = rotate(x * 0.02, y * 0.02, -0.77);
+  const rotatedB = rotate(x * 0.02, y * 0.02, 1.19);
+  const broad = fractalNoise2D(seedHash ^ 0xd13f3c49, rotatedA.x * 0.5, rotatedA.y * 0.5, 4, 0.56, 2.0);
+  const local = fractalNoise2D(seedHash ^ 0x2be3a5ad, rotatedB.x * 1.28, rotatedB.y * 1.28, 5, 0.48, 2.1);
+  const rainShadow = fractalNoise2D(
+    seedHash ^ 0x7b6de0c1,
+    rotatedA.x * 0.72,
+    rotatedB.y * 0.72,
+    3,
+    0.58,
+    2.0,
+  );
+  const highlandDryness = clamp01((heightAt(seed, x, y) - 0.58) * 1.5);
+  return clamp01(broad * 0.52 + local * 0.34 + rainShadow * 0.14 - highlandDryness * 0.18);
 }
 
 export function getTileAt(seed: string, x: number, y: number): TileType {
@@ -754,8 +1044,14 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
   }
   const elevation = heightAt(seed, x, y);
   const oceanNeighbors = oceanNeighborCountAt(seed, tileX, tileY);
+  const ringTwoOcean = oceanRingCountAt(seed, tileX, tileY, 2);
+  const coastAffinity = oceanNeighbors * 1.1 + ringTwoOcean * 0.35;
+  const shorelineLimit =
+    oceanNeighbors >= 2
+      ? SEA_LEVEL + SHORELINE_BAND
+      : SEA_LEVEL + SHORELINE_BAND * 0.65;
   const base =
-    oceanNeighbors > 0 && elevation <= SEA_LEVEL + SHORELINE_BAND
+    oceanNeighbors > 0 && coastAffinity >= 1.4 && elevation <= shorelineLimit
       ? TILE_TYPES[2]
       : landBiomeFromFields(elevation, moistureAt(seed, x, y));
 
