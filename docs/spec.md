@@ -53,3 +53,19 @@ Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinit
 - `256x256` largest component `>= 80`
 - sampled short-fragment ratio `<= 15%`
 - sampled sink termination ratio `>= 55%`
+
+## Milestone 11 A1: Perf HUD + Profiler Usage
+1. Perf HUD availability:
+- Debug overlay includes a `Show Perf HUD` toggle.
+- Perf HUD displays rolling frame metrics (`FPS 1s`, `FPS 5s`, `avg ms`, `p95 ms`, slow-frame counts over the frame window).
+- Perf HUD displays per-bucket timing (`input`, `camera`, `visibleRange`, `rangeDiff`, `chunkGenerate`, `chunkBuild`, `renderSubmit`, `minimap`, `overlay`) as `avg` and `p95`.
+2. Counter visibility:
+- HUD exposes chunk/cache counters (chunk requests, cache hit rate, generated/rebuilt chunks per second and rolling values, processed tiles per second and rolling values).
+- HUD exposes scene complexity counters (loaded chunks, display object count, graphics object count, sprite count, render texture estimate).
+3. Export workflow:
+- `Copy perf snapshot` captures a live snapshot and appends it to an internal rolling log buffer.
+- Button copies the rolling log buffer JSON to clipboard for external analysis.
+- HUD shows copy status feedback.
+4. Determinism and behavior:
+- Instrumentation does not modify seed/world determinism.
+- Existing streaming/camera behavior remains functional while profiling is active.

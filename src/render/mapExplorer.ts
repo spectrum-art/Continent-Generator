@@ -1,4 +1,4 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Sprite } from 'pixi.js';
 import {
   CHUNK_SIZE,
   chunkCoord,
@@ -23,6 +23,7 @@ import {
 import { colorForRenderedTile } from './style';
 import { LEGEND_ORDER, TILE_PALETTE, TILE_PALETTE_CSS } from './palette';
 import { minimapColorForPixel } from './minimap';
+import { PerfProfiler, type PerfBucket, type PerfSnapshot } from './perf';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
@@ -48,6 +49,17 @@ const DEBUG_MODES = [
   'lake-basin',
   'river-trace',
 ] as const;
+const PERF_BUCKETS_FOR_DISPLAY: ReadonlyArray<PerfBucket> = [
+  'input',
+  'camera',
+  'visibleRange',
+  'rangeDiff',
+  'chunkGenerate',
+  'chunkBuild',
+  'renderSubmit',
+  'minimap',
+  'overlay',
+];
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -85,6 +97,14 @@ type OverlayElements = {
   stressHealthValue: HTMLSpanElement;
   perfValue: HTMLSpanElement;
   minimapRateValue: HTMLSpanElement;
+  perfToggleButton: HTMLButtonElement;
+  perfPanel: HTMLDivElement;
+  perfFrameValue: HTMLDivElement;
+  perfBucketsValue: HTMLPreElement;
+  perfCountersValue: HTMLPreElement;
+  perfCopyButton: HTMLButtonElement;
+  perfCopyStatus: HTMLSpanElement;
+  perfReportValue: HTMLPreElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
 };
@@ -187,7 +207,8 @@ function createChunkContainer(
   cr: number,
   shouldDrawOutlines: boolean,
   debugMode: DebugMode,
-): Container {
+): { container: Container; tileCount: number; generationMs: number; buildMs: number } {
+  const generationStart = performance.now();
   const chunkContainer = new Container();
   const baseQ = cq * CHUNK_SIZE;
   const baseR = cr * CHUNK_SIZE;
@@ -204,7 +225,9 @@ function createChunkContainer(
     }
     chunkTiles.push(row);
   }
+  const generationMs = performance.now() - generationStart;
 
+  const buildStart = performance.now();
   const chunkGraphics = new Graphics();
   for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
     for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
@@ -298,7 +321,13 @@ function createChunkContainer(
   }
 
   chunkContainer.addChild(chunkGraphics);
-  return chunkContainer;
+  const buildMs = performance.now() - buildStart;
+  return {
+    container: chunkContainer,
+    tileCount: CHUNK_SIZE * CHUNK_SIZE,
+    generationMs,
+    buildMs,
+  };
 }
 
 function createOverlay(seed: string): OverlayElements {
@@ -520,6 +549,61 @@ function createOverlay(seed: string): OverlayElements {
   perfValue.textContent = '0.0ms / 0.0fps';
   perfRow.append(perfLabel, perfValue);
 
+  const perfToggleButton = document.createElement('button');
+  perfToggleButton.type = 'button';
+  perfToggleButton.textContent = 'Show Perf HUD';
+  perfToggleButton.style.cursor = 'pointer';
+  perfToggleButton.style.marginTop = '6px';
+
+  const perfPanel = document.createElement('div');
+  perfPanel.style.display = 'none';
+  perfPanel.style.marginTop = '6px';
+  perfPanel.style.padding = '6px';
+  perfPanel.style.border = '1px solid rgba(255,255,255,0.2)';
+  perfPanel.style.borderRadius = '6px';
+  perfPanel.style.background = 'rgba(0, 0, 0, 0.22)';
+
+  const perfFrameValue = document.createElement('div');
+  perfFrameValue.textContent = 'Frame: n/a';
+
+  const perfBucketsValue = document.createElement('pre');
+  perfBucketsValue.textContent = 'Buckets: n/a';
+  perfBucketsValue.style.margin = '4px 0 0 0';
+  perfBucketsValue.style.whiteSpace = 'pre-wrap';
+
+  const perfCountersValue = document.createElement('pre');
+  perfCountersValue.textContent = 'Counters: n/a';
+  perfCountersValue.style.margin = '4px 0 0 0';
+  perfCountersValue.style.whiteSpace = 'pre-wrap';
+
+  const perfCopyRow = document.createElement('div');
+  perfCopyRow.style.marginTop = '4px';
+  perfCopyRow.style.display = 'flex';
+  perfCopyRow.style.alignItems = 'center';
+  perfCopyRow.style.gap = '6px';
+  const perfCopyButton = document.createElement('button');
+  perfCopyButton.type = 'button';
+  perfCopyButton.textContent = 'Copy perf snapshot';
+  perfCopyButton.style.cursor = 'pointer';
+  const perfCopyStatus = document.createElement('span');
+  perfCopyStatus.textContent = '';
+  perfCopyRow.append(perfCopyButton, perfCopyStatus);
+
+  const perfReportValue = document.createElement('pre');
+  perfReportValue.textContent = '';
+  perfReportValue.style.margin = '4px 0 0 0';
+  perfReportValue.style.whiteSpace = 'pre-wrap';
+  perfReportValue.style.maxHeight = '120px';
+  perfReportValue.style.overflow = 'auto';
+
+  perfPanel.append(
+    perfFrameValue,
+    perfBucketsValue,
+    perfCountersValue,
+    perfCopyRow,
+    perfReportValue,
+  );
+
   const minimapRow = document.createElement('div');
   minimapRow.style.marginTop = '8px';
   const minimapLabel = document.createElement('div');
@@ -550,6 +634,8 @@ function createOverlay(seed: string): OverlayElements {
     stressBandRow,
     stressHealthRow,
     perfRow,
+    perfToggleButton,
+    perfPanel,
     minimapRateRow,
     legendRow,
     minimapRow,
@@ -589,6 +675,14 @@ function createOverlay(seed: string): OverlayElements {
     const isVisible = legendRow.style.display !== 'none';
     legendRow.style.display = isVisible ? 'none' : 'block';
   });
+  perfToggleButton.addEventListener('click', () => {
+    const isVisible = perfPanel.style.display !== 'none';
+    perfPanel.style.display = isVisible ? 'none' : 'block';
+    perfToggleButton.textContent = isVisible ? 'Show Perf HUD' : 'Hide Perf HUD';
+  });
+  perfCopyButton.addEventListener('click', () => {
+    root.dispatchEvent(new CustomEvent('perfcopy'));
+  });
 
   return {
     root,
@@ -609,6 +703,14 @@ function createOverlay(seed: string): OverlayElements {
     stressHealthValue,
     perfValue,
     minimapRateValue,
+    perfToggleButton,
+    perfPanel,
+    perfFrameValue,
+    perfBucketsValue,
+    perfCountersValue,
+    perfCopyButton,
+    perfCopyStatus,
+    perfReportValue,
     minimapCanvas,
     minimapContext,
   };
@@ -658,6 +760,10 @@ export async function startMapExplorer(): Promise<void> {
   let frameMsEma = 16.7;
   let fpsEma = 60;
   let drawMode: 'hex' | 'lod' = 'hex';
+  const perf = new PerfProfiler();
+  let lastSceneCountUpdate = 0;
+  let lastPerfLogCaptureMs = 0;
+  let lastOverlayPerfReport = '';
   const moveKeys: MovementKeys = {
     up: false,
     down: false,
@@ -665,6 +771,50 @@ export async function startMapExplorer(): Promise<void> {
     right: false,
     boost: false,
   };
+
+  function formatPerfSnapshot(snapshot: PerfSnapshot): string {
+    return JSON.stringify(snapshot, null, 2);
+  }
+
+  function formatBucketLine(snapshot: PerfSnapshot): string {
+    return PERF_BUCKETS_FOR_DISPLAY
+      .map((bucket) => {
+        const stats = snapshot.buckets[bucket];
+        return `${bucket} avg ${stats.avgMs.toFixed(1)} p95 ${stats.p95Ms.toFixed(1)}ms`;
+      })
+      .join('\n');
+  }
+
+  function countSceneObjects(root: Container): {
+    displayObjects: number;
+    graphicsObjects: number;
+    spriteObjects: number;
+  } {
+    let displayObjects = 0;
+    let graphicsObjects = 0;
+    let spriteObjects = 0;
+    const stack: Container[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop() as Container;
+      for (const child of node.children) {
+        displayObjects += 1;
+        if (child instanceof Graphics) {
+          graphicsObjects += 1;
+        }
+        if (child instanceof Sprite) {
+          spriteObjects += 1;
+        }
+        if (child instanceof Container) {
+          stack.push(child);
+        }
+      }
+    }
+    return {
+      displayObjects,
+      graphicsObjects,
+      spriteObjects,
+    };
+  }
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
     return autoBordersEnabled && zoom >= OUTLINE_ZOOM_THRESHOLD;
@@ -690,11 +840,13 @@ export async function startMapExplorer(): Promise<void> {
   }
 
   function clearLoadedChunks(): void {
+    const submitStart = performance.now();
     for (const chunk of loadedChunks.values()) {
       world.removeChild(chunk.container);
       chunk.container.destroy({ children: true });
     }
     loadedChunks.clear();
+    perf.mark('renderSubmit', performance.now() - submitStart);
   }
 
   function loadChunk(cq: number, cr: number): void {
@@ -703,13 +855,19 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
 
-    const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines, debugMode);
-    world.addChild(container);
+    const built = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines, debugMode);
+    perf.mark('chunkGenerate', built.generationMs);
+    perf.mark('chunkBuild', built.buildMs);
+    perf.addChunkGenerated(built.tileCount);
+    perf.addChunkRebuilt(built.tileCount);
+    const submitStart = performance.now();
+    world.addChild(built.container);
     const lodEnabled = shouldUseLodMode(world.scale.x);
     if (lodEnabled) {
-      container.cacheAsTexture(true);
+      built.container.cacheAsTexture(true);
     }
-    loadedChunks.set(key, { cq, cr, container, lodEnabled });
+    perf.mark('renderSubmit', performance.now() - submitStart);
+    loadedChunks.set(key, { cq, cr, container: built.container, lodEnabled });
     totalChunksGenerated += 1;
   }
 
@@ -719,12 +877,15 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
 
+    const submitStart = performance.now();
     world.removeChild(chunk.container);
     chunk.container.destroy({ children: true });
+    perf.mark('renderSubmit', performance.now() - submitStart);
     loadedChunks.delete(key);
   }
 
   function refreshChunks(): void {
+    const visibleStart = performance.now();
     const corners = [
       screenToWorld(world, 0, 0),
       screenToWorld(world, window.innerWidth, 0),
@@ -749,13 +910,19 @@ export async function startMapExplorer(): Promise<void> {
     const minChunkR = chunkCoord(Math.floor(minR) - AXIAL_VIEW_PADDING) - CHUNK_PREFETCH_MARGIN;
     const maxChunkQ = chunkCoord(Math.ceil(maxQ) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
     const maxChunkR = chunkCoord(Math.ceil(maxR) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
+    perf.mark('visibleRange', performance.now() - visibleStart);
 
+    const diffStart = performance.now();
     const needed = new Set<string>();
     for (let cr = minChunkR; cr <= maxChunkR; cr += 1) {
       for (let cq = minChunkQ; cq <= maxChunkQ; cq += 1) {
         const key = getRenderChunkKey(cq, cr);
         needed.add(key);
-        loadChunk(cq, cr);
+        const has = loadedChunks.has(key);
+        perf.addChunkRequest(has);
+        if (!has) {
+          loadChunk(cq, cr);
+        }
       }
     }
 
@@ -764,9 +931,33 @@ export async function startMapExplorer(): Promise<void> {
         unloadChunk(key);
       }
     }
+    perf.mark('rangeDiff', performance.now() - diffStart);
   }
 
-  function updateOverlay(): void {
+  function updateOverlay(nowMs: number): void {
+    const sceneRenderTextures = Array.from(loadedChunks.values()).filter((chunk) => chunk.lodEnabled).length;
+    if (nowMs - lastSceneCountUpdate >= 500) {
+      lastSceneCountUpdate = nowMs;
+      const counts = countSceneObjects(world);
+      perf.setSceneCounts({
+        loadedChunks: loadedChunks.size,
+        displayObjects: counts.displayObjects,
+        graphicsObjects: counts.graphicsObjects,
+        spriteObjects: counts.spriteObjects,
+        renderTextureObjects: sceneRenderTextures,
+      });
+    } else {
+      perf.setSceneCounts({
+        loadedChunks: loadedChunks.size,
+        renderTextureObjects: sceneRenderTextures,
+      });
+    }
+
+    if (nowMs - lastPerfLogCaptureMs >= 1000) {
+      perf.captureSnapshot('live');
+      lastPerfLogCaptureMs = nowMs;
+    }
+    const snapshot = perf.getSnapshot('live');
     const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
     const centerAxial = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
     const roundedCenter = roundAxial(centerAxial.q, centerAxial.r);
@@ -795,8 +986,22 @@ export async function startMapExplorer(): Promise<void> {
         ? 'ok'
         : 'warn'
       : 'idle';
-    overlay.perfValue.textContent = `${frameMsEma.toFixed(1)}ms / ${fpsEma.toFixed(1)}fps`;
+    overlay.perfValue.textContent = `${snapshot.frame.avgMs.toFixed(1)}ms / ${snapshot.frame.fps1s.toFixed(1)}fps`;
     overlay.minimapRateValue.textContent = minimapRate.toFixed(1);
+    overlay.perfFrameValue.textContent =
+      `FPS 1s ${snapshot.frame.fps1s.toFixed(1)} | FPS 5s ${snapshot.frame.fps5s.toFixed(1)} | ` +
+      `avg ${snapshot.frame.avgMs.toFixed(1)}ms | p95 ${snapshot.frame.p95Ms.toFixed(1)}ms | ` +
+      `slow ${snapshot.frame.slowFrames}/${snapshot.frame.sampleCount}`;
+    overlay.perfBucketsValue.textContent = formatBucketLine(snapshot);
+    overlay.perfCountersValue.textContent =
+      `chunks loaded=${snapshot.counters.loadedChunks} generated/s=${snapshot.counters.generatedPerSecond.toFixed(2)} ` +
+      `rolling=${snapshot.counters.rollingGeneratedPerSecond.toFixed(2)}\n` +
+      `rebuilt/s=${snapshot.counters.rebuiltPerSecond.toFixed(2)} rolling=${snapshot.counters.rollingRebuiltPerSecond.toFixed(2)}\n` +
+      `tiles/s=${snapshot.counters.tilesProcessedPerSecond.toFixed(0)} rolling=${snapshot.counters.rollingTilesProcessedPerSecond.toFixed(0)}\n` +
+      `chunk req/s=${snapshot.counters.chunkRequestsPerSecond.toFixed(2)} rolling=${snapshot.counters.rollingChunkRequestsPerSecond.toFixed(2)}\n` +
+      `cache hit total=${(snapshot.counters.cacheHitRate * 100).toFixed(1)}% rolling=${(snapshot.counters.rollingCacheHitRate * 100).toFixed(1)}%\n` +
+      `display=${snapshot.counters.displayObjects} graphics=${snapshot.counters.graphicsObjects} sprites=${snapshot.counters.spriteObjects} rt=${snapshot.counters.renderTextureObjects}`;
+    overlay.perfReportValue.textContent = lastOverlayPerfReport;
   }
 
   function updateMinimap(nowMs: number): void {
@@ -898,6 +1103,29 @@ export async function startMapExplorer(): Promise<void> {
     stressChunkMax = Number.NEGATIVE_INFINITY;
     frameMsEma = 16.7;
     fpsEma = 60;
+    perf.reset();
+    overlay.perfCopyStatus.textContent = '';
+    lastOverlayPerfReport = '';
+  });
+
+  overlay.root.addEventListener('perfcopy', () => {
+    const snapshot = perf.captureSnapshot('manual');
+    const payload = perf.exportLogJson();
+    lastOverlayPerfReport = formatPerfSnapshot(snapshot);
+    const clipboard = navigator.clipboard;
+    if (!clipboard) {
+      overlay.perfCopyStatus.textContent = 'clipboard unavailable';
+      return;
+    }
+    overlay.perfCopyStatus.textContent = 'copying...';
+    void clipboard.writeText(payload).then(
+      () => {
+        overlay.perfCopyStatus.textContent = `copied (${perf.getLog().length})`;
+      },
+      () => {
+        overlay.perfCopyStatus.textContent = 'clipboard blocked';
+      },
+    );
   });
 
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -1033,10 +1261,13 @@ export async function startMapExplorer(): Promise<void> {
   drawMode = shouldUseLodMode(world.scale.x) ? 'lod' : 'hex';
 
   app.ticker.add((ticker) => {
+    const frameStart = performance.now();
+    perf.beginFrame(frameStart);
     frameMsEma = frameMsEma * 0.92 + ticker.deltaMS * 0.08;
     const instantFps = ticker.deltaMS > 0 ? 1000 / ticker.deltaMS : 0;
     fpsEma = fpsEma * 0.92 + instantFps * 0.08;
 
+    const inputStart = performance.now();
     if (stressEnabled && !stressPaused) {
       const dtSeconds = ticker.deltaMS / 1000;
       stressElapsedMs += ticker.deltaMS;
@@ -1082,7 +1313,9 @@ export async function startMapExplorer(): Promise<void> {
         cameraDirty = true;
       }
     }
+    perf.mark('input', performance.now() - inputStart);
 
+    const cameraStart = performance.now();
     const useLodMode = shouldUseLodMode(world.scale.x);
     if ((drawMode === 'lod') !== useLodMode) {
       applyLodModeToLoadedChunks(useLodMode);
@@ -1095,12 +1328,20 @@ export async function startMapExplorer(): Promise<void> {
       clearLoadedChunks();
       cameraDirty = true;
     }
+    perf.mark('camera', performance.now() - cameraStart);
 
     if (cameraDirty) {
       refreshChunks();
       cameraDirty = false;
     }
-    updateOverlay();
-    updateMinimap(performance.now());
+    const overlayStart = performance.now();
+    const nowMs = performance.now();
+    updateOverlay(nowMs);
+    perf.mark('overlay', performance.now() - overlayStart);
+
+    const minimapStart = performance.now();
+    updateMinimap(nowMs);
+    perf.mark('minimap', performance.now() - minimapStart);
+    perf.endFrame(performance.now());
   });
 }
