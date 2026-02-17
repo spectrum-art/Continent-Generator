@@ -8,35 +8,33 @@ Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinit
 - No runtime AI features
 - No platform-specific dependencies
 
-## Milestone 9 Acceptance Criteria
-1. Terrain debug render modes are available in overlay + keybind:
-- `normal`, `elevation`, `moisture`, `ocean-mask`, `flow`, `lake-basin`, `river-trace`
-- deterministic per seed and compatible with chunk streaming.
-2. Water visuals are seam-safe:
-- macro overlap classification tests remain green.
-- water visual scalar seam checks pass across chunk boundaries.
-3. Hydrology v3 (deterministic trace rivers):
-- sparse deterministic sources and downhill tracing with merge support.
-- traces terminate to ocean/lake/merge or are pruned by minimum quality.
-- river tests validate determinism, max step bound, minimum long component, and sink-termination ratio.
-4. Lakes v3 basin constraints:
-- ocean/lake split uses macro-connected flood fill.
-- tendril pruning and compactness checks prevent spaghetti lakes.
-- tests enforce basin presence/count bounds and compactness/tendril limits.
-5. Shoreline coherence:
-- shoreline remains ocean-only and tightened (`SHORELINE_BAND = 0.052`).
-- tests enforce ocean adjacency, coverage cap, and isolated-thread guard.
-6. Elevation readability + bias guard:
-- stronger main-view land shading contrast.
-- directional isotropy sanity test guards against strong axis bias in elevation sampling.
-- minimap remains base-palette-only (no elevation modulation).
-7. Palette separation + river integration:
-- water/lake/river/rock hues are clearly separated via single-source palette.
-- river shading is softened to read as terrain-integrated water.
-8. Low-zoom LOD, stress mode, and existing controls remain intact.
-9. `npm test` and `npm run build` pass for each checkpoint commit.
+## Milestone 10 Acceptance Criteria
+1. Seam and shore consistency:
+- elevation/moisture macro seam checks pass.
+- chunk-border shore classification checks pass.
+- no deterministic chunk-edge shoreline discontinuity in tests.
+2. Natural shore width targets:
+- ocean shore mean width stays in `1.9..4.0` sampled tiles.
+- lake shore mean width stays in `1.0..2.0` sampled tiles.
+3. River hierarchy and drainage:
+- deterministic river layout per seed.
+- accumulation hierarchy check: max sampled river accumulation is at least `5x` sampled average in a `1024x1024` window.
+- river coherence checks pass: largest sampled component `>= 80`, short-component ratio `<= 15%`, majority of sampled sources terminate to ocean/lake.
+4. Mountain structure and readability:
+- at least one continuous mountain/rock ridge component `>= 40` tiles in sample.
+- mountain elevations stay meaningfully above river elevations on average.
+- slope-aware land shading is enabled in renderer.
+5. Terrain-driven biomes:
+- forest placement depends on moisture/elevation/drainage weighting.
+- biome smoothing reduces speckling and tiny isolated patches (guarded in generator tests).
+6. River visual integration:
+- river color is blended toward aquatic tones and terrain bank tones (not high-contrast overlay styling).
+7. Core behavior remains unchanged:
+- deterministic seeded generator and pure `src/gen/*`.
+- existing pan/zoom/chunk streaming/minimap/stress systems stay intact.
+- `npm test` and `npm run build` are green at checkpoint gates.
 
-## Tuned Constants (Milestone 9)
+## Tuned Constants (Milestone 10)
 - `SEA_LEVEL = 0.45`
 - `SHORELINE_BAND = 0.052`
 - `HYDRO_MACRO_SIZE = 256`
@@ -50,7 +48,8 @@ Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinit
 - `MAX_RIVER_STEPS = 420`
 - `MIN_RIVER_LENGTH = 12`
 - `MIN_RIVER_ELEVATION_DROP = 0.02`
-- River coverage/coherence guardrails in tests (`256x256` sample):
-- coverage `0.35%..4%`
-- largest component `>= 80`
-- sink termination ratio `>= 55%` (sampled sources)
+- River coverage/coherence guardrails in tests:
+- `256x256` coverage target `0.35%..4%`
+- `256x256` largest component `>= 80`
+- sampled short-fragment ratio `<= 15%`
+- sampled sink termination ratio `>= 55%`
