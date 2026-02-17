@@ -245,12 +245,14 @@ function createChunkContainer(
         const waterShade = tile === 'water' || tile === 'lake'
           ? waterShadeScalarAt(seed, sample.x, sample.y)
           : null;
+        const riverFlow = tile === 'river' ? flowAccumulationAt(seed, sample.x, sample.y) : null;
         renderColor = colorForRenderedTile(
           tile,
           TILE_PALETTE[tile],
           elevation,
           shorelineNeighbors,
           waterShade,
+          riverFlow,
         );
       }
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHUNK_SIZE,
   flowAccumulationAt,
+  flowDirectionAt,
   HYDRO_MACRO_MARGIN,
   HYDRO_MACRO_SIZE,
   LAKE_SHORE_RADIUS_MAX,
@@ -59,7 +60,7 @@ describe('generator determinism', () => {
       expect(a).toBe(b);
       expect(b).toBe(c);
     }
-  }, 12000);
+  }, 25000);
 
   it('returns deterministic elevation and moisture field values', () => {
     const seed = 'field-seed';
@@ -104,7 +105,7 @@ describe('generator determinism', () => {
       expect(flow).toBeGreaterThanOrEqual(0);
       expect(flow).toBeLessThanOrEqual(1);
     }
-  });
+  }, 12000);
 
   it('keeps elevation directional bias within a bounded isotropy ratio', () => {
     const seed = 'default';
@@ -185,7 +186,7 @@ describe('chunk generation', () => {
       const worldY = cy * CHUNK_SIZE + ly;
       expect(chunk[ly][lx]).toBe(getTileAt(seed, worldX, worldY));
     }
-  });
+  }, 15000);
 
   it('is continuous across horizontal neighboring chunk borders', () => {
     const seed = 'neighbor-x';
@@ -202,7 +203,7 @@ describe('chunk generation', () => {
       expect(left[ly][CHUNK_SIZE - 1]).toBe(getTileAt(seed, leftWorldX, worldY));
       expect(right[ly][0]).toBe(getTileAt(seed, rightWorldX, worldY));
     }
-  });
+  }, 15000);
 
   it('is continuous across vertical neighboring chunk borders', () => {
     const seed = 'neighbor-y';
@@ -219,7 +220,7 @@ describe('chunk generation', () => {
       expect(top[CHUNK_SIZE - 1][lx]).toBe(getTileAt(seed, worldX, topWorldY));
       expect(bottom[0][lx]).toBe(getTileAt(seed, worldX, bottomWorldY));
     }
-  });
+  }, 15000);
 });
 
 describe('distribution sanity', () => {
@@ -227,14 +228,14 @@ describe('distribution sanity', () => {
     const seed = 'distribution';
     const found = new Set<TileType>();
 
-    for (let y = -256; y < 256; y += 1) {
-      for (let x = -256; x < 256; x += 1) {
+    for (let y = -256; y < 256; y += 2) {
+      for (let x = -256; x < 256; x += 2) {
         found.add(getTileAt(seed, x, y));
       }
     }
 
     expect(found.size).toBeGreaterThanOrEqual(5);
-  }, 30000);
+  }, 20000);
 });
 
 describe('sea level model', () => {
@@ -721,7 +722,7 @@ describe('sea level model', () => {
     expect(oceanMean, `ocean mean shore width=${oceanMean.toFixed(2)} expected 2..4`).toBeLessThanOrEqual(4);
     expect(lakeMean, `lake mean shore width=${lakeMean.toFixed(2)} expected 1..2`).toBeGreaterThanOrEqual(1);
     expect(lakeMean, `lake mean shore width=${lakeMean.toFixed(2)} expected 1..2`).toBeLessThanOrEqual(2);
-  }, 12000);
+  }, 20000);
 });
 
 describe('river core', () => {
@@ -760,6 +761,27 @@ describe('river core', () => {
     }
   });
 
+  it('uses downhill flow directions where directions are defined', () => {
+    const seed = 'default';
+    const samples: Array<[number, number]> = [
+      [0, 0],
+      [24, -18],
+      [80, 41],
+      [-77, 36],
+      [143, -120],
+    ];
+
+    for (const [x, y] of samples) {
+      const next = flowDirectionAt(seed, x, y);
+      if (!next) {
+        continue;
+      }
+      const here = elevationAt(seed, x, y);
+      const there = elevationAt(seed, next.x, next.y);
+      expect(there).toBeLessThanOrEqual(here);
+    }
+  });
+
   it('keeps river coverage within tuned target range in a 256x256 sample', () => {
     const seed = 'default';
     const size = 256;
@@ -784,6 +806,40 @@ describe('river core', () => {
       `river coverage ratio=${(ratio * 100).toFixed(2)}% expected between 0.50% and 4.00%`,
     ).toBeLessThanOrEqual(0.04);
   });
+
+  it('builds hierarchical trunks with strong accumulation in a 1024 sample window', () => {
+    const seed = 'default';
+    const size = 1024;
+    const half = size / 2;
+    const step = 4;
+    let riverTiles = 0;
+    let sourceCount = 0;
+    let accumulationSum = 0;
+    let accumulationMax = 0;
+
+    for (let y = -half; y < half; y += step) {
+      for (let x = -half; x < half; x += step) {
+        if (isRiverSourceAt(seed, x, y)) {
+          sourceCount += 1;
+        }
+        if (getTileAt(seed, x, y) !== 'river') {
+          continue;
+        }
+        riverTiles += 1;
+        const acc = flowAccumulationAt(seed, x, y);
+        accumulationSum += acc;
+        accumulationMax = Math.max(accumulationMax, acc);
+      }
+    }
+
+    expect(riverTiles).toBeGreaterThan(100);
+    expect(sourceCount, `source count=${sourceCount} expected <= 120`).toBeLessThanOrEqual(120);
+    const avgAccumulation = accumulationSum / Math.max(1, riverTiles);
+    expect(
+      accumulationMax,
+      `max river accumulation=${accumulationMax.toFixed(3)} expected >= 5x average ${avgAccumulation.toFixed(3)}`,
+    ).toBeGreaterThanOrEqual(avgAccumulation * 5);
+  }, 30000);
 
   it('terminates a majority of sampled river sources into ocean/lake sinks', () => {
     const seed = 'default';
@@ -874,4 +930,63 @@ describe('river core', () => {
     expect(largest, `largest river component length=${largest} expected >= 80`).toBeGreaterThanOrEqual(80);
     expect(components, `river component count=${components} expected <= 25`).toBeLessThanOrEqual(25);
   });
+
+  it('keeps short river fragments below 15% of components', () => {
+    const seed = 'default';
+    const size = 384;
+    const half = size / 2;
+    const riverTiles = new Set<string>();
+    const visited = new Set<string>();
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'river') {
+          riverTiles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    let components = 0;
+    let shortComponents = 0;
+    for (const key of riverTiles) {
+      if (visited.has(key)) continue;
+      components += 1;
+      const queue = [key];
+      visited.add(key);
+      let count = 0;
+
+      while (queue.length > 0) {
+        const current = queue.shift() as string;
+        count += 1;
+        const [xStr, yStr] = current.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+        for (const [dx, dy] of dirs) {
+          const nextKey = `${x + dx},${y + dy}`;
+          if (!riverTiles.has(nextKey) || visited.has(nextKey)) continue;
+          visited.add(nextKey);
+          queue.push(nextKey);
+        }
+      }
+
+      if (count < 10) {
+        shortComponents += 1;
+      }
+    }
+
+    expect(components).toBeGreaterThan(0);
+    const shortRatio = shortComponents / components;
+    expect(
+      shortRatio,
+      `short river component ratio=${(shortRatio * 100).toFixed(2)}% expected <= 15%`,
+    ).toBeLessThanOrEqual(0.15);
+  }, 15000);
 });

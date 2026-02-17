@@ -34,14 +34,16 @@ export function colorForRenderedTile(
   elevation: number,
   shorelineNeighbors: number,
   waterShade: number | null,
+  riverFlow: number | null = null,
 ): number {
   let shaded = baseColor;
   if (tile === 'water' || tile === 'lake') {
     const scalar = waterShade ?? 0.5;
     shaded = shadeColor(baseColor, 1.08 - scalar * 0.48);
   } else if (tile === 'river') {
-    const riverBody = shadeColor(baseColor, 0.78 + elevation * 0.18);
-    shaded = mixColor(riverBody, 0x2f6c96, 0.24);
+    const flow = clamp(riverFlow ?? 0.4, 0, 1);
+    const riverBody = shadeColor(baseColor, 0.7 + elevation * 0.15 + flow * 0.26);
+    shaded = mixColor(riverBody, 0x2b6a95, 0.2 + flow * 0.22);
   } else {
     const baseFactor = 0.5 + elevation * 1.22;
     const rockBoost = tile === 'mountain' || tile === 'rock' ? 0.12 : 0;

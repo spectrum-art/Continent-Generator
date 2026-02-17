@@ -11,20 +11,20 @@ export type TileType =
 export type ShoreType = 'ocean' | 'lake';
 
 export const CHUNK_SIZE = 64;
-export const RIVER_SOURCE_SPACING = 22;
-export const RIVER_SOURCE_RATE = 0.78;
-export const MIN_SOURCE_ELEVATION = 0.54;
-export const MIN_SOURCE_FLOW = 0.16;
-export const RIVER_SOURCE_MARGIN = 176;
+export const RIVER_SOURCE_SPACING = 20;
+export const RIVER_SOURCE_RATE = 0.9;
+export const MIN_SOURCE_ELEVATION = 0.46;
+export const MIN_SOURCE_FLOW = 0;
+export const RIVER_SOURCE_MARGIN = 320;
 export const MAX_RIVER_STEPS = 420;
 export const SEA_LEVEL = 0.45;
 export const RIVER_WATER_STOP_ELEVATION = SEA_LEVEL;
 export const RIVER_UPHILL_TOLERANCE = 0.005;
 export const MAJOR_SOURCE_SPACING = 84;
-export const MAJOR_MIN_SOURCE_ELEVATION = 0.67;
-export const MIN_RIVER_LENGTH = 12;
-export const MIN_RIVER_ELEVATION_DROP = 0.02;
-export const MAX_RIVER_COMPONENT_SOURCES = 110;
+export const MAJOR_MIN_SOURCE_ELEVATION = 0.58;
+export const MIN_RIVER_LENGTH = 10;
+export const MIN_RIVER_ELEVATION_DROP = 0.015;
+export const MAX_RIVER_COMPONENT_SOURCES = 260;
 export const SHORELINE_BAND = 0.052;
 export const OCEAN_SHORE_RADIUS_MIN = 1.8;
 export const OCEAN_SHORE_RADIUS_MAX = 4.2;
@@ -33,8 +33,11 @@ export const LAKE_SHORE_RADIUS_MAX = 2.3;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 128;
 export const MIN_LAKE_COMPONENT_TILES = 40;
+export const MAJOR_LAKE_TILES = 20;
 export const MAX_LAKE_COMPACTNESS = 220;
 export const LAKE_TENDRIL_PRUNE_PASSES = 3;
+export const FLOW_MACRO_SIZE = 192;
+export const FLOW_MACRO_MARGIN = 80;
 
 const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -47,6 +50,7 @@ const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
 ];
 const RIVER_CACHE_MAX_CHUNKS = 256;
 const HYDRO_CACHE_MAX_REGIONS = 64;
+const FLOW_CACHE_MAX_REGIONS = 64;
 const RIVER_TIE_EPSILON = 1e-6;
 
 type RiverChunkData = {
@@ -62,12 +66,25 @@ type HydroRegionData = {
   ocean: Set<string>;
   lake: Set<string>;
   lakeBasinId: Map<string, number>;
+  lakeBasinSize: Map<number, number>;
+};
+
+type FlowRegionData = {
+  roiStartX: number;
+  roiStartY: number;
+  roiEndX: number;
+  roiEndY: number;
+  width: number;
+  accumulation: Float32Array;
+  maxAccumulation: number;
 };
 
 const riverChunkCache = new Map<string, RiverChunkData>();
 const riverChunkCacheOrder: string[] = [];
 const hydroRegionCache = new Map<string, HydroRegionData>();
 const hydroRegionCacheOrder: string[] = [];
+const flowRegionCache = new Map<string, FlowRegionData>();
+const flowRegionCacheOrder: string[] = [];
 
 function hashString(input: string): number {
   let hash = 2166136261;
@@ -128,6 +145,10 @@ function chunkRiverCacheKey(seed: string, cx: number, cy: number): string {
 }
 
 function regionHydroCacheKey(seed: string, macroX: number, macroY: number): string {
+  return `${seed}|${macroX}:${macroY}`;
+}
+
+function regionFlowCacheKey(seed: string, macroX: number, macroY: number): string {
   return `${seed}|${macroX}:${macroY}`;
 }
 
@@ -246,25 +267,41 @@ function chooseDownhillNeighbor(
   return { x: bestX, y: bestY, elevation: bestElevation };
 }
 
-function riverSourcePotentialAt(seed: string, x: number, y: number): number {
-  const center = elevationAt(seed, x, y);
-  let downhill = 0;
-  let uphill = 0;
-  for (const [dx, dy] of AXIAL_DIRECTIONS) {
-    const neighbor = elevationAt(seed, x + dx, y + dy);
-    const delta = center - neighbor;
-    if (delta > 0) {
-      downhill += delta;
-    } else {
-      uphill += -delta;
+function chooseLowestNeighbor(
+  seedHash: number,
+  seed: string,
+  x: number,
+  y: number,
+): { x: number; y: number; elevation: number } {
+  let bestX = x;
+  let bestY = y;
+  let bestElevation = Number.POSITIVE_INFINITY;
+  let bestTie = Number.MAX_SAFE_INTEGER;
+
+  for (let i = 0; i < AXIAL_DIRECTIONS.length; i += 1) {
+    const [dx, dy] = AXIAL_DIRECTIONS[i];
+    const nx = x + dx;
+    const ny = y + dy;
+    const candidateElevation = elevationAt(seed, nx, ny);
+    const tie = hashCoord(seedHash, nx, ny, i + 251);
+    if (
+      candidateElevation < bestElevation - RIVER_TIE_EPSILON ||
+      (Math.abs(candidateElevation - bestElevation) <= RIVER_TIE_EPSILON && tie < bestTie)
+    ) {
+      bestX = nx;
+      bestY = ny;
+      bestElevation = candidateElevation;
+      bestTie = tie;
     }
   }
-  const valleyPotential = (1 + uphill * 10) / (0.4 + downhill * 12);
-  return clamp01(Math.log2(1 + valleyPotential * 2.4) / 3.2);
+
+  return { x: bestX, y: bestY, elevation: bestElevation };
 }
 
 type RiverTraceResult = {
   path: Array<[number, number]>;
+  endX: number;
+  endY: number;
   endElevation: number;
   terminatedWater: boolean;
   terminatedLake: boolean;
@@ -316,20 +353,27 @@ function traceRiverPath(
     }
 
     const next = chooseDownhillNeighbor(seedHash, seed, x, y);
-    if (next.x === x && next.y === y) {
-      break;
-    }
-    if (next.elevation > currentElevation + RIVER_UPHILL_TOLERANCE) {
-      break;
+    let move = next;
+    if (next.x === x && next.y === y || next.elevation > currentElevation + RIVER_UPHILL_TOLERANCE) {
+      const spill = chooseLowestNeighbor(seedHash, seed, x, y);
+      if (spill.x === x && spill.y === y) {
+        break;
+      }
+      if (spill.elevation > currentElevation + 0.03) {
+        break;
+      }
+      move = spill;
     }
 
-    x = next.x;
-    y = next.y;
-    currentElevation = next.elevation;
+    x = move.x;
+    y = move.y;
+    currentElevation = move.elevation;
   }
 
   return {
     path,
+    endX: x,
+    endY: y,
     endElevation: currentElevation,
     terminatedWater,
     terminatedLake,
@@ -398,12 +442,12 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       if (elev < MIN_SOURCE_ELEVATION) {
         continue;
       }
-      const sourcePotential = riverSourcePotentialAt(seed, x, y);
-      if (sourcePotential < MIN_SOURCE_FLOW) {
+      const sourceAccumulation = flowAccumulationAt(seed, x, y);
+      if (sourceAccumulation < MIN_SOURCE_FLOW) {
         continue;
       }
       const score =
-        elev * 1.2 + sourcePotential * 1.45 + ((hashCoord(seedHash, x, y, 203) & 0xff) / 255) * 0.2;
+        elev * 1.2 + sourceAccumulation * 1.9 + ((hashCoord(seedHash, x, y, 203) & 0xff) / 255) * 0.2;
       const tie = hashCoord(seedHash, x, y, 181);
       candidates.push({ x, y, score, tie });
     }
@@ -425,10 +469,10 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       if (elev < MAJOR_MIN_SOURCE_ELEVATION) {
         continue;
       }
-      const sourcePotential = riverSourcePotentialAt(seed, x, y);
+      const sourceAccumulation = flowAccumulationAt(seed, x, y);
       const score =
         elev * 1.35 +
-        sourcePotential * 1.15 +
+        sourceAccumulation * 1.5 +
         ((hashCoord(seedHash, x, y, 227) & 0xff) / 255) * 0.12;
       const tie = hashCoord(seedHash, x, y, 229);
       candidates.push({ x, y, score, tie });
@@ -470,13 +514,15 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     if (elevationDrop < MIN_RIVER_ELEVATION_DROP) {
       continue;
     }
-    if (!trace.terminatedWater && !trace.terminatedLake && !trace.mergedIntoRiver) {
-      const isStrongInlandTrace =
-        pathWithoutWater.length >= MIN_RIVER_LENGTH * 2 &&
-        elevationDrop >= MIN_RIVER_ELEVATION_DROP * 1.9;
-      if (!isStrongInlandTrace) {
-        continue;
+    let reachesValidSink = trace.terminatedWater || trace.mergedIntoRiver;
+    if (!reachesValidSink && trace.terminatedLake) {
+      const basinSize = lakeBasinSizeAt(seed, trace.endX, trace.endY) ?? 0;
+      if (basinSize >= MAJOR_LAKE_TILES) {
+        reachesValidSink = true;
       }
+    }
+    if (!reachesValidSink) {
+      continue;
     }
 
     acceptedSources += 1;
@@ -490,9 +536,9 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
 
       const widenHash = hashCoord(seedHash, px, py, 907 + i);
       const shouldWidenPrimary =
-        pathWithoutWater.length >= 24 &&
-        (widenHash & 0xff) < 182 &&
-        i >= Math.floor(pathWithoutWater.length * 0.3);
+        pathWithoutWater.length >= 12 &&
+        (widenHash & 0xff) < 230 &&
+        i >= Math.floor(pathWithoutWater.length * 0.2);
       if (!shouldWidenPrimary) {
         continue;
       }
@@ -506,9 +552,9 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       }
 
       const shouldWidenSecondary =
-        pathWithoutWater.length >= 42 &&
-        i >= Math.floor(pathWithoutWater.length * 0.55) &&
-        ((widenHash >>> 8) & 0xff) < 96;
+        pathWithoutWater.length >= 20 &&
+        i >= Math.floor(pathWithoutWater.length * 0.35) &&
+        ((widenHash >>> 8) & 0xff) < 156;
       if (!shouldWidenSecondary) {
         continue;
       }
@@ -526,7 +572,7 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
   for (const key of riverWorldTiles) {
     const [x, y] = parseTileKey(key);
     const elevation = elevationAt(seed, x, y);
-    const widths = elevation < 0.62 ? 3 : 2;
+    const widths = elevation < 0.62 ? 4 : 3;
     let dir = hashCoord(seedHash, x, y, 941) % AXIAL_DIRECTIONS.length;
     for (let i = 0; i < widths; i += 1) {
       const [dx, dy] = AXIAL_DIRECTIONS[dir];
@@ -690,6 +736,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 
   const lakeWorld = new Set<string>();
   const lakeBasinIdWorld = new Map<string, number>();
+  const lakeBasinSize = new Map<number, number>();
   const basinVisited = new Set<string>();
   let nextLakeBasinId = 1;
   for (const key of waterCandidates) {
@@ -787,6 +834,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 
       const basinId = nextLakeBasinId;
       nextLakeBasinId += 1;
+      lakeBasinSize.set(basinId, component.length);
       for (const lakeKey of component) {
         lakeWorld.add(lakeKey);
         lakeBasinIdWorld.set(lakeKey, basinId);
@@ -824,6 +872,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
     ocean,
     lake,
     lakeBasinId,
+    lakeBasinSize,
   };
   hydroRegionCache.set(cacheKey, built);
   hydroRegionCacheOrder.push(cacheKey);
@@ -838,6 +887,128 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 
 function macroCoord(n: number): number {
   return Math.floor((n - HYDRO_MACRO_SIZE / 2) / HYDRO_MACRO_SIZE);
+}
+
+function flowMacroCoord(n: number): number {
+  return Math.floor((n - FLOW_MACRO_SIZE / 2) / FLOW_MACRO_SIZE);
+}
+
+function buildFlowRegion(seed: string, regionX: number, regionY: number): FlowRegionData {
+  const cacheKey = regionFlowCacheKey(seed, regionX, regionY);
+  const cached = flowRegionCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const interiorStartX = regionX * FLOW_MACRO_SIZE;
+  const interiorStartY = regionY * FLOW_MACRO_SIZE;
+  const interiorEndX = interiorStartX + FLOW_MACRO_SIZE - 1;
+  const interiorEndY = interiorStartY + FLOW_MACRO_SIZE - 1;
+  const roiStartX = interiorStartX - FLOW_MACRO_MARGIN;
+  const roiStartY = interiorStartY - FLOW_MACRO_MARGIN;
+  const roiEndX = interiorEndX + FLOW_MACRO_MARGIN;
+  const roiEndY = interiorEndY + FLOW_MACRO_MARGIN;
+  const width = roiEndX - roiStartX + 1;
+  const height = roiEndY - roiStartY + 1;
+  const cellCount = width * height;
+  const elevations = new Float32Array(cellCount);
+  const downstream = new Int32Array(cellCount);
+  downstream.fill(-1);
+  const indegree = new Int32Array(cellCount);
+  const accumulation = new Float32Array(cellCount);
+  accumulation.fill(1);
+  const seedHash = hashString(seed);
+
+  const idxAt = (x: number, y: number): number => (y - roiStartY) * width + (x - roiStartX);
+
+  for (let y = roiStartY; y <= roiEndY; y += 1) {
+    for (let x = roiStartX; x <= roiEndX; x += 1) {
+      elevations[idxAt(x, y)] = elevationAt(seed, x, y);
+    }
+  }
+
+  for (let y = roiStartY; y <= roiEndY; y += 1) {
+    for (let x = roiStartX; x <= roiEndX; x += 1) {
+      const idx = idxAt(x, y);
+      const center = elevations[idx];
+      let bestElevation = center - RIVER_TIE_EPSILON;
+      let bestNeighbor = -1;
+      let bestTie = Number.MAX_SAFE_INTEGER;
+
+      for (let i = 0; i < AXIAL_DIRECTIONS.length; i += 1) {
+        const [dx, dy] = AXIAL_DIRECTIONS[i];
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < roiStartX || nx > roiEndX || ny < roiStartY || ny > roiEndY) {
+          continue;
+        }
+        const nIdx = idxAt(nx, ny);
+        const candidate = elevations[nIdx];
+        const tie = hashCoord(seedHash, nx, ny, i + 401);
+        if (
+          candidate < bestElevation - RIVER_TIE_EPSILON ||
+          (Math.abs(candidate - bestElevation) <= RIVER_TIE_EPSILON && tie < bestTie)
+        ) {
+          bestElevation = candidate;
+          bestNeighbor = nIdx;
+          bestTie = tie;
+        }
+      }
+
+      if (bestNeighbor >= 0) {
+        downstream[idx] = bestNeighbor;
+        indegree[bestNeighbor] += 1;
+      }
+    }
+  }
+
+  const queue = new Int32Array(cellCount);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < cellCount; i += 1) {
+    if (indegree[i] === 0) {
+      queue[tail] = i;
+      tail += 1;
+    }
+  }
+
+  while (head < tail) {
+    const idx = queue[head];
+    head += 1;
+    const to = downstream[idx];
+    if (to >= 0) {
+      accumulation[to] += accumulation[idx];
+      indegree[to] -= 1;
+      if (indegree[to] === 0) {
+        queue[tail] = to;
+        tail += 1;
+      }
+    }
+  }
+
+  let maxAccumulation = 1;
+  for (let i = 0; i < cellCount; i += 1) {
+    maxAccumulation = Math.max(maxAccumulation, accumulation[i]);
+  }
+
+  const built: FlowRegionData = {
+    roiStartX,
+    roiStartY,
+    roiEndX,
+    roiEndY,
+    width,
+    accumulation,
+    maxAccumulation,
+  };
+  flowRegionCache.set(cacheKey, built);
+  flowRegionCacheOrder.push(cacheKey);
+  while (flowRegionCacheOrder.length > FLOW_CACHE_MAX_REGIONS) {
+    const oldest = flowRegionCacheOrder.shift();
+    if (!oldest) break;
+    flowRegionCache.delete(oldest);
+  }
+
+  return built;
 }
 
 export function classifyWaterTileFromMacro(
@@ -912,41 +1083,55 @@ export function lakeBasinIdAt(seed: string, x: number, y: number): number | null
   return region.lakeBasinId.get(localKey) ?? null;
 }
 
+export function lakeBasinSizeAt(seed: string, x: number, y: number): number | null {
+  const basinId = lakeBasinIdAt(seed, x, y);
+  if (basinId === null) {
+    return null;
+  }
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  const region = buildHydroRegion(seed, macroX, macroY);
+  return region.lakeBasinSize.get(basinId) ?? null;
+}
+
 export function flowAccumulationAt(seed: string, x: number, y: number): number {
   const tileX = Math.round(x);
   const tileY = Math.round(y);
-  const seedHash = hashString(seed);
-  const centerElevation = elevationAt(seed, tileX, tileY);
-  let slopeOut = 0;
-  let upstream = 0;
-  for (const [dx, dy] of AXIAL_DIRECTIONS) {
-    const nx = tileX + dx;
-    const ny = tileY + dy;
-    const neighborElevation = elevationAt(seed, nx, ny);
-    const delta = centerElevation - neighborElevation;
-    if (delta > 0) {
-      slopeOut += delta;
-    } else {
-      upstream += -delta;
-    }
-    const downhill = chooseDownhillNeighbor(seedHash, seed, nx, ny);
-    if (downhill.x === tileX && downhill.y === tileY) {
-      upstream += 0.85;
-    }
+  const macroX = flowMacroCoord(tileX);
+  const macroY = flowMacroCoord(tileY);
+  const region = buildFlowRegion(seed, macroX, macroY);
+  if (
+    tileX < region.roiStartX ||
+    tileX > region.roiEndX ||
+    tileY < region.roiStartY ||
+    tileY > region.roiEndY
+  ) {
+    return 0;
   }
-  const valleyWeight = clamp01((SEA_LEVEL + 0.22 - centerElevation) / 0.46);
-  const localNoise = fractalNoise2D(
-    seedHash ^ 0x5173a1bd,
-    tileX * 0.045,
-    tileY * 0.045,
-    3,
-    0.57,
-    2.05,
-  );
-  const numerator = 1 + upstream * 16 + valleyWeight * 3.5 + localNoise * 0.75;
-  const denominator = 0.25 + slopeOut * 9;
-  const normalized = numerator / denominator;
-  return clamp01(Math.log2(1 + normalized * 4.3) / 4.7);
+
+  const localX = tileX - region.roiStartX;
+  const localY = tileY - region.roiStartY;
+  const idx = localY * region.width + localX;
+  const raw = region.accumulation[idx];
+  const normalized = Math.log2(1 + raw) / Math.log2(1 + region.maxAccumulation);
+  return clamp01(Math.pow(normalized, 2.2));
+}
+
+export function flowDirectionAt(seed: string, x: number, y: number): { x: number; y: number } | null {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const seedHash = hashString(seed);
+  const next = chooseDownhillNeighbor(seedHash, seed, tileX, tileY);
+  const center = elevationAt(seed, tileX, tileY);
+  if (next.x === tileX && next.y === tileY) {
+    return null;
+  }
+  if (next.elevation >= center - RIVER_TIE_EPSILON) {
+    return null;
+  }
+  return { x: next.x, y: next.y };
 }
 
 export function isRiverSourceAt(seed: string, x: number, y: number): boolean {

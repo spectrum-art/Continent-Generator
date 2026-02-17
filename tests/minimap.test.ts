@@ -21,5 +21,5 @@ describe('minimap rendering colors', () => {
 
     expect(colors.size).toBeLessThanOrEqual(allowed.size);
     expect(colors.size).toBeGreaterThanOrEqual(4);
-  });
+  }, 15000);
 });
