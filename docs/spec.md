@@ -69,3 +69,21 @@ Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinit
 4. Determinism and behavior:
 - Instrumentation does not modify seed/world determinism.
 - Existing streaming/camera behavior remains functional while profiling is active.
+
+## Milestone 11 Acceptance Criteria
+1. Profiler and scenario tooling:
+- Perf HUD exposes frame metrics, per-bucket p95 timings, chunk/cache/display counters, and JSON export.
+- Scenario Runner executes deterministic scenarios (`idle10`, `pan10`, `zoomPan10`, `stress15`) from a known reset state.
+- Each scenario emits a structured perf report in HUD and console.
+2. Differential diagnosis and targeted fixes:
+- Diagnosis is documented in `docs/perf.md` with baseline numbers and selected bottlenecks.
+- Renderer uses queued chunk loading with explicit budgets (`CHUNK_LOADS_PER_SECOND_CAP`, `CHUNK_LOADS_PER_FRAME_CAP`).
+- Minimap updates are throttled and cached; chunk tile and minimap color caches are LRU bounded.
+- Scenario measurement window starts only after warmup plus pending-load drain.
+3. Guardrails:
+- Added architecture-oriented tests for cache reuse, chunk-load budget policy, and LOD/outline policy thresholds.
+4. Strict threshold gate:
+- Scenario 1 (`idle 10s`): avg FPS `>= 58`, frame p95 `<= 20ms`, `chunksGenerated=0`.
+- Scenario 2 (`pan 10s`, warm cache): avg FPS `>= 45`, frame p95 `<= 28ms`, `chunksGenerated<=2`, slow-frame rate `<= 10%`.
+- Scenario 3 (`zoomed-out pan 10s`): avg FPS `>= 30`, frame p95 `<= 40ms`, slow-frame rate `<= 20%`, low-zoom chunk-sprite mode active.
+- Scenario 4 (`stress autopan 15s`): avg FPS `>= 30`, frame p95 `<= 40ms`, chunk generation rate capped and UI responsive.
