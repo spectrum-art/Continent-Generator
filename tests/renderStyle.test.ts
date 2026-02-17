@@ -12,10 +12,10 @@ describe('render style', () => {
   it('produces at least 3 luminance levels for same biome at different elevations', () => {
     const baseGrass = 0x63b359;
     const colors = [
-      colorForRenderedTile('grass', baseGrass, 0.2, 0),
-      colorForRenderedTile('grass', baseGrass, 0.5, 0),
-      colorForRenderedTile('grass', baseGrass, 0.8, 0),
-      colorForRenderedTile('grass', baseGrass, 0.95, 0),
+      colorForRenderedTile('grass', baseGrass, 0.2, 0, null),
+      colorForRenderedTile('grass', baseGrass, 0.5, 0, null),
+      colorForRenderedTile('grass', baseGrass, 0.8, 0, null),
+      colorForRenderedTile('grass', baseGrass, 0.95, 0, null),
     ];
     const levels = new Set(colors.map((c) => Math.round(luminance(c))));
     expect(levels.size).toBeGreaterThanOrEqual(3);
@@ -23,8 +23,15 @@ describe('render style', () => {
 
   it('applies shoreline tint when adjacent to water', () => {
     const baseGrass = 0x63b359;
-    const inland = colorForRenderedTile('grass', baseGrass, 0.5, 0);
-    const shoreline = colorForRenderedTile('grass', baseGrass, 0.5, 2);
+    const inland = colorForRenderedTile('grass', baseGrass, 0.5, 0, null);
+    const shoreline = colorForRenderedTile('grass', baseGrass, 0.5, 2, null);
     expect(shoreline).not.toBe(inland);
+  });
+
+  it('darkens deeper ocean water when water shade scalar is higher', () => {
+    const baseWater = 0x2d6cdf;
+    const shallow = colorForRenderedTile('water', baseWater, 0.2, 0, 0.2);
+    const deep = colorForRenderedTile('water', baseWater, 0.2, 0, 0.9);
+    expect(Math.round(luminance(deep))).toBeLessThan(Math.round(luminance(shallow)));
   });
 });

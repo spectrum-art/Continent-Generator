@@ -5,6 +5,7 @@ import {
   HYDRO_MACRO_MARGIN,
   HYDRO_MACRO_SIZE,
   MAX_RIVER_STEPS,
+  SHORELINE_BAND,
   classifyWaterTileFromMacro,
   chunkCoord,
   elevationAt,
@@ -14,6 +15,8 @@ import {
   getChunkKey,
   getTileAt,
   moistureAt,
+  oceanNeighborCountAt,
+  waterShadeScalarFromMacro,
   signedHeightAt,
   riverTraceLengthFromSource,
   type TileType,
@@ -374,11 +377,45 @@ describe('sea level model', () => {
         const fromLeft = classifyWaterTileFromMacro(seed, x, y, leftMacroX, macroY);
         const fromRight = classifyWaterTileFromMacro(seed, x, y, rightMacroX, macroY);
         expect(fromLeft).toBe(fromRight);
+        const shadeLeft = waterShadeScalarFromMacro(seed, x, y, leftMacroX, macroY);
+        const shadeRight = waterShadeScalarFromMacro(seed, x, y, rightMacroX, macroY);
+        if (shadeLeft === null || shadeRight === null) {
+          expect(shadeLeft).toBe(shadeRight);
+        } else {
+          expect(Math.abs(shadeLeft - shadeRight)).toBeLessThanOrEqual(1e-12);
+        }
         comparisons += 1;
       }
     }
 
     expect(comparisons).toBeGreaterThan(100);
+  });
+
+  it('uses a 20% tighter shoreline band than the prior 0.065 value', () => {
+    expect(SHORELINE_BAND).toBeCloseTo(0.052, 6);
+  });
+
+  it('limits sand coverage and keeps sand ocean-adjacent only', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    let sandCount = 0;
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) !== 'sand') {
+          continue;
+        }
+        sandCount += 1;
+        expect(oceanNeighborCountAt(seed, x, y)).toBeGreaterThan(0);
+      }
+    }
+
+    const ratio = sandCount / (size * size);
+    expect(
+      ratio,
+      `sand coverage ratio=${(ratio * 100).toFixed(2)}% expected <= 12%`,
+    ).toBeLessThanOrEqual(0.12);
   });
 });
 

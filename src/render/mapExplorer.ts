@@ -4,6 +4,7 @@ import {
   chunkCoord,
   elevationAt,
   getTileAt,
+  waterShadeScalarAt,
   type TileType,
 } from '../gen/generator';
 import {
@@ -16,6 +17,7 @@ import {
 } from './hex';
 import { colorForRenderedTile } from './style';
 import { LEGEND_ORDER, TILE_PALETTE, TILE_PALETTE_CSS } from './palette';
+import { minimapColorForPixel } from './minimap';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
@@ -137,7 +139,7 @@ function createChunkContainer(
       const tile = chunkTiles[localR][localQ];
       const elevation = elevationAt(seed, sample.x, sample.y);
       let shorelineNeighbors = 0;
-      if (tile !== 'water' && tile !== 'river') {
+      if (tile !== 'water' && tile !== 'lake' && tile !== 'river') {
         for (const [dq, dr] of HEX_DIRECTIONS) {
           const neighborLocalQ = localQ + dq;
           const neighborLocalR = localR + dr;
@@ -153,17 +155,22 @@ function createChunkContainer(
             const neighborSample = axialToSample(q + dq, r + dr);
             neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
           }
-          if (neighborTile === 'water' || neighborTile === 'river') {
+          if (neighborTile === 'water') {
             shorelineNeighbors += 1;
           }
         }
       }
+
+      const waterShade = (tile === 'water' || tile === 'lake')
+        ? waterShadeScalarAt(seed, sample.x, sample.y)
+        : null;
 
       const renderColor = colorForRenderedTile(
         tile,
         TILE_PALETTE[tile],
         elevation,
         shorelineNeighbors,
+        waterShade,
       );
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
@@ -615,19 +622,19 @@ export async function startMapExplorer(): Promise<void> {
     const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
     const centerAxialFloat = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
     const centerAxial = roundAxial(centerAxialFloat.q, centerAxialFloat.r);
-    const centerAxialPixel = axialToPixel(centerAxial.q, centerAxial.r, HEX_SIZE);
-
     for (let py = 0; py < MINIMAP_SIZE; py += MINIMAP_SAMPLE_STEP) {
       for (let px = 0; px < MINIMAP_SIZE; px += MINIMAP_SAMPLE_STEP) {
-        const offsetX = (px + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
-        const offsetY = (py + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
-        const worldX = centerAxialPixel.x + offsetX;
-        const worldY = centerAxialPixel.y + offsetY;
-        const mappedAxial = pixelToAxial(worldX, worldY, HEX_SIZE);
-        const mappedRounded = roundAxial(mappedAxial.q, mappedAxial.r);
-        const sample = axialToSample(mappedRounded.q, mappedRounded.r);
-        const tile = getTileAt(activeSeed, sample.x, sample.y);
-        ctx.fillStyle = TILE_PALETTE_CSS[tile];
+        ctx.fillStyle = minimapColorForPixel(
+          activeSeed,
+          centerAxial,
+          px,
+          py,
+          {
+            size: MINIMAP_SIZE,
+            sampleStep: MINIMAP_SAMPLE_STEP,
+            worldUnitsPerPixel: MINIMAP_WORLD_UNITS_PER_PIXEL,
+          },
+        );
         ctx.fillRect(px, py, MINIMAP_SAMPLE_STEP, MINIMAP_SAMPLE_STEP);
       }
     }

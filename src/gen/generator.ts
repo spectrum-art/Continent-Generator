@@ -20,7 +20,7 @@ export const MAJOR_SOURCE_SPACING = 72;
 export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
 export const MIN_RIVER_LENGTH = 11;
 export const MIN_RIVER_ELEVATION_DROP = 0.03;
-export const SHORELINE_BAND = 0.065;
+export const SHORELINE_BAND = 0.052;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 128;
 export const MIN_LAKE_COMPONENT_TILES = 40;
@@ -175,8 +175,7 @@ function fractalNoise2D(
   return total / maxTotal;
 }
 
-function biomeFromFields(elevation: number, moisture: number): TileType {
-  if (elevation < SEA_LEVEL + SHORELINE_BAND) return TILE_TYPES[2];
+function landBiomeFromFields(elevation: number, moisture: number): TileType {
   if (elevation > 0.78) return TILE_TYPES[6];
   if (elevation > 0.64 && moisture < 0.35) return TILE_TYPES[6];
   if (elevation > 0.61) return TILE_TYPES[5];
@@ -606,6 +605,56 @@ function classifyWaterTile(seed: string, tileX: number, tileY: number): Extract<
   return classifyWaterTileFromMacro(seed, tileX, tileY, macroX, macroY);
 }
 
+export function oceanNeighborCountAt(seed: string, x: number, y: number): number {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  let count = 0;
+  for (const [dx, dy] of AXIAL_DIRECTIONS) {
+    const waterClass = classifyWaterTile(seed, tileX + dx, tileY + dy);
+    if (waterClass === TILE_TYPES[0]) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export function waterShadeScalarFromMacro(
+  seed: string,
+  tileX: number,
+  tileY: number,
+  macroX: number,
+  macroY: number,
+): number | null {
+  const waterClass = classifyWaterTileFromMacro(seed, tileX, tileY, macroX, macroY);
+  if (!waterClass) {
+    return null;
+  }
+
+  const seedHash = hashString(seed);
+  const depth = clamp01((SEA_LEVEL - heightAt(seed, tileX, tileY)) / Math.max(SEA_LEVEL, 0.0001));
+  const macroNoise = fractalNoise2D(
+    seedHash ^ 0x6e624eb7,
+    tileX * 0.06,
+    tileY * 0.06,
+    3,
+    0.54,
+    2.12,
+  );
+  let scalar = clamp01(depth * 0.72 + macroNoise * 0.28);
+  if (waterClass === TILE_TYPES[1]) {
+    scalar = clamp01(scalar * 0.86);
+  }
+  return scalar;
+}
+
+export function waterShadeScalarAt(seed: string, x: number, y: number): number | null {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  return waterShadeScalarFromMacro(seed, tileX, tileY, macroX, macroY);
+}
+
 export function moistureAt(seed: string, x: number, y: number): number {
   const seedHash = hashString(seed);
   const rotated = rotate(x * 0.022, y * 0.022, -0.77);
@@ -627,7 +676,11 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
     return waterClass;
   }
   const elevation = heightAt(seed, x, y);
-  const base = biomeFromFields(elevation, moistureAt(seed, x, y));
+  const oceanNeighbors = oceanNeighborCountAt(seed, tileX, tileY);
+  const base =
+    oceanNeighbors > 0 && elevation <= SEA_LEVEL + SHORELINE_BAND
+      ? TILE_TYPES[2]
+      : landBiomeFromFields(elevation, moistureAt(seed, x, y));
 
   if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
     return TILE_TYPES[7];

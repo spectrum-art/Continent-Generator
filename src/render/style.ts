@@ -33,15 +33,19 @@ export function colorForRenderedTile(
   baseColor: number,
   elevation: number,
   shorelineNeighbors: number,
+  waterShade: number | null,
 ): number {
   let shaded = baseColor;
-  if (tile === 'water' || tile === 'river') {
-    shaded = shadeColor(baseColor, 0.9 + elevation * 0.25);
+  if (tile === 'water' || tile === 'lake') {
+    const scalar = waterShade ?? 0.5;
+    shaded = shadeColor(baseColor, 1.08 - scalar * 0.48);
+  } else if (tile === 'river') {
+    shaded = shadeColor(baseColor, 0.88 + elevation * 0.22);
   } else {
-    shaded = shadeColor(baseColor, 0.82 + elevation * 0.45);
+    shaded = shadeColor(baseColor, 0.62 + elevation * 0.92);
   }
 
-  if (shorelineNeighbors > 0 && tile !== 'sand' && tile !== 'water' && tile !== 'river') {
+  if (shorelineNeighbors > 0 && tile !== 'sand' && tile !== 'water' && tile !== 'lake' && tile !== 'river') {
     const shorelineTint = 0xd8c589;
     const mixAmount = clamp(shorelineNeighbors / 6, 0.18, 0.55);
     shaded = mixColor(shaded, shorelineTint, mixAmount);
