@@ -19,6 +19,8 @@ export const RIVER_UPHILL_TOLERANCE = 0.005;
 export const MAJOR_SOURCE_SPACING = 72;
 export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
 export const SHORELINE_BAND = 0.065;
+export const HYDRO_MACRO_SIZE = 256;
+export const HYDRO_MACRO_MARGIN = 64;
 
 const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -30,18 +32,18 @@ const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [0, 1],
 ];
 const RIVER_CACHE_MAX_CHUNKS = 256;
-const HYDRO_CACHE_MAX_REGIONS = 96;
+const HYDRO_CACHE_MAX_REGIONS = 64;
 const RIVER_TIE_EPSILON = 1e-6;
-const HYDRO_SUPER_CHUNK_SIZE = 3;
-const HYDRO_MARGIN_CHUNKS = 1;
 
 type RiverChunkData = {
   tiles: Set<string>;
 };
 
 type HydroRegionData = {
-  regionStartX: number;
-  regionStartY: number;
+  roiStartX: number;
+  roiStartY: number;
+  roiEndX: number;
+  roiEndY: number;
   ocean: Set<string>;
   lake: Set<string>;
 };
@@ -105,8 +107,8 @@ function chunkRiverCacheKey(seed: string, cx: number, cy: number): string {
   return `${seed}|${cx}:${cy}`;
 }
 
-function regionHydroCacheKey(seed: string, rx: number, ry: number): string {
-  return `${seed}|${rx}:${ry}`;
+function regionHydroCacheKey(seed: string, macroX: number, macroY: number): string {
+  return `${seed}|${macroX}:${macroY}`;
 }
 
 function localTileKey(localX: number, localY: number): string {
@@ -115,11 +117,6 @@ function localTileKey(localX: number, localY: number): string {
 
 function worldTileKey(tileX: number, tileY: number): string {
   return `${tileX},${tileY}`;
-}
-
-function parseTileKey(key: string): [number, number] {
-  const [x, y] = key.split(',');
-  return [Number(x), Number(y)];
 }
 
 function latticeValue(seedHash: number, x: number, y: number): number {
@@ -416,19 +413,15 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
     return cached;
   }
 
-  const regionChunkStartX = regionX * HYDRO_SUPER_CHUNK_SIZE;
-  const regionChunkStartY = regionY * HYDRO_SUPER_CHUNK_SIZE;
-  const regionTileStartX = regionChunkStartX * CHUNK_SIZE;
-  const regionTileStartY = regionChunkStartY * CHUNK_SIZE;
-  const regionTileSize = HYDRO_SUPER_CHUNK_SIZE * CHUNK_SIZE;
-  const regionTileEndX = regionTileStartX + regionTileSize - 1;
-  const regionTileEndY = regionTileStartY + regionTileSize - 1;
+  const interiorStartX = regionX * HYDRO_MACRO_SIZE;
+  const interiorStartY = regionY * HYDRO_MACRO_SIZE;
+  const interiorEndX = interiorStartX + HYDRO_MACRO_SIZE - 1;
+  const interiorEndY = interiorStartY + HYDRO_MACRO_SIZE - 1;
 
-  const marginTiles = HYDRO_MARGIN_CHUNKS * CHUNK_SIZE;
-  const roiStartX = regionTileStartX - marginTiles;
-  const roiStartY = regionTileStartY - marginTiles;
-  const roiEndX = regionTileEndX + marginTiles;
-  const roiEndY = regionTileEndY + marginTiles;
+  const roiStartX = interiorStartX - HYDRO_MACRO_MARGIN;
+  const roiStartY = interiorStartY - HYDRO_MACRO_MARGIN;
+  const roiEndX = interiorEndX + HYDRO_MACRO_MARGIN;
+  const roiEndY = interiorEndY + HYDRO_MACRO_MARGIN;
 
   const waterCandidates = new Set<string>();
   const oceanWorld = new Set<string>();
@@ -467,22 +460,26 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 
   const ocean = new Set<string>();
   const lake = new Set<string>();
-  for (const key of waterCandidates) {
-    const [x, y] = parseTileKey(key);
-    if (x < regionTileStartX || x > regionTileEndX || y < regionTileStartY || y > regionTileEndY) {
-      continue;
-    }
-    const local = localTileKey(x - regionTileStartX, y - regionTileStartY);
-    if (oceanWorld.has(key)) {
-      ocean.add(local);
-    } else {
-      lake.add(local);
+  for (let y = roiStartY; y <= roiEndY; y += 1) {
+    for (let x = roiStartX; x <= roiEndX; x += 1) {
+      const key = worldTileKey(x, y);
+      if (!waterCandidates.has(key)) {
+        continue;
+      }
+      const local = localTileKey(x - roiStartX, y - roiStartY);
+      if (oceanWorld.has(key)) {
+        ocean.add(local);
+      } else {
+        lake.add(local);
+      }
     }
   }
 
   const built: HydroRegionData = {
-    regionStartX: regionTileStartX,
-    regionStartY: regionTileStartY,
+    roiStartX,
+    roiStartY,
+    roiEndX,
+    roiEndY,
     ocean,
     lake,
   };
@@ -497,23 +494,47 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
   return built;
 }
 
-function classifyWaterTile(seed: string, tileX: number, tileY: number): TileType | null {
+function macroCoord(n: number): number {
+  return Math.floor(n / HYDRO_MACRO_SIZE);
+}
+
+export function classifyWaterTileFromMacro(
+  seed: string,
+  tileX: number,
+  tileY: number,
+  macroX: number,
+  macroY: number,
+): Extract<TileType, 'water' | 'lake'> | null {
   if (!isWaterCandidateAt(seed, tileX, tileY)) {
     return null;
   }
 
-  const cx = chunkCoord(tileX);
-  const cy = chunkCoord(tileY);
-  const regionX = Math.floor(cx / HYDRO_SUPER_CHUNK_SIZE);
-  const regionY = Math.floor(cy / HYDRO_SUPER_CHUNK_SIZE);
-  const region = buildHydroRegion(seed, regionX, regionY);
-  const localX = tileX - region.regionStartX;
-  const localY = tileY - region.regionStartY;
+  const region = buildHydroRegion(seed, macroX, macroY);
+  if (
+    tileX < region.roiStartX ||
+    tileX > region.roiEndX ||
+    tileY < region.roiStartY ||
+    tileY > region.roiEndY
+  ) {
+    return null;
+  }
+
+  const localX = tileX - region.roiStartX;
+  const localY = tileY - region.roiStartY;
   const key = localTileKey(localX, localY);
   if (region.lake.has(key)) {
     return TILE_TYPES[1];
   }
-  return TILE_TYPES[0];
+  if (region.ocean.has(key)) {
+    return TILE_TYPES[0];
+  }
+  return null;
+}
+
+function classifyWaterTile(seed: string, tileX: number, tileY: number): Extract<TileType, 'water' | 'lake'> | null {
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  return classifyWaterTileFromMacro(seed, tileX, tileY, macroX, macroY);
 }
 
 export function moistureAt(seed: string, x: number, y: number): number {
