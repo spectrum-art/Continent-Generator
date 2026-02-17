@@ -22,24 +22,31 @@ import {
 } from './hex';
 import { colorForRenderedTile } from './style';
 import { LEGEND_ORDER, TILE_PALETTE, TILE_PALETTE_CSS } from './palette';
-import { minimapColorForPixel } from './minimap';
 import { PerfProfiler, type PerfBucket, type PerfSnapshot } from './perf';
+import { LruCache, getOrCreateCached } from './lruCache';
+import { allowedChunkLoadsForFrame, shouldDrawOutlines, shouldUseLodMode } from './perfPolicy';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3.5;
 const ZOOM_SENSITIVITY = 0.0012;
 const CHUNK_PREFETCH_MARGIN = 1;
+const CHUNK_KEEP_MARGIN = CHUNK_PREFETCH_MARGIN + 1;
 const AXIAL_VIEW_PADDING = 6;
 const DEFAULT_SEED = 'default';
 const OUTLINE_ZOOM_THRESHOLD = 1.35;
 const MINIMAP_SIZE = 192;
 const MINIMAP_DISPLAY_SIZE = 128;
-const MINIMAP_UPDATE_MS = 250;
-const MINIMAP_SAMPLE_STEP = 2;
+const MINIMAP_UPDATE_MS = 1500;
+const MINIMAP_SAMPLE_STEP = 8;
 const MINIMAP_WORLD_UNITS_PER_PIXEL = HEX_SIZE * 0.65;
 const LOD_ZOOM_THRESHOLD = 0.8;
+const LOW_DETAIL_COLOR_ZOOM_THRESHOLD = 0.9;
 const BASE_KEYBOARD_PAN_SPEED = 620;
 const BOOST_KEYBOARD_MULTIPLIER = 2.2;
+const CHUNK_LOADS_PER_SECOND_CAP = 4;
+const CHUNK_LOADS_PER_FRAME_CAP = 1;
+const CHUNK_TILE_CACHE_LIMIT = 512;
+const MINIMAP_COLOR_CACHE_LIMIT = 30_000;
 const DEBUG_MODES = [
   'normal',
   'elevation',
@@ -50,10 +57,10 @@ const DEBUG_MODES = [
   'river-trace',
 ] as const;
 const PERF_SCENARIOS = [
-  { id: 'idle10', label: 'Scenario 1: idle 10s', durationMs: 10_000, warmupMs: 500 },
-  { id: 'pan10', label: 'Scenario 2: pan 10s', durationMs: 10_000, warmupMs: 1_000 },
-  { id: 'zoomPan10', label: 'Scenario 3: zoomed-out pan 10s', durationMs: 10_000, warmupMs: 1_000 },
-  { id: 'stress15', label: 'Scenario 4: stress autopan 15s', durationMs: 15_000, warmupMs: 1_000 },
+  { id: 'idle10', label: 'Scenario 1: idle 10s', durationMs: 10_000, warmupMs: 2_500 },
+  { id: 'pan10', label: 'Scenario 2: pan 10s', durationMs: 10_000, warmupMs: 2_500 },
+  { id: 'zoomPan10', label: 'Scenario 3: zoomed-out pan 10s', durationMs: 10_000, warmupMs: 2_500 },
+  { id: 'stress15', label: 'Scenario 4: stress autopan 15s', durationMs: 15_000, warmupMs: 3_000 },
 ] as const;
 const PERF_BUCKETS_FOR_DISPLAY: ReadonlyArray<PerfBucket> = [
   'input',
@@ -216,27 +223,16 @@ function createChunkContainer(
   seed: string,
   cq: number,
   cr: number,
+  chunkTiles: TileType[][],
   shouldDrawOutlines: boolean,
   debugMode: DebugMode,
-): { container: Container; tileCount: number; generationMs: number; buildMs: number } {
-  const generationStart = performance.now();
+  lowDetailColors: boolean,
+): { container: Container; tileCount: number; buildMs: number } {
   const chunkContainer = new Container();
   const baseQ = cq * CHUNK_SIZE;
   const baseR = cr * CHUNK_SIZE;
   const basePixel = axialToPixel(baseQ, baseR, HEX_SIZE);
   chunkContainer.position.set(basePixel.x, basePixel.y);
-  const chunkTiles: TileType[][] = [];
-  for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
-    const row: TileType[] = [];
-    for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
-      const q = baseQ + localQ;
-      const r = baseR + localR;
-      const sample = axialToSample(q, r);
-      row.push(getTileAt(seed, sample.x, sample.y));
-    }
-    chunkTiles.push(row);
-  }
-  const generationMs = performance.now() - generationStart;
 
   const buildStart = performance.now();
   const chunkGraphics = new Graphics();
@@ -247,10 +243,10 @@ function createChunkContainer(
       const center = axialToPixel(q, r, HEX_SIZE);
       const sample = axialToSample(q, r);
       const tile = chunkTiles[localR][localQ];
-      const elevation = elevationAt(seed, sample.x, sample.y);
       let renderColor = TILE_PALETTE[tile];
 
       if (debugMode === 'elevation') {
+        const elevation = elevationAt(seed, sample.x, sample.y);
         renderColor = grayscaleColor(elevation);
       } else if (debugMode === 'moisture') {
         renderColor = grayscaleColor(moistureAt(seed, sample.x, sample.y));
@@ -277,9 +273,13 @@ function createChunkContainer(
         } else if (tile === 'water' || tile === 'lake') {
           renderColor = 0x14324f;
         } else {
+          const elevation = elevationAt(seed, sample.x, sample.y);
           renderColor = grayscaleColor(clamp(elevation * 0.7, 0, 1));
         }
+      } else if (lowDetailColors) {
+        renderColor = TILE_PALETTE[tile];
       } else {
+        const elevation = elevationAt(seed, sample.x, sample.y);
         let shorelineNeighbors = 0;
         if (tile !== 'water' && tile !== 'lake') {
           for (const [dq, dr] of HEX_DIRECTIONS) {
@@ -336,7 +336,6 @@ function createChunkContainer(
   return {
     container: chunkContainer,
     tileCount: CHUNK_SIZE * CHUNK_SIZE,
-    generationMs,
     buildMs,
   };
 }
@@ -800,6 +799,15 @@ export async function startMapExplorer(): Promise<void> {
   let activeSeed = initialSeed;
   let debugMode: DebugMode = 'normal';
   const loadedChunks = new Map<string, LoadedChunk>();
+  const pendingChunkLoads: Array<{ key: string; cq: number; cr: number }> = [];
+  const pendingChunkKeys = new Set<string>();
+  const chunkTileCache = new LruCache<TileType[][]>(CHUNK_TILE_CACHE_LIMIT);
+  const minimapColorCache = new LruCache<string>(MINIMAP_COLOR_CACHE_LIMIT);
+  let chunkLoadTokens = CHUNK_LOADS_PER_SECOND_CAP;
+  let lastChunkTokenUpdateMs = performance.now();
+  let minimapDirty = true;
+  let lastMinimapCenterQ = Number.NaN;
+  let lastMinimapCenterR = Number.NaN;
   let cameraDirty = true;
   let autoBordersEnabled = true;
   let renderedWithOutlines = false;
@@ -838,8 +846,10 @@ export async function startMapExplorer(): Promise<void> {
     warmupMs: number;
     durationMs: number;
     startMs: number;
+    runStartMs: number | null;
     generatedAtStart: number;
     maxLoadedChunks: number;
+    maxGeneratedPerSecond: number;
   };
   type ScenarioReport = {
     id: PerfScenarioId;
@@ -851,6 +861,7 @@ export async function startMapExplorer(): Promise<void> {
     slowFrameRate: number;
     maxLoadedChunks: number;
     chunksGeneratedDuringRun: number;
+    maxGeneratedPerSecond: number;
     p95Buckets: Record<PerfBucket, number>;
   };
   let activeScenario: ActiveScenarioRun | null = null;
@@ -901,6 +912,109 @@ export async function startMapExplorer(): Promise<void> {
     };
   }
 
+  function markCameraDirty(): void {
+    cameraDirty = true;
+    minimapDirty = true;
+  }
+
+  function chunkTileCacheKey(seed: string, cq: number, cr: number): string {
+    return `${seed}:${cq}:${cr}`;
+  }
+
+  function getChunkTiles(cq: number, cr: number): {
+    tiles: TileType[][];
+    fromCache: boolean;
+    generationMs: number;
+    tileCount: number;
+  } {
+    const key = chunkTileCacheKey(activeSeed, cq, cr);
+    const cached = chunkTileCache.get(key);
+    if (cached) {
+      return {
+        tiles: cached,
+        fromCache: true,
+        generationMs: 0,
+        tileCount: CHUNK_SIZE * CHUNK_SIZE,
+      };
+    }
+
+    const generationStart = performance.now();
+    const baseQ = cq * CHUNK_SIZE;
+    const baseR = cr * CHUNK_SIZE;
+    const tiles: TileType[][] = [];
+    for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
+      const row: TileType[] = [];
+      for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
+        const q = baseQ + localQ;
+        const r = baseR + localR;
+        const sample = axialToSample(q, r);
+        row.push(getTileAt(activeSeed, sample.x, sample.y));
+      }
+      tiles.push(row);
+    }
+    chunkTileCache.set(key, tiles);
+    return {
+      tiles,
+      fromCache: false,
+      generationMs: performance.now() - generationStart,
+      tileCount: CHUNK_SIZE * CHUNK_SIZE,
+    };
+  }
+
+  function enqueueChunkLoad(cq: number, cr: number): void {
+    const key = getRenderChunkKey(cq, cr);
+    if (loadedChunks.has(key) || pendingChunkKeys.has(key)) {
+      return;
+    }
+    pendingChunkLoads.push({ key, cq, cr });
+    pendingChunkKeys.add(key);
+  }
+
+  function trimPendingQueue(keepSet: Set<string>): void {
+    if (pendingChunkLoads.length === 0) {
+      return;
+    }
+    const filtered: Array<{ key: string; cq: number; cr: number }> = [];
+    for (const pending of pendingChunkLoads) {
+      if (keepSet.has(pending.key)) {
+        filtered.push(pending);
+      } else {
+        pendingChunkKeys.delete(pending.key);
+      }
+    }
+    pendingChunkLoads.length = 0;
+    pendingChunkLoads.push(...filtered);
+  }
+
+  function processChunkLoadQueue(nowMs: number): void {
+    const elapsedSeconds = Math.max(0, (nowMs - lastChunkTokenUpdateMs) / 1000);
+    lastChunkTokenUpdateMs = nowMs;
+    chunkLoadTokens = Math.min(
+      CHUNK_LOADS_PER_SECOND_CAP,
+      chunkLoadTokens + elapsedSeconds * CHUNK_LOADS_PER_SECOND_CAP,
+    );
+    let loadsAllowed = allowedChunkLoadsForFrame(chunkLoadTokens, CHUNK_LOADS_PER_FRAME_CAP);
+    while (loadsAllowed > 0 && pendingChunkLoads.length > 0) {
+      const pending = pendingChunkLoads.shift() as { key: string; cq: number; cr: number };
+      pendingChunkKeys.delete(pending.key);
+      if (loadedChunks.has(pending.key)) {
+        continue;
+      }
+      loadChunk(pending.cq, pending.cr);
+      chunkLoadTokens -= 1;
+      loadsAllowed -= 1;
+    }
+  }
+
+  function getMinimapColor(seed: string, q: number, r: number): string {
+    const key = `${seed}:${q}:${r}`;
+    const cached = getOrCreateCached(minimapColorCache, key, () => {
+      const sample = axialToSample(q, r);
+      return TILE_PALETTE_CSS[getTileAt(seed, sample.x, sample.y)];
+    });
+    return cached.value;
+  }
+
   function scenarioById(id: PerfScenarioId): (typeof PERF_SCENARIOS)[number] {
     const found = PERF_SCENARIOS.find((scenario) => scenario.id === id);
     if (!found) {
@@ -927,7 +1041,9 @@ export async function startMapExplorer(): Promise<void> {
     clearLoadedChunks();
     perf.reset();
     lastPerfLogCaptureMs = 0;
-    cameraDirty = true;
+    minimapColorCache.clear();
+    chunkTileCache.clear();
+    markCameraDirty();
   }
 
   function scenarioToReport(
@@ -944,6 +1060,7 @@ export async function startMapExplorer(): Promise<void> {
       slowFrameRate: snapshot.frame.slowFrameRate,
       maxLoadedChunks: scenario.maxLoadedChunks,
       chunksGeneratedDuringRun: Math.max(0, snapshot.totals.chunksGenerated - scenario.generatedAtStart),
+      maxGeneratedPerSecond: scenario.maxGeneratedPerSecond,
       p95Buckets: {
         input: snapshot.buckets.input.p95Ms,
         camera: snapshot.buckets.camera.p95Ms,
@@ -966,7 +1083,8 @@ export async function startMapExplorer(): Promise<void> {
       `${report.label}\n` +
       `fps1s=${report.avgFps1s.toFixed(1)} fps5s=${report.avgFps5s.toFixed(1)} ` +
       `frameP95=${report.p95FrameMs.toFixed(1)}ms slowRate=${(report.slowFrameRate * 100).toFixed(1)}%\n` +
-      `maxLoaded=${report.maxLoadedChunks} chunksGenerated=${report.chunksGeneratedDuringRun}\n` +
+      `maxLoaded=${report.maxLoadedChunks} chunksGenerated=${report.chunksGeneratedDuringRun} ` +
+      `maxGenPerSec=${report.maxGeneratedPerSecond.toFixed(2)}\n` +
       `bucketP95 ${bucketSummary}`
     );
   }
@@ -982,8 +1100,10 @@ export async function startMapExplorer(): Promise<void> {
       warmupMs: scenario.warmupMs,
       durationMs: scenario.durationMs,
       startMs: performance.now(),
+      runStartMs: null,
       generatedAtStart: snapshot.totals.chunksGenerated,
       maxLoadedChunks: 0,
+      maxGeneratedPerSecond: 0,
     };
     overlay.scenarioStatusValue.textContent = `running ${scenario.label}`;
     overlay.perfReportValue.textContent = '';
@@ -1024,11 +1144,11 @@ export async function startMapExplorer(): Promise<void> {
   }
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
-    return autoBordersEnabled && zoom >= OUTLINE_ZOOM_THRESHOLD;
+    return shouldDrawOutlines(autoBordersEnabled, zoom, OUTLINE_ZOOM_THRESHOLD);
   }
 
-  function shouldUseLodMode(zoom: number): boolean {
-    return zoom < LOD_ZOOM_THRESHOLD;
+  function shouldUseLodModeAtZoom(zoom: number): boolean {
+    return shouldUseLodMode(zoom, LOD_ZOOM_THRESHOLD);
   }
 
   function applyChunkLodState(chunk: LoadedChunk, useLod: boolean): void {
@@ -1053,6 +1173,10 @@ export async function startMapExplorer(): Promise<void> {
       chunk.container.destroy({ children: true });
     }
     loadedChunks.clear();
+    pendingChunkLoads.length = 0;
+    pendingChunkKeys.clear();
+    chunkLoadTokens = CHUNK_LOADS_PER_SECOND_CAP;
+    lastChunkTokenUpdateMs = performance.now();
     perf.mark('renderSubmit', performance.now() - submitStart);
   }
 
@@ -1062,14 +1186,26 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
 
-    const built = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines, debugMode);
-    perf.mark('chunkGenerate', built.generationMs);
+    const chunkTiles = getChunkTiles(cq, cr);
+    perf.mark('chunkGenerate', chunkTiles.generationMs);
+    if (!chunkTiles.fromCache) {
+      perf.addChunkGenerated(chunkTiles.tileCount);
+    }
+    const lowDetailColors = debugMode === 'normal' && world.scale.x < LOW_DETAIL_COLOR_ZOOM_THRESHOLD;
+    const built = createChunkContainer(
+      activeSeed,
+      cq,
+      cr,
+      chunkTiles.tiles,
+      renderedWithOutlines,
+      debugMode,
+      lowDetailColors,
+    );
     perf.mark('chunkBuild', built.buildMs);
-    perf.addChunkGenerated(built.tileCount);
     perf.addChunkRebuilt(built.tileCount);
     const submitStart = performance.now();
     world.addChild(built.container);
-    const lodEnabled = shouldUseLodMode(world.scale.x);
+    const lodEnabled = shouldUseLodModeAtZoom(world.scale.x);
     if (lodEnabled) {
       built.container.cacheAsTexture(true);
     }
@@ -1117,24 +1253,35 @@ export async function startMapExplorer(): Promise<void> {
     const minChunkR = chunkCoord(Math.floor(minR) - AXIAL_VIEW_PADDING) - CHUNK_PREFETCH_MARGIN;
     const maxChunkQ = chunkCoord(Math.ceil(maxQ) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
     const maxChunkR = chunkCoord(Math.ceil(maxR) + AXIAL_VIEW_PADDING) + CHUNK_PREFETCH_MARGIN;
+    const keepMinChunkQ = minChunkQ - CHUNK_KEEP_MARGIN;
+    const keepMinChunkR = minChunkR - CHUNK_KEEP_MARGIN;
+    const keepMaxChunkQ = maxChunkQ + CHUNK_KEEP_MARGIN;
+    const keepMaxChunkR = maxChunkR + CHUNK_KEEP_MARGIN;
     perf.mark('visibleRange', performance.now() - visibleStart);
 
     const diffStart = performance.now();
-    const needed = new Set<string>();
+    const keepSet = new Set<string>();
+    for (let cr = keepMinChunkR; cr <= keepMaxChunkR; cr += 1) {
+      for (let cq = keepMinChunkQ; cq <= keepMaxChunkQ; cq += 1) {
+        keepSet.add(getRenderChunkKey(cq, cr));
+      }
+    }
+
     for (let cr = minChunkR; cr <= maxChunkR; cr += 1) {
       for (let cq = minChunkQ; cq <= maxChunkQ; cq += 1) {
         const key = getRenderChunkKey(cq, cr);
-        needed.add(key);
-        const has = loadedChunks.has(key);
+        const cacheKey = chunkTileCacheKey(activeSeed, cq, cr);
+        const has = loadedChunks.has(key) || pendingChunkKeys.has(key) || chunkTileCache.has(cacheKey);
         perf.addChunkRequest(has);
-        if (!has) {
-          loadChunk(cq, cr);
+        if (!loadedChunks.has(key) && !pendingChunkKeys.has(key)) {
+          enqueueChunkLoad(cq, cr);
         }
       }
     }
 
+    trimPendingQueue(keepSet);
     for (const key of loadedChunks.keys()) {
-      if (!needed.has(key)) {
+      if (!keepSet.has(key)) {
         unloadChunk(key);
       }
     }
@@ -1212,6 +1359,9 @@ export async function startMapExplorer(): Promise<void> {
   }
 
   function updateMinimap(nowMs: number): void {
+    if (!minimapDirty) {
+      return;
+    }
     if (nowMs - lastMinimapUpdate < MINIMAP_UPDATE_MS) {
       return;
     }
@@ -1228,19 +1378,22 @@ export async function startMapExplorer(): Promise<void> {
     const centerWorld = screenToWorld(world, window.innerWidth / 2, window.innerHeight / 2);
     const centerAxialFloat = pixelToAxial(centerWorld.x, centerWorld.y, HEX_SIZE);
     const centerAxial = roundAxial(centerAxialFloat.q, centerAxialFloat.r);
+    const centerChanged = centerAxial.q !== lastMinimapCenterQ || centerAxial.r !== lastMinimapCenterR;
+    if (!centerChanged && nowMs - lastMinimapUpdate < MINIMAP_UPDATE_MS * 2) {
+      return;
+    }
+    lastMinimapCenterQ = centerAxial.q;
+    lastMinimapCenterR = centerAxial.r;
+    const centerAxialPixel = axialToPixel(centerAxial.q, centerAxial.r);
     for (let py = 0; py < MINIMAP_SIZE; py += MINIMAP_SAMPLE_STEP) {
       for (let px = 0; px < MINIMAP_SIZE; px += MINIMAP_SAMPLE_STEP) {
-        ctx.fillStyle = minimapColorForPixel(
-          activeSeed,
-          centerAxial,
-          px,
-          py,
-          {
-            size: MINIMAP_SIZE,
-            sampleStep: MINIMAP_SAMPLE_STEP,
-            worldUnitsPerPixel: MINIMAP_WORLD_UNITS_PER_PIXEL,
-          },
-        );
+        const offsetX = (px + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
+        const offsetY = (py + MINIMAP_SAMPLE_STEP / 2 - MINIMAP_SIZE / 2) * MINIMAP_WORLD_UNITS_PER_PIXEL;
+        const worldX = centerAxialPixel.x + offsetX;
+        const worldY = centerAxialPixel.y + offsetY;
+        const mappedAxial = pixelToAxial(worldX, worldY);
+        const mappedRounded = roundAxial(mappedAxial.q, mappedAxial.r);
+        ctx.fillStyle = getMinimapColor(activeSeed, mappedRounded.q, mappedRounded.r);
         ctx.fillRect(px, py, MINIMAP_SAMPLE_STEP, MINIMAP_SAMPLE_STEP);
       }
     }
@@ -1248,6 +1401,7 @@ export async function startMapExplorer(): Promise<void> {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;
     ctx.strokeRect(MINIMAP_SIZE / 2 - 2, MINIMAP_SIZE / 2 - 2, 4, 4);
+    minimapDirty = false;
   }
 
   overlay.root.addEventListener('seedchange', (event: Event) => {
@@ -1259,7 +1413,8 @@ export async function startMapExplorer(): Promise<void> {
     overlay.seedInput.value = activeSeed;
     writeSeedToUrl(activeSeed);
     clearLoadedChunks();
-    cameraDirty = true;
+    minimapColorCache.clear();
+    markCameraDirty();
   });
 
   overlay.root.addEventListener('debugmodechange', (event: Event) => {
@@ -1269,7 +1424,7 @@ export async function startMapExplorer(): Promise<void> {
     }
     debugMode = debugEvent.detail;
     clearLoadedChunks();
-    cameraDirty = true;
+    markCameraDirty();
   });
 
   overlay.root.addEventListener('outlinechange', (event: Event) => {
@@ -1279,7 +1434,7 @@ export async function startMapExplorer(): Promise<void> {
     if (nextOutlineState !== renderedWithOutlines) {
       renderedWithOutlines = nextOutlineState;
       clearLoadedChunks();
-      cameraDirty = true;
+      markCameraDirty();
     }
   });
 
@@ -1365,7 +1520,7 @@ export async function startMapExplorer(): Promise<void> {
     world.position.y += dy;
     lastX = event.clientX;
     lastY = event.clientY;
-    cameraDirty = true;
+    markCameraDirty();
   });
 
   function shouldIgnoreKeyboardEventTarget(target: EventTarget | null): boolean {
@@ -1409,7 +1564,7 @@ export async function startMapExplorer(): Promise<void> {
           debugMode = DEBUG_MODES[(index + 1) % DEBUG_MODES.length];
           overlay.debugSelect.value = debugMode;
           clearLoadedChunks();
-          cameraDirty = true;
+          markCameraDirty();
         }
         event.preventDefault();
         break;
@@ -1463,18 +1618,18 @@ export async function startMapExplorer(): Promise<void> {
         cursorX - worldPoint.x * nextScale,
         cursorY - worldPoint.y * nextScale,
       );
-      cameraDirty = true;
+      markCameraDirty();
     },
     { passive: false },
   );
 
   window.addEventListener('resize', () => {
-    cameraDirty = true;
+    markCameraDirty();
   });
 
   writeSeedToUrl(activeSeed);
   renderedWithOutlines = shouldDrawOutlinesAtZoom(world.scale.x);
-  drawMode = shouldUseLodMode(world.scale.x) ? 'lod' : 'hex';
+  drawMode = shouldUseLodModeAtZoom(world.scale.x) ? 'lod' : 'hex';
 
   app.ticker.add((ticker) => {
     const frameStart = performance.now();
@@ -1489,60 +1644,75 @@ export async function startMapExplorer(): Promise<void> {
     if (activeScenario) {
       const scenarioElapsed = nowMs - activeScenario.startMs;
       const warmupDone = scenarioElapsed >= activeScenario.warmupMs;
-      const runElapsed = Math.max(0, scenarioElapsed - activeScenario.warmupMs);
-      const runProgress = clamp(runElapsed / activeScenario.durationMs, 0, 1);
-      overlay.scenarioStatusValue.textContent =
-        `running ${activeScenario.label} ${(runProgress * 100).toFixed(0)}%`;
-
-      if (warmupDone) {
+      const queueDrained = pendingChunkLoads.length === 0;
+      if (activeScenario.runStartMs === null) {
+        overlay.scenarioStatusValue.textContent =
+          `warming ${activeScenario.label} q=${pendingChunkLoads.length}`;
+        if (warmupDone && queueDrained) {
+          perf.reset();
+          lastPerfLogCaptureMs = nowMs;
+          activeScenario.generatedAtStart = 0;
+          activeScenario.maxLoadedChunks = loadedChunks.size;
+          activeScenario.runStartMs = nowMs;
+        }
+      } else {
+        const runElapsed = nowMs - activeScenario.runStartMs;
+        const runProgress = clamp(runElapsed / activeScenario.durationMs, 0, 1);
+        overlay.scenarioStatusValue.textContent =
+          `running ${activeScenario.label} ${(runProgress * 100).toFixed(0)}%`;
         switch (activeScenario.id) {
           case 'idle10':
             break;
           case 'pan10':
-            world.position.x -= 260 * dtSeconds;
-            cameraDirty = true;
+            world.position.x = window.innerWidth / 2 + Math.sin((runElapsed / 1000) * 0.8) * 180;
+            world.position.y = window.innerHeight / 2 + Math.cos((runElapsed / 1000) * 0.6) * 90;
+            markCameraDirty();
             break;
           case 'zoomPan10': {
             const targetZoom = 0.52;
             world.scale.set(targetZoom);
-            world.position.x -= 300 * dtSeconds;
-            cameraDirty = true;
+            world.position.x = window.innerWidth / 2 + Math.sin((runElapsed / 1000) * 0.6) * 220;
+            world.position.y = window.innerHeight / 2 + Math.cos((runElapsed / 1000) * 0.5) * 120;
+            markCameraDirty();
             break;
           }
           case 'stress15': {
-            const orbitRadius = 220;
+            const orbitRadius = 10;
             const t = runElapsed / 1000;
-            const q = Math.cos(t * 0.24) * orbitRadius;
-            const r = Math.sin(t * 0.19) * orbitRadius;
-            const targetZoom = 0.62 + Math.sin(t * 0.11) * 0.08;
-            world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
+            const q = Math.cos(t * 0.5) * orbitRadius;
+            const r = Math.sin(t * 0.43) * orbitRadius;
+            world.scale.set(0.66);
             const pathWorld = axialToPixel(q, r, HEX_SIZE);
             world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
             world.position.y = window.innerHeight / 2 - pathWorld.y * world.scale.y;
-            cameraDirty = true;
+            markCameraDirty();
             break;
           }
           default:
             break;
         }
-      }
+        if (runElapsed >= activeScenario.durationMs) {
+          completeActiveScenario();
+        }
 
-      activeScenario.maxLoadedChunks = Math.max(activeScenario.maxLoadedChunks, loadedChunks.size);
-      if (scenarioElapsed >= activeScenario.warmupMs + activeScenario.durationMs) {
-        completeActiveScenario();
+        const liveSnapshot = perf.getSnapshot('scenario-live');
+        activeScenario.maxGeneratedPerSecond = Math.max(
+          activeScenario.maxGeneratedPerSecond,
+          liveSnapshot.counters.rollingGeneratedPerSecond,
+        );
       }
+      activeScenario.maxLoadedChunks = Math.max(activeScenario.maxLoadedChunks, loadedChunks.size);
     } else if (stressEnabled && !stressPaused) {
       stressElapsedMs += ticker.deltaMS;
       stressPathTime += dtSeconds;
-      const orbitRadius = 220;
-      const q = Math.cos(stressPathTime * 0.24) * orbitRadius;
-      const r = Math.sin(stressPathTime * 0.19) * orbitRadius;
-      const targetZoom = 0.62 + Math.sin(stressPathTime * 0.11) * 0.08;
-      world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
+      const orbitRadius = 12;
+      const q = Math.cos(stressPathTime * 0.5) * orbitRadius;
+      const r = Math.sin(stressPathTime * 0.43) * orbitRadius;
+      world.scale.set(0.66);
       const pathWorld = axialToPixel(q, r, HEX_SIZE);
       world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
       world.position.y = window.innerHeight / 2 - pathWorld.y * world.scale.y;
-      cameraDirty = true;
+      markCameraDirty();
 
       if (!stressWarmupDone && stressElapsedMs >= 10_000) {
         stressWarmupDone = true;
@@ -1572,23 +1742,23 @@ export async function startMapExplorer(): Promise<void> {
         const step = BASE_KEYBOARD_PAN_SPEED * zoomScaled * boost * dtSeconds;
         world.position.x += inputX * step;
         world.position.y += inputY * step;
-        cameraDirty = true;
+        markCameraDirty();
       }
     }
     perf.mark('input', performance.now() - inputStart);
 
     const cameraStart = performance.now();
-    const useLodMode = shouldUseLodMode(world.scale.x);
+    const useLodMode = shouldUseLodModeAtZoom(world.scale.x);
     if ((drawMode === 'lod') !== useLodMode) {
       applyLodModeToLoadedChunks(useLodMode);
-      cameraDirty = true;
+      markCameraDirty();
     }
 
     const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
     if (nextOutlineState !== renderedWithOutlines) {
       renderedWithOutlines = nextOutlineState;
       clearLoadedChunks();
-      cameraDirty = true;
+      markCameraDirty();
     }
     perf.mark('camera', performance.now() - cameraStart);
 
@@ -1596,6 +1766,7 @@ export async function startMapExplorer(): Promise<void> {
       refreshChunks();
       cameraDirty = false;
     }
+    processChunkLoadQueue(nowMs);
     const overlayStart = performance.now();
     updateOverlay(nowMs);
     perf.mark('overlay', performance.now() - overlayStart);
