@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHUNK_SIZE,
+  HYDRO_MACRO_MARGIN,
+  HYDRO_MACRO_SIZE,
   MAX_RIVER_STEPS,
+  classifyWaterTileFromMacro,
   chunkCoord,
   elevationAt,
   generateChunk,
@@ -306,6 +309,29 @@ describe('sea level model', () => {
     }
 
     expect(touchedOcean).toBe(false);
+  });
+
+  it('keeps water classification consistent in overlapping macro ROIs', () => {
+    const seed = 'default';
+    const leftMacroX = 0;
+    const rightMacroX = 1;
+    const macroY = 0;
+    const overlapStartX = HYDRO_MACRO_SIZE - HYDRO_MACRO_MARGIN;
+    const overlapEndX = HYDRO_MACRO_SIZE + HYDRO_MACRO_MARGIN - 1;
+    const overlapStartY = -HYDRO_MACRO_MARGIN;
+    const overlapEndY = HYDRO_MACRO_SIZE + HYDRO_MACRO_MARGIN - 1;
+    let comparisons = 0;
+
+    for (let y = overlapStartY; y <= overlapEndY; y += 7) {
+      for (let x = overlapStartX; x <= overlapEndX; x += 5) {
+        const fromLeft = classifyWaterTileFromMacro(seed, x, y, leftMacroX, macroY);
+        const fromRight = classifyWaterTileFromMacro(seed, x, y, rightMacroX, macroY);
+        expect(fromLeft).toBe(fromRight);
+        comparisons += 1;
+      }
+    }
+
+    expect(comparisons).toBeGreaterThan(100);
   });
 });
 

@@ -509,7 +509,13 @@ export function classifyWaterTileFromMacro(
     return null;
   }
 
-  const region = buildHydroRegion(seed, macroX, macroY);
+  const canonicalMacroX = macroCoord(tileX);
+  const canonicalMacroY = macroCoord(tileY);
+  const region = buildHydroRegion(
+    seed,
+    macroX === canonicalMacroX ? macroX : canonicalMacroX,
+    macroY === canonicalMacroY ? macroY : canonicalMacroY,
+  );
   if (
     tileX < region.roiStartX ||
     tileX > region.roiEndX ||
