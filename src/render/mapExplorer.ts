@@ -29,6 +29,8 @@ const MINIMAP_DISPLAY_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
 const MINIMAP_WORLD_UNITS_PER_PIXEL = HEX_SIZE * 0.65;
+const BASE_KEYBOARD_PAN_SPEED = 620;
+const BOOST_KEYBOARD_MULTIPLIER = 2.2;
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -60,6 +62,14 @@ type OverlayElements = {
   minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
+};
+
+type MovementKeys = {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  boost: boolean;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -428,6 +438,7 @@ export async function startMapExplorer(): Promise<void> {
   let outlineMode: 'auto' | 'on' | 'off' = 'auto';
   let renderedWithOutlines = false;
   let stressEnabled = false;
+  let stressPaused = false;
   let stressElapsedMs = 0;
   let stressPathTime = 0;
   let stressWarmupDone = false;
@@ -443,6 +454,13 @@ export async function startMapExplorer(): Promise<void> {
   let totalChunksGenerated = 0;
   let frameMsEma = 16.7;
   let fpsEma = 60;
+  const moveKeys: MovementKeys = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    boost: false,
+  };
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
     if (outlineMode === 'on') return true;
@@ -534,7 +552,7 @@ export async function startMapExplorer(): Promise<void> {
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
     overlay.totalGeneratedValue.textContent = `${totalChunksGenerated}`;
     overlay.outlineModeValue.textContent = outlineMode;
-    overlay.stressValue.textContent = stressEnabled ? 'on' : 'off';
+    overlay.stressValue.textContent = stressEnabled ? (stressPaused ? 'paused' : 'on') : 'off';
     overlay.stressElapsedValue.textContent = `${(stressElapsedMs / 1000).toFixed(1)}s`;
     overlay.stressChunkBandValue.textContent = Number.isFinite(stressChunkMin)
       ? `${stressChunkMin}..${stressChunkMax} (Δ${stressChunkMax - stressChunkMin})`
@@ -608,7 +626,11 @@ export async function startMapExplorer(): Promise<void> {
   overlay.root.addEventListener('stresstoggle', (event: Event) => {
     const stressEvent = event as CustomEvent<boolean>;
     stressEnabled = stressEvent.detail;
+    if (stressEnabled) {
+      stressPaused = false;
+    }
     if (!stressEnabled) {
+      stressPaused = false;
       stressElapsedMs = 0;
       stressPathTime = 0;
       stressWarmupDone = false;
@@ -654,6 +676,69 @@ export async function startMapExplorer(): Promise<void> {
     cameraDirty = true;
   });
 
+  function shouldIgnoreKeyboardEventTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+  }
+
+  window.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (shouldIgnoreKeyboardEventTarget(event.target)) {
+      return;
+    }
+
+    switch (event.code) {
+      case 'KeyW':
+        moveKeys.up = true;
+        break;
+      case 'KeyS':
+        moveKeys.down = true;
+        break;
+      case 'KeyA':
+        moveKeys.left = true;
+        break;
+      case 'KeyD':
+        moveKeys.right = true;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        moveKeys.boost = true;
+        break;
+      case 'Space':
+        if (!event.repeat && stressEnabled) {
+          stressPaused = !stressPaused;
+        }
+        event.preventDefault();
+        break;
+      default:
+        break;
+    }
+  });
+
+  window.addEventListener('keyup', (event: KeyboardEvent) => {
+    switch (event.code) {
+      case 'KeyW':
+        moveKeys.up = false;
+        break;
+      case 'KeyS':
+        moveKeys.down = false;
+        break;
+      case 'KeyA':
+        moveKeys.left = false;
+        break;
+      case 'KeyD':
+        moveKeys.right = false;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        moveKeys.boost = false;
+        break;
+      default:
+        break;
+    }
+  });
+
   app.canvas.addEventListener(
     'wheel',
     (event: WheelEvent) => {
@@ -693,7 +778,7 @@ export async function startMapExplorer(): Promise<void> {
     const instantFps = ticker.deltaMS > 0 ? 1000 / ticker.deltaMS : 0;
     fpsEma = fpsEma * 0.92 + instantFps * 0.08;
 
-    if (stressEnabled) {
+    if (stressEnabled && !stressPaused) {
       const dtSeconds = ticker.deltaMS / 1000;
       stressElapsedMs += ticker.deltaMS;
       stressPathTime += dtSeconds;
@@ -714,6 +799,28 @@ export async function startMapExplorer(): Promise<void> {
       } else if (stressWarmupDone) {
         stressChunkMin = Math.min(stressChunkMin, loadedChunks.size);
         stressChunkMax = Math.max(stressChunkMax, loadedChunks.size);
+      }
+    }
+
+    if (!isDragging) {
+      const dtSeconds = ticker.deltaMS / 1000;
+      let inputX = 0;
+      let inputY = 0;
+      if (moveKeys.left) inputX += 1;
+      if (moveKeys.right) inputX -= 1;
+      if (moveKeys.up) inputY += 1;
+      if (moveKeys.down) inputY -= 1;
+
+      if (inputX !== 0 || inputY !== 0) {
+        const magnitude = Math.hypot(inputX, inputY);
+        inputX /= magnitude;
+        inputY /= magnitude;
+        const zoomScaled = clamp(1 / world.scale.x, 0.45, 2.4);
+        const boost = moveKeys.boost ? BOOST_KEYBOARD_MULTIPLIER : 1;
+        const step = BASE_KEYBOARD_PAN_SPEED * zoomScaled * boost * dtSeconds;
+        world.position.x += inputX * step;
+        world.position.y += inputY * step;
+        cameraDirty = true;
       }
     }
 
