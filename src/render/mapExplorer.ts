@@ -31,6 +31,7 @@ const MINIMAP_DISPLAY_SIZE = 128;
 const MINIMAP_UPDATE_MS = 250;
 const MINIMAP_SAMPLE_STEP = 2;
 const MINIMAP_WORLD_UNITS_PER_PIXEL = HEX_SIZE * 0.65;
+const LOD_ZOOM_THRESHOLD = 0.8;
 const BASE_KEYBOARD_PAN_SPEED = 620;
 const BOOST_KEYBOARD_MULTIPLIER = 2.2;
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -46,17 +47,21 @@ type LoadedChunk = {
   cq: number;
   cr: number;
   container: Container;
+  lodEnabled: boolean;
 };
 
 type OverlayElements = {
   root: HTMLDivElement;
   seedInput: HTMLInputElement;
-  outlineModeValue: HTMLSpanElement;
+  outlineCheckbox: HTMLInputElement;
   stressValue: HTMLSpanElement;
   seedValue: HTMLSpanElement;
   axialValue: HTMLSpanElement;
   zoomValue: HTMLSpanElement;
   loadedChunksValue: HTMLSpanElement;
+  drawModeValue: HTMLSpanElement;
+  chunkSpritesValue: HTMLSpanElement;
+  tileDrawEstimateValue: HTMLSpanElement;
   totalGeneratedValue: HTMLSpanElement;
   stressElapsedValue: HTMLSpanElement;
   stressChunkBandValue: HTMLSpanElement;
@@ -97,6 +102,18 @@ function writeSeedToUrl(seed: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('seed', seed);
   window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+}
+
+function ensureMaterialSymbolsFont(): void {
+  if (document.head.querySelector('link[data-material-symbols]')) {
+    return;
+  }
+  const fontLink = document.createElement('link');
+  fontLink.rel = 'stylesheet';
+  fontLink.href =
+    'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0';
+  fontLink.dataset.materialSymbols = 'true';
+  document.head.appendChild(fontLink);
 }
 
 function screenToWorld(world: Container, screenX: number, screenY: number): { x: number; y: number } {
@@ -190,6 +207,8 @@ function createChunkContainer(
 }
 
 function createOverlay(seed: string): OverlayElements {
+  ensureMaterialSymbolsFont();
+
   const root = document.createElement('div');
   root.style.position = 'fixed';
   root.style.top = '8px';
@@ -219,16 +238,18 @@ function createOverlay(seed: string): OverlayElements {
 
   const outlineRow = document.createElement('div');
   outlineRow.style.marginTop = '6px';
-  const outlineLabel = document.createElement('span');
-  outlineLabel.textContent = 'Auto borders (zoomed-in only): ';
-  const outlineModeValue = document.createElement('span');
-  outlineModeValue.textContent = 'enabled';
-  outlineModeValue.style.marginRight = '6px';
-  const outlineToggle = document.createElement('button');
-  outlineToggle.type = 'button';
-  outlineToggle.textContent = 'Disable';
-  outlineToggle.style.cursor = 'pointer';
-  outlineRow.append(outlineLabel, outlineModeValue, outlineToggle);
+  outlineRow.style.display = 'flex';
+  outlineRow.style.alignItems = 'center';
+  outlineRow.style.gap = '6px';
+  const outlineCheckbox = document.createElement('input');
+  outlineCheckbox.type = 'checkbox';
+  outlineCheckbox.checked = true;
+  outlineCheckbox.style.cursor = 'pointer';
+  const outlineLabel = document.createElement('label');
+  outlineLabel.style.cursor = 'pointer';
+  outlineLabel.textContent = 'Show tile borders when zoomed';
+  outlineLabel.prepend(outlineCheckbox);
+  outlineRow.append(outlineLabel);
 
   const seedValueRow = document.createElement('div');
   const seedValueLabel = document.createElement('span');
@@ -255,6 +276,27 @@ function createOverlay(seed: string): OverlayElements {
   const loadedChunksValue = document.createElement('span');
   chunksRow.append(chunksLabel, loadedChunksValue);
 
+  const drawModeRow = document.createElement('div');
+  const drawModeLabel = document.createElement('span');
+  drawModeLabel.textContent = 'Draw mode: ';
+  const drawModeValue = document.createElement('span');
+  drawModeValue.textContent = 'hex';
+  drawModeRow.append(drawModeLabel, drawModeValue);
+
+  const chunkSpritesRow = document.createElement('div');
+  const chunkSpritesLabel = document.createElement('span');
+  chunkSpritesLabel.textContent = 'Chunk sprites: ';
+  const chunkSpritesValue = document.createElement('span');
+  chunkSpritesValue.textContent = '0';
+  chunkSpritesRow.append(chunkSpritesLabel, chunkSpritesValue);
+
+  const tileDrawEstimateRow = document.createElement('div');
+  const tileDrawEstimateLabel = document.createElement('span');
+  tileDrawEstimateLabel.textContent = 'Approx tile draws: ';
+  const tileDrawEstimateValue = document.createElement('span');
+  tileDrawEstimateValue.textContent = '0';
+  tileDrawEstimateRow.append(tileDrawEstimateLabel, tileDrawEstimateValue);
+
   const minimapRateRow = document.createElement('div');
   const minimapRateLabel = document.createElement('span');
   minimapRateLabel.textContent = 'Minimap Hz: ';
@@ -264,7 +306,6 @@ function createOverlay(seed: string): OverlayElements {
 
   const legendToggle = document.createElement('button');
   legendToggle.type = 'button';
-  legendToggle.textContent = 'Key';
   legendToggle.title = 'Toggle legend';
   legendToggle.style.position = 'absolute';
   legendToggle.style.top = '8px';
@@ -276,7 +317,12 @@ function createOverlay(seed: string): OverlayElements {
   legendToggle.style.background = 'rgba(0, 0, 0, 0.25)';
   legendToggle.style.color = '#e8e8e8';
   legendToggle.style.cursor = 'pointer';
-  legendToggle.style.font = '11px/1 monospace';
+  const legendIcon = document.createElement('span');
+  legendIcon.className = 'material-symbols-outlined';
+  legendIcon.textContent = 'key';
+  legendIcon.style.fontSize = '16px';
+  legendIcon.style.lineHeight = '1';
+  legendToggle.appendChild(legendIcon);
 
   const legendRow = document.createElement('div');
   legendRow.style.marginTop = '6px';
@@ -385,6 +431,9 @@ function createOverlay(seed: string): OverlayElements {
     axialRow,
     zoomRow,
     chunksRow,
+    drawModeRow,
+    chunkSpritesRow,
+    tileDrawEstimateRow,
     generatedRow,
     stressRow,
     stressBandRow,
@@ -410,11 +459,8 @@ function createOverlay(seed: string): OverlayElements {
 
   seedInput.addEventListener('change', applySeed);
   applyButton.addEventListener('click', applySeed);
-  outlineToggle.addEventListener('click', () => {
-    const enabled = outlineModeValue.textContent !== 'enabled';
-    outlineModeValue.textContent = enabled ? 'enabled' : 'disabled';
-    outlineToggle.textContent = enabled ? 'Disable' : 'Enable';
-    root.dispatchEvent(new CustomEvent<boolean>('outlinechange', { detail: enabled }));
+  outlineCheckbox.addEventListener('change', () => {
+    root.dispatchEvent(new CustomEvent<boolean>('outlinechange', { detail: outlineCheckbox.checked }));
   });
   stressToggle.addEventListener('click', () => {
     const current = stressValue.textContent === 'on';
@@ -433,12 +479,15 @@ function createOverlay(seed: string): OverlayElements {
   return {
     root,
     seedInput,
-    outlineModeValue,
+    outlineCheckbox,
     stressValue,
     seedValue,
     axialValue,
     zoomValue,
     loadedChunksValue,
+    drawModeValue,
+    chunkSpritesValue,
+    tileDrawEstimateValue,
     totalGeneratedValue,
     stressElapsedValue,
     stressChunkBandValue,
@@ -492,6 +541,7 @@ export async function startMapExplorer(): Promise<void> {
   let totalChunksGenerated = 0;
   let frameMsEma = 16.7;
   let fpsEma = 60;
+  let drawMode: 'hex' | 'lod' = 'hex';
   const moveKeys: MovementKeys = {
     up: false,
     down: false,
@@ -502,6 +552,25 @@ export async function startMapExplorer(): Promise<void> {
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
     return autoBordersEnabled && zoom >= OUTLINE_ZOOM_THRESHOLD;
+  }
+
+  function shouldUseLodMode(zoom: number): boolean {
+    return zoom < LOD_ZOOM_THRESHOLD;
+  }
+
+  function applyChunkLodState(chunk: LoadedChunk, useLod: boolean): void {
+    if (chunk.lodEnabled === useLod) {
+      return;
+    }
+    chunk.container.cacheAsTexture(useLod);
+    chunk.lodEnabled = useLod;
+  }
+
+  function applyLodModeToLoadedChunks(useLod: boolean): void {
+    for (const chunk of loadedChunks.values()) {
+      applyChunkLodState(chunk, useLod);
+    }
+    drawMode = useLod ? 'lod' : 'hex';
   }
 
   function clearLoadedChunks(): void {
@@ -520,7 +589,11 @@ export async function startMapExplorer(): Promise<void> {
 
     const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines);
     world.addChild(container);
-    loadedChunks.set(key, { cq, cr, container });
+    const lodEnabled = shouldUseLodMode(world.scale.x);
+    if (lodEnabled) {
+      container.cacheAsTexture(true);
+    }
+    loadedChunks.set(key, { cq, cr, container, lodEnabled });
     totalChunksGenerated += 1;
   }
 
@@ -586,8 +659,12 @@ export async function startMapExplorer(): Promise<void> {
     overlay.axialValue.textContent = `${roundedCenter.q}, ${roundedCenter.r}`;
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
+    overlay.drawModeValue.textContent = drawMode;
+    overlay.chunkSpritesValue.textContent = drawMode === 'lod' ? `${loadedChunks.size}` : '0';
+    overlay.tileDrawEstimateValue.textContent =
+      drawMode === 'lod' ? '0' : `${loadedChunks.size * CHUNK_SIZE * CHUNK_SIZE}`;
     overlay.totalGeneratedValue.textContent = `${totalChunksGenerated}`;
-    overlay.outlineModeValue.textContent = autoBordersEnabled ? 'enabled' : 'disabled';
+    overlay.outlineCheckbox.checked = autoBordersEnabled;
     overlay.stressValue.textContent = stressEnabled ? (stressPaused ? 'paused' : 'on') : 'off';
     overlay.stressElapsedValue.textContent = `${(stressElapsedMs / 1000).toFixed(1)}s`;
     overlay.stressChunkBandValue.textContent = Number.isFinite(stressChunkMin)
@@ -816,6 +893,7 @@ export async function startMapExplorer(): Promise<void> {
 
   writeSeedToUrl(activeSeed);
   renderedWithOutlines = shouldDrawOutlinesAtZoom(world.scale.x);
+  drawMode = shouldUseLodMode(world.scale.x) ? 'lod' : 'hex';
 
   app.ticker.add((ticker) => {
     frameMsEma = frameMsEma * 0.92 + ticker.deltaMS * 0.08;
@@ -829,7 +907,7 @@ export async function startMapExplorer(): Promise<void> {
       const orbitRadius = 220;
       const q = Math.cos(stressPathTime * 0.24) * orbitRadius;
       const r = Math.sin(stressPathTime * 0.19) * orbitRadius;
-      const targetZoom = 1 + Math.sin(stressPathTime * 0.11) * 0.12;
+      const targetZoom = 0.62 + Math.sin(stressPathTime * 0.11) * 0.08;
       world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
       const pathWorld = axialToPixel(q, r, HEX_SIZE);
       world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
@@ -866,6 +944,12 @@ export async function startMapExplorer(): Promise<void> {
         world.position.y += inputY * step;
         cameraDirty = true;
       }
+    }
+
+    const useLodMode = shouldUseLodMode(world.scale.x);
+    if ((drawMode === 'lod') !== useLodMode) {
+      applyLodModeToLoadedChunks(useLodMode);
+      cameraDirty = true;
     }
 
     const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
