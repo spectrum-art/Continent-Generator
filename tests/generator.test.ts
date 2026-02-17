@@ -531,6 +531,15 @@ describe('sea level model', () => {
     const size = 256;
     const half = size / 2;
     let sandCount = 0;
+    let isolatedSand = 0;
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
 
     for (let y = -half; y < half; y += 1) {
       for (let x = -half; x < half; x += 1) {
@@ -538,7 +547,27 @@ describe('sea level model', () => {
           continue;
         }
         sandCount += 1;
-        expect(oceanNeighborCountAt(seed, x, y)).toBeGreaterThan(0);
+        const oceanNeighbors = oceanNeighborCountAt(seed, x, y);
+        expect(oceanNeighbors).toBeGreaterThan(0);
+
+        let adjacentSand = 0;
+        let touchesLakeOrRiver = false;
+        for (const [dx, dy] of dirs) {
+          const neighborTile = getTileAt(seed, x + dx, y + dy);
+          if (neighborTile === 'sand') {
+            adjacentSand += 1;
+          }
+          if (neighborTile === 'lake' || neighborTile === 'river') {
+            touchesLakeOrRiver = true;
+          }
+        }
+
+        if (adjacentSand === 0 && oceanNeighbors <= 1) {
+          isolatedSand += 1;
+        }
+        if (touchesLakeOrRiver) {
+          expect(oceanNeighbors).toBeGreaterThan(0);
+        }
       }
     }
 
@@ -547,6 +576,13 @@ describe('sea level model', () => {
       ratio,
       `sand coverage ratio=${(ratio * 100).toFixed(2)}% expected <= 12%`,
     ).toBeLessThanOrEqual(0.12);
+    if (sandCount > 0) {
+      const isolatedRatio = isolatedSand / sandCount;
+      expect(
+        isolatedRatio,
+        `isolated shore ratio=${(isolatedRatio * 100).toFixed(2)}% expected <= 22%`,
+      ).toBeLessThanOrEqual(0.22);
+    }
   });
 });
 
