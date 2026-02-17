@@ -259,6 +259,53 @@ describe('sea level model', () => {
     expect(largest).toBeGreaterThanOrEqual(30);
   });
 
+  it('keeps lake basin count in the tuned 1..12 range in 256x256', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const lakeTiles = new Set<string>();
+    const visited = new Set<string>();
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'lake') {
+          lakeTiles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    let basins = 0;
+    for (const key of lakeTiles) {
+      if (visited.has(key)) continue;
+      basins += 1;
+      const queue = [key];
+      visited.add(key);
+      while (queue.length > 0) {
+        const current = queue.shift() as string;
+        const [xStr, yStr] = current.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+        for (const [dx, dy] of dirs) {
+          const nextKey = `${x + dx},${y + dy}`;
+          if (!lakeTiles.has(nextKey) || visited.has(nextKey)) continue;
+          visited.add(nextKey);
+          queue.push(nextKey);
+        }
+      }
+    }
+
+    expect(basins, `lake basin count=${basins} expected in 1..12`).toBeGreaterThanOrEqual(1);
+    expect(basins, `lake basin count=${basins} expected in 1..12`).toBeLessThanOrEqual(12);
+  });
+
   it('keeps lake components non-ocean-connected inside the sampled window', () => {
     const seed = 'default';
     const size = 256;
@@ -396,7 +443,7 @@ describe('river core', () => {
     ).toBeLessThanOrEqual(0.04);
   });
 
-  it('has at least one river component with length >= 50 in 256x256 sample', () => {
+  it('has at least one river component with length >= 60 in 256x256 sample', () => {
     const seed = 'default';
     const size = 256;
     const half = size / 2;
@@ -451,6 +498,6 @@ describe('river core', () => {
       }
     }
 
-    expect(largest, `largest river component length=${largest} expected >= 50`).toBeGreaterThanOrEqual(50);
+    expect(largest, `largest river component length=${largest} expected >= 60`).toBeGreaterThanOrEqual(60);
   });
 });

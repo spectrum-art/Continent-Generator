@@ -23,7 +23,7 @@ export const MIN_RIVER_ELEVATION_DROP = 0.03;
 export const SHORELINE_BAND = 0.065;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 128;
-export const MIN_LAKE_COMPONENT_TILES = 20;
+export const MIN_LAKE_COMPONENT_TILES = 40;
 
 const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
