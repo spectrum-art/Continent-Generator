@@ -58,6 +58,7 @@ type OverlayElements = {
   totalGeneratedValue: HTMLSpanElement;
   stressElapsedValue: HTMLSpanElement;
   stressChunkBandValue: HTMLSpanElement;
+  stressHealthValue: HTMLSpanElement;
   perfValue: HTMLSpanElement;
   minimapRateValue: HTMLSpanElement;
   minimapCanvas: HTMLCanvasElement;
@@ -342,6 +343,13 @@ function createOverlay(seed: string): OverlayElements {
   stressChunkBandValue.textContent = 'n/a';
   stressBandRow.append(stressBandLabel, stressChunkBandValue);
 
+  const stressHealthRow = document.createElement('div');
+  const stressHealthLabel = document.createElement('span');
+  stressHealthLabel.textContent = 'Stress health: ';
+  const stressHealthValue = document.createElement('span');
+  stressHealthValue.textContent = 'idle';
+  stressHealthRow.append(stressHealthLabel, stressHealthValue);
+
   const perfRow = document.createElement('div');
   const perfLabel = document.createElement('span');
   perfLabel.textContent = 'Perf (EMA): ';
@@ -373,6 +381,7 @@ function createOverlay(seed: string): OverlayElements {
     generatedRow,
     stressRow,
     stressBandRow,
+    stressHealthRow,
     perfRow,
     minimapRateRow,
     legendRow,
@@ -428,6 +437,7 @@ function createOverlay(seed: string): OverlayElements {
     totalGeneratedValue,
     stressElapsedValue,
     stressChunkBandValue,
+    stressHealthValue,
     perfValue,
     minimapRateValue,
     minimapCanvas,
@@ -580,6 +590,14 @@ export async function startMapExplorer(): Promise<void> {
     overlay.stressChunkBandValue.textContent = Number.isFinite(stressChunkMin)
       ? `${stressChunkMin}..${stressChunkMax} (Δ${stressChunkMax - stressChunkMin})`
       : 'warming';
+    const chunkBandDelta = Number.isFinite(stressChunkMin) ? stressChunkMax - stressChunkMin : 0;
+    const chunkStable = !stressEnabled || !stressWarmupDone || chunkBandDelta <= 30;
+    const perfStable = fpsEma >= 30 || frameMsEma <= 33;
+    overlay.stressHealthValue.textContent = stressEnabled
+      ? chunkStable && perfStable
+        ? 'ok'
+        : 'warn'
+      : 'idle';
     overlay.perfValue.textContent = `${frameMsEma.toFixed(1)}ms / ${fpsEma.toFixed(1)}fps`;
     overlay.minimapRateValue.textContent = minimapRate.toFixed(1);
   }
