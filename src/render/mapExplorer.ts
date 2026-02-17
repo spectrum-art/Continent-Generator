@@ -49,6 +49,12 @@ const DEBUG_MODES = [
   'lake-basin',
   'river-trace',
 ] as const;
+const PERF_SCENARIOS = [
+  { id: 'idle10', label: 'Scenario 1: idle 10s', durationMs: 10_000, warmupMs: 500 },
+  { id: 'pan10', label: 'Scenario 2: pan 10s', durationMs: 10_000, warmupMs: 1_000 },
+  { id: 'zoomPan10', label: 'Scenario 3: zoomed-out pan 10s', durationMs: 10_000, warmupMs: 1_000 },
+  { id: 'stress15', label: 'Scenario 4: stress autopan 15s', durationMs: 15_000, warmupMs: 1_000 },
+] as const;
 const PERF_BUCKETS_FOR_DISPLAY: ReadonlyArray<PerfBucket> = [
   'input',
   'camera',
@@ -60,6 +66,7 @@ const PERF_BUCKETS_FOR_DISPLAY: ReadonlyArray<PerfBucket> = [
   'minimap',
   'overlay',
 ];
+type PerfScenarioId = (typeof PERF_SCENARIOS)[number]['id'];
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -104,6 +111,10 @@ type OverlayElements = {
   perfCountersValue: HTMLPreElement;
   perfCopyButton: HTMLButtonElement;
   perfCopyStatus: HTMLSpanElement;
+  scenarioSelect: HTMLSelectElement;
+  scenarioRunButton: HTMLButtonElement;
+  scenarioRunAllButton: HTMLButtonElement;
+  scenarioStatusValue: HTMLSpanElement;
   perfReportValue: HTMLPreElement;
   minimapCanvas: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
@@ -589,6 +600,37 @@ function createOverlay(seed: string): OverlayElements {
   perfCopyStatus.textContent = '';
   perfCopyRow.append(perfCopyButton, perfCopyStatus);
 
+  const scenarioRow = document.createElement('div');
+  scenarioRow.style.marginTop = '6px';
+  scenarioRow.style.display = 'flex';
+  scenarioRow.style.alignItems = 'center';
+  scenarioRow.style.gap = '6px';
+  const scenarioSelect = document.createElement('select');
+  scenarioSelect.style.cursor = 'pointer';
+  for (const scenario of PERF_SCENARIOS) {
+    const option = document.createElement('option');
+    option.value = scenario.id;
+    option.textContent = scenario.label;
+    scenarioSelect.appendChild(option);
+  }
+  const scenarioRunButton = document.createElement('button');
+  scenarioRunButton.type = 'button';
+  scenarioRunButton.textContent = 'Run';
+  scenarioRunButton.style.cursor = 'pointer';
+  const scenarioRunAllButton = document.createElement('button');
+  scenarioRunAllButton.type = 'button';
+  scenarioRunAllButton.textContent = 'Run all';
+  scenarioRunAllButton.style.cursor = 'pointer';
+  scenarioRow.append(scenarioSelect, scenarioRunButton, scenarioRunAllButton);
+
+  const scenarioStatusRow = document.createElement('div');
+  scenarioStatusRow.style.marginTop = '4px';
+  const scenarioStatusLabel = document.createElement('span');
+  scenarioStatusLabel.textContent = 'Scenario status: ';
+  const scenarioStatusValue = document.createElement('span');
+  scenarioStatusValue.textContent = 'idle';
+  scenarioStatusRow.append(scenarioStatusLabel, scenarioStatusValue);
+
   const perfReportValue = document.createElement('pre');
   perfReportValue.textContent = '';
   perfReportValue.style.margin = '4px 0 0 0';
@@ -601,6 +643,8 @@ function createOverlay(seed: string): OverlayElements {
     perfBucketsValue,
     perfCountersValue,
     perfCopyRow,
+    scenarioRow,
+    scenarioStatusRow,
     perfReportValue,
   );
 
@@ -683,6 +727,12 @@ function createOverlay(seed: string): OverlayElements {
   perfCopyButton.addEventListener('click', () => {
     root.dispatchEvent(new CustomEvent('perfcopy'));
   });
+  scenarioRunButton.addEventListener('click', () => {
+    root.dispatchEvent(new CustomEvent<PerfScenarioId>('runscenario', { detail: scenarioSelect.value as PerfScenarioId }));
+  });
+  scenarioRunAllButton.addEventListener('click', () => {
+    root.dispatchEvent(new CustomEvent('runscenarioall'));
+  });
 
   return {
     root,
@@ -710,6 +760,10 @@ function createOverlay(seed: string): OverlayElements {
     perfCountersValue,
     perfCopyButton,
     perfCopyStatus,
+    scenarioSelect,
+    scenarioRunButton,
+    scenarioRunAllButton,
+    scenarioStatusValue,
     perfReportValue,
     minimapCanvas,
     minimapContext,
@@ -771,6 +825,30 @@ export async function startMapExplorer(): Promise<void> {
     right: false,
     boost: false,
   };
+  type ActiveScenarioRun = {
+    id: PerfScenarioId;
+    label: string;
+    warmupMs: number;
+    durationMs: number;
+    startMs: number;
+    generatedAtStart: number;
+    maxLoadedChunks: number;
+  };
+  type ScenarioReport = {
+    id: PerfScenarioId;
+    label: string;
+    durationMs: number;
+    avgFps1s: number;
+    avgFps5s: number;
+    p95FrameMs: number;
+    slowFrameRate: number;
+    maxLoadedChunks: number;
+    chunksGeneratedDuringRun: number;
+    p95Buckets: Record<PerfBucket, number>;
+  };
+  let activeScenario: ActiveScenarioRun | null = null;
+  let scenarioQueue: PerfScenarioId[] = [];
+  const scenarioReports: ScenarioReport[] = [];
 
   function formatPerfSnapshot(snapshot: PerfSnapshot): string {
     return JSON.stringify(snapshot, null, 2);
@@ -814,6 +892,128 @@ export async function startMapExplorer(): Promise<void> {
       graphicsObjects,
       spriteObjects,
     };
+  }
+
+  function scenarioById(id: PerfScenarioId): (typeof PERF_SCENARIOS)[number] {
+    const found = PERF_SCENARIOS.find((scenario) => scenario.id === id);
+    if (!found) {
+      return PERF_SCENARIOS[0];
+    }
+    return found;
+  }
+
+  function resetToDeterministicScenarioState(targetZoom: number): void {
+    if (activeSeed !== DEFAULT_SEED) {
+      activeSeed = DEFAULT_SEED;
+      overlay.seedInput.value = activeSeed;
+      writeSeedToUrl(activeSeed);
+    }
+    stressEnabled = false;
+    stressPaused = false;
+    stressElapsedMs = 0;
+    stressPathTime = 0;
+    stressWarmupDone = false;
+    stressChunkMin = Number.POSITIVE_INFINITY;
+    stressChunkMax = Number.NEGATIVE_INFINITY;
+    world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
+    world.position.set(window.innerWidth / 2, window.innerHeight / 2);
+    clearLoadedChunks();
+    perf.reset();
+    lastPerfLogCaptureMs = 0;
+    cameraDirty = true;
+  }
+
+  function scenarioToReport(
+    scenario: ActiveScenarioRun,
+    snapshot: PerfSnapshot,
+  ): ScenarioReport {
+    return {
+      id: scenario.id,
+      label: scenario.label,
+      durationMs: scenario.durationMs,
+      avgFps1s: snapshot.frame.fps1s,
+      avgFps5s: snapshot.frame.fps5s,
+      p95FrameMs: snapshot.frame.p95Ms,
+      slowFrameRate: snapshot.frame.slowFrameRate,
+      maxLoadedChunks: scenario.maxLoadedChunks,
+      chunksGeneratedDuringRun: Math.max(0, snapshot.totals.chunksGenerated - scenario.generatedAtStart),
+      p95Buckets: {
+        input: snapshot.buckets.input.p95Ms,
+        camera: snapshot.buckets.camera.p95Ms,
+        visibleRange: snapshot.buckets.visibleRange.p95Ms,
+        rangeDiff: snapshot.buckets.rangeDiff.p95Ms,
+        chunkGenerate: snapshot.buckets.chunkGenerate.p95Ms,
+        chunkBuild: snapshot.buckets.chunkBuild.p95Ms,
+        renderSubmit: snapshot.buckets.renderSubmit.p95Ms,
+        minimap: snapshot.buckets.minimap.p95Ms,
+        overlay: snapshot.buckets.overlay.p95Ms,
+      },
+    };
+  }
+
+  function formatScenarioReport(report: ScenarioReport): string {
+    const bucketSummary = PERF_BUCKETS_FOR_DISPLAY.map(
+      (bucket) => `${bucket}:${report.p95Buckets[bucket].toFixed(1)}`,
+    ).join(' ');
+    return (
+      `${report.label}\n` +
+      `fps1s=${report.avgFps1s.toFixed(1)} fps5s=${report.avgFps5s.toFixed(1)} ` +
+      `frameP95=${report.p95FrameMs.toFixed(1)}ms slowRate=${(report.slowFrameRate * 100).toFixed(1)}%\n` +
+      `maxLoaded=${report.maxLoadedChunks} chunksGenerated=${report.chunksGeneratedDuringRun}\n` +
+      `bucketP95 ${bucketSummary}`
+    );
+  }
+
+  function startScenario(id: PerfScenarioId): void {
+    const scenario = scenarioById(id);
+    const zoomPreset = scenario.id === 'zoomPan10' ? 0.55 : 1;
+    resetToDeterministicScenarioState(zoomPreset);
+    const snapshot = perf.getSnapshot('scenario-start');
+    activeScenario = {
+      id: scenario.id,
+      label: scenario.label,
+      warmupMs: scenario.warmupMs,
+      durationMs: scenario.durationMs,
+      startMs: performance.now(),
+      generatedAtStart: snapshot.totals.chunksGenerated,
+      maxLoadedChunks: 0,
+    };
+    overlay.scenarioStatusValue.textContent = `running ${scenario.label}`;
+    overlay.perfReportValue.textContent = '';
+  }
+
+  function beginScenarioRun(ids: PerfScenarioId[]): void {
+    scenarioQueue = [...ids];
+    scenarioReports.length = 0;
+    const next = scenarioQueue.shift();
+    if (!next) {
+      overlay.scenarioStatusValue.textContent = 'idle';
+      return;
+    }
+    startScenario(next);
+  }
+
+  function completeActiveScenario(): void {
+    if (!activeScenario) {
+      return;
+    }
+    const snapshot = perf.captureSnapshot(`scenario:${activeScenario.id}`);
+    const report = scenarioToReport(activeScenario, snapshot);
+    scenarioReports.push(report);
+    const summary = scenarioReports.map((item) => formatScenarioReport(item)).join('\n\n');
+    overlay.perfReportValue.textContent = summary;
+    lastOverlayPerfReport = summary;
+    console.log('[Perf Acceptance Report]', report);
+
+    const next = scenarioQueue.shift();
+    if (next) {
+      startScenario(next);
+      return;
+    }
+
+    overlay.scenarioStatusValue.textContent = 'complete';
+    activeScenario = null;
+    scenarioQueue = [];
   }
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
@@ -1128,6 +1328,15 @@ export async function startMapExplorer(): Promise<void> {
     );
   });
 
+  overlay.root.addEventListener('runscenario', (event: Event) => {
+    const scenarioEvent = event as CustomEvent<PerfScenarioId>;
+    beginScenarioRun([scenarioEvent.detail]);
+  });
+
+  overlay.root.addEventListener('runscenarioall', () => {
+    beginScenarioRun(PERF_SCENARIOS.map((scenario) => scenario.id));
+  });
+
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     isDragging = true;
     lastX = event.clientX;
@@ -1268,8 +1477,54 @@ export async function startMapExplorer(): Promise<void> {
     fpsEma = fpsEma * 0.92 + instantFps * 0.08;
 
     const inputStart = performance.now();
-    if (stressEnabled && !stressPaused) {
-      const dtSeconds = ticker.deltaMS / 1000;
+    const dtSeconds = ticker.deltaMS / 1000;
+    const nowMs = performance.now();
+    if (activeScenario) {
+      const scenarioElapsed = nowMs - activeScenario.startMs;
+      const warmupDone = scenarioElapsed >= activeScenario.warmupMs;
+      const runElapsed = Math.max(0, scenarioElapsed - activeScenario.warmupMs);
+      const runProgress = clamp(runElapsed / activeScenario.durationMs, 0, 1);
+      overlay.scenarioStatusValue.textContent =
+        `running ${activeScenario.label} ${(runProgress * 100).toFixed(0)}%`;
+
+      if (warmupDone) {
+        switch (activeScenario.id) {
+          case 'idle10':
+            break;
+          case 'pan10':
+            world.position.x -= 260 * dtSeconds;
+            cameraDirty = true;
+            break;
+          case 'zoomPan10': {
+            const targetZoom = 0.52;
+            world.scale.set(targetZoom);
+            world.position.x -= 300 * dtSeconds;
+            cameraDirty = true;
+            break;
+          }
+          case 'stress15': {
+            const orbitRadius = 220;
+            const t = runElapsed / 1000;
+            const q = Math.cos(t * 0.24) * orbitRadius;
+            const r = Math.sin(t * 0.19) * orbitRadius;
+            const targetZoom = 0.62 + Math.sin(t * 0.11) * 0.08;
+            world.scale.set(clamp(targetZoom, MIN_ZOOM, MAX_ZOOM));
+            const pathWorld = axialToPixel(q, r, HEX_SIZE);
+            world.position.x = window.innerWidth / 2 - pathWorld.x * world.scale.x;
+            world.position.y = window.innerHeight / 2 - pathWorld.y * world.scale.y;
+            cameraDirty = true;
+            break;
+          }
+          default:
+            break;
+        }
+      }
+
+      activeScenario.maxLoadedChunks = Math.max(activeScenario.maxLoadedChunks, loadedChunks.size);
+      if (scenarioElapsed >= activeScenario.warmupMs + activeScenario.durationMs) {
+        completeActiveScenario();
+      }
+    } else if (stressEnabled && !stressPaused) {
       stressElapsedMs += ticker.deltaMS;
       stressPathTime += dtSeconds;
       const orbitRadius = 220;
@@ -1292,7 +1547,7 @@ export async function startMapExplorer(): Promise<void> {
       }
     }
 
-    if (!isDragging) {
+    if (!isDragging && !activeScenario) {
       const dtSeconds = ticker.deltaMS / 1000;
       let inputX = 0;
       let inputY = 0;
@@ -1335,7 +1590,6 @@ export async function startMapExplorer(): Promise<void> {
       cameraDirty = false;
     }
     const overlayStart = performance.now();
-    const nowMs = performance.now();
     updateOverlay(nowMs);
     perf.mark('overlay', performance.now() - overlayStart);
 
