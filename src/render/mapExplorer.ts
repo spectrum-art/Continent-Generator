@@ -154,6 +154,33 @@ function screenToWorld(world: Container, screenX: number, screenY: number): { x:
   };
 }
 
+function slopeLightAt(seed: string, sampleX: number, sampleY: number): number {
+  const eps = 0.9;
+  const hL = elevationAt(seed, sampleX - eps, sampleY);
+  const hR = elevationAt(seed, sampleX + eps, sampleY);
+  const hU = elevationAt(seed, sampleX, sampleY - eps);
+  const hD = elevationAt(seed, sampleX, sampleY + eps);
+  const dx = (hR - hL) / (2 * eps);
+  const dy = (hD - hU) / (2 * eps);
+  const nx = -dx * 3.4;
+  const ny = -dy * 3.4;
+  const nz = 1;
+  const nLen = Math.hypot(nx, ny, nz) || 1;
+  const nnx = nx / nLen;
+  const nny = ny / nLen;
+  const nnz = nz / nLen;
+
+  const lx = -0.58;
+  const ly = -0.42;
+  const lz = 0.69;
+  const lLen = Math.hypot(lx, ly, lz) || 1;
+  const lnx = lx / lLen;
+  const lny = ly / lLen;
+  const lnz = lz / lLen;
+  const dot = nnx * lnx + nny * lny + nnz * lnz;
+  return clamp(dot * 0.5 + 0.5, 0, 1);
+}
+
 function createChunkContainer(
   seed: string,
   cq: number,
@@ -245,6 +272,7 @@ function createChunkContainer(
         const waterShade = tile === 'water' || tile === 'lake'
           ? waterShadeScalarAt(seed, sample.x, sample.y)
           : null;
+        const slopeLight = tile === 'water' || tile === 'lake' ? null : slopeLightAt(seed, sample.x, sample.y);
         const riverFlow = tile === 'river' ? flowAccumulationAt(seed, sample.x, sample.y) : null;
         renderColor = colorForRenderedTile(
           tile,
@@ -252,6 +280,7 @@ function createChunkContainer(
           elevation,
           shorelineNeighbors,
           waterShade,
+          slopeLight,
           riverFlow,
         );
       }

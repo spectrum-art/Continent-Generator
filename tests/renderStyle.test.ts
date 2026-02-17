@@ -34,4 +34,11 @@ describe('render style', () => {
     const deep = colorForRenderedTile('water', baseWater, 0.2, 0, 0.9);
     expect(Math.round(luminance(deep))).toBeLessThan(Math.round(luminance(shallow)));
   });
+
+  it('applies directional slope light to mountain shading', () => {
+    const baseMountain = 0x8d8f98;
+    const shadow = colorForRenderedTile('mountain', baseMountain, 0.8, 0, null, 0.15);
+    const lit = colorForRenderedTile('mountain', baseMountain, 0.8, 0, null, 0.9);
+    expect(Math.round(luminance(lit))).toBeGreaterThan(Math.round(luminance(shadow)));
+  });
 });

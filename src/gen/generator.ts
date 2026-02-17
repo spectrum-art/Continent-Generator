@@ -227,11 +227,13 @@ function fractalNoise2D(
   return total / maxTotal;
 }
 
-function landBiomeFromFields(elevation: number, moisture: number): TileType {
-  if (elevation > 0.84) return TILE_TYPES[6];
-  if (elevation > 0.71 && moisture < 0.36) return TILE_TYPES[6];
-  if (elevation > 0.67) return TILE_TYPES[5];
-  if (moisture > 0.61) return TILE_TYPES[4];
+function landBiomeFromFields(elevation: number, moisture: number, drainage: number): TileType {
+  if (elevation > 0.86) return TILE_TYPES[6];
+  if (elevation > 0.74 && moisture < 0.34) return TILE_TYPES[6];
+  if (elevation > 0.69) return TILE_TYPES[5];
+  const humidIndex = moisture * 0.7 + drainage * 0.3;
+  if (humidIndex > 0.62 && elevation > SEA_LEVEL + 0.03 && elevation < 0.73) return TILE_TYPES[4];
+  if (moisture > 0.64 && drainage > 0.26 && elevation > SEA_LEVEL + 0.02 && elevation < 0.72) return TILE_TYPES[4];
   return TILE_TYPES[3];
 }
 
@@ -644,7 +646,17 @@ export function elevationAt(seed: string, x: number, y: number): number {
     0.46,
     2.02,
   );
-  const ridge = 1 - Math.abs(detail * 2 - 1);
+  const ridgeA = 1 - Math.abs(detail * 2 - 1);
+  const ridgeBNoise = fractalNoise2D(
+    seedHash ^ 0x6d2bf5a9,
+    ridgeBasis.x * 1.35,
+    ridgeBasis.y * 1.35,
+    4,
+    0.5,
+    2.05,
+  );
+  const ridgeB = 1 - Math.abs(ridgeBNoise * 2 - 1);
+  const ridge = Math.pow(clamp01(ridgeA * 0.68 + ridgeB * 0.32), 1.7);
   const broadSlope = fractalNoise2D(
     seedHash ^ 0x11ab04f3,
     domainX * 0.4,
@@ -653,8 +665,9 @@ export function elevationAt(seed: string, x: number, y: number): number {
     0.6,
     2.0,
   );
-  const combined = continent * 0.5 + terrain * 0.32 + ridge * 0.12 + broadSlope * 0.06;
-  const contrasted = smoothstep(clamp01((combined - 0.06) * 1.18));
+  const mountainBase = clamp01((terrain - 0.45) * 1.15 + ridge * 0.72);
+  const combined = continent * 0.46 + terrain * 0.24 + broadSlope * 0.08 + mountainBase * 0.22;
+  const contrasted = smoothstep(clamp01((combined - 0.05) * 1.21));
   return clamp01(contrasted * 1.05);
 }
 
@@ -1381,6 +1394,14 @@ export function moistureAtFromMacro(
   return moistureAt(seed, x, y);
 }
 
+function rawLandBiomeAt(seed: string, tileX: number, tileY: number): TileType {
+  const elevation = heightAt(seed, tileX, tileY);
+  const moisture = moistureAt(seed, tileX, tileY);
+  // Use a cheap local proxy here so neighborhood smoothing remains fast and deterministic.
+  const drainage = clamp01(moisture * 0.72 + clamp01((elevation - SEA_LEVEL) * 2.4) * 0.28);
+  return landBiomeFromFields(elevation, moisture, drainage);
+}
+
 export function getTileAt(seed: string, x: number, y: number): TileType {
   const tileX = Math.round(x);
   const tileY = Math.round(y);
@@ -1397,7 +1418,49 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
   const macroX = macroCoord(tileX);
   const macroY = macroCoord(tileY);
   const shore = shoreMetricsFromMacro(seed, tileX, tileY, macroX, macroY);
-  const base = shore ? TILE_TYPES[2] : landBiomeFromFields(elevation, moistureAt(seed, x, y));
+  let base: TileType;
+  if (shore) {
+    base = TILE_TYPES[2];
+  } else {
+    const moisture = moistureAt(seed, x, y);
+    const drainage = flowAccumulationAt(seed, x, y);
+    const raw = landBiomeFromFields(elevation, moisture, drainage);
+    const neighborCounts: Record<TileType, number> = {
+      water: 0,
+      lake: 0,
+      sand: 0,
+      grass: 0,
+      forest: 0,
+      mountain: 0,
+      rock: 0,
+      river: 0,
+    };
+    for (const [dx, dy] of AXIAL_DIRECTIONS) {
+      const neighborRaw = rawLandBiomeAt(seed, tileX + dx, tileY + dy);
+      neighborCounts[neighborRaw] += 1;
+    }
+
+    let modalBiome: TileType = raw;
+    let modalCount = neighborCounts[raw];
+    for (const candidate of [TILE_TYPES[3], TILE_TYPES[4], TILE_TYPES[5], TILE_TYPES[6]]) {
+      if (neighborCounts[candidate] > modalCount) {
+        modalCount = neighborCounts[candidate];
+        modalBiome = candidate;
+      }
+    }
+
+    const sameCount = neighborCounts[raw];
+    base = raw;
+    if (sameCount <= 2 && modalCount >= 3) {
+      base = modalBiome;
+    } else if (sameCount <= 3 && modalCount >= 4) {
+      base = modalBiome;
+    } else if (raw === 'forest' && neighborCounts.forest === 0 && (drainage < 0.4 || moisture < 0.54)) {
+      base = TILE_TYPES[3];
+    } else if (raw === 'grass' && modalBiome === 'forest' && modalCount >= 4 && moisture > 0.52 && drainage > 0.3) {
+      base = TILE_TYPES[4];
+    }
+  }
 
   if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
     return TILE_TYPES[7];
