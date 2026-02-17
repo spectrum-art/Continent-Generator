@@ -114,6 +114,17 @@ function createChunkContainer(
   const baseR = cr * CHUNK_SIZE;
   const basePixel = axialToPixel(baseQ, baseR, HEX_SIZE);
   chunkContainer.position.set(basePixel.x, basePixel.y);
+  const chunkTiles: TileType[][] = [];
+  for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
+    const row: TileType[] = [];
+    for (let localQ = 0; localQ < CHUNK_SIZE; localQ += 1) {
+      const q = baseQ + localQ;
+      const r = baseR + localR;
+      const sample = axialToSample(q, r);
+      row.push(getTileAt(seed, sample.x, sample.y));
+    }
+    chunkTiles.push(row);
+  }
 
   const chunkGraphics = new Graphics();
   for (let localR = 0; localR < CHUNK_SIZE; localR += 1) {
@@ -122,13 +133,25 @@ function createChunkContainer(
       const r = baseR + localR;
       const center = axialToPixel(q, r, HEX_SIZE);
       const sample = axialToSample(q, r);
-      const tile = getTileAt(seed, sample.x, sample.y);
+      const tile = chunkTiles[localR][localQ];
       const elevation = elevationAt(seed, sample.x, sample.y);
       let shorelineNeighbors = 0;
       if (tile !== 'water' && tile !== 'river') {
         for (const [dq, dr] of HEX_DIRECTIONS) {
-          const neighborSample = axialToSample(q + dq, r + dr);
-          const neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
+          const neighborLocalQ = localQ + dq;
+          const neighborLocalR = localR + dr;
+          let neighborTile: TileType;
+          if (
+            neighborLocalQ >= 0 &&
+            neighborLocalQ < CHUNK_SIZE &&
+            neighborLocalR >= 0 &&
+            neighborLocalR < CHUNK_SIZE
+          ) {
+            neighborTile = chunkTiles[neighborLocalR][neighborLocalQ];
+          } else {
+            const neighborSample = axialToSample(q + dq, r + dr);
+            neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
+          }
           if (neighborTile === 'water' || neighborTile === 'river') {
             shorelineNeighbors += 1;
           }
