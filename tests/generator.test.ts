@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHUNK_SIZE,
+  flowAccumulationAt,
   HYDRO_MACRO_MARGIN,
   HYDRO_MACRO_SIZE,
   MAX_RIVER_STEPS,
@@ -12,11 +13,14 @@ import {
   generateChunk,
   heightAt,
   isWaterCandidateAt,
+  isRiverSourceAt,
+  lakeBasinIdAt,
   getChunkKey,
   getTileAt,
   moistureAt,
   oceanNeighborCountAt,
   waterShadeScalarFromMacro,
+  waterClassAt,
   signedHeightAt,
   riverTraceLengthFromSource,
   type TileType,
@@ -63,6 +67,27 @@ describe('generator determinism', () => {
       expect(e1).toBeLessThanOrEqual(1);
       expect(m1).toBeGreaterThanOrEqual(0);
       expect(m1).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('returns deterministic debug field values for flow/lake/source accessors', () => {
+    const seed = 'default';
+    const samples: Array<[number, number]> = [
+      [0, 0],
+      [12, -19],
+      [64, 64],
+      [-87, 43],
+      [150, -90],
+    ];
+
+    for (const [x, y] of samples) {
+      expect(flowAccumulationAt(seed, x, y)).toBe(flowAccumulationAt(seed, x, y));
+      expect(lakeBasinIdAt(seed, x, y)).toBe(lakeBasinIdAt(seed, x, y));
+      expect(waterClassAt(seed, x, y)).toBe(waterClassAt(seed, x, y));
+      expect(isRiverSourceAt(seed, x, y)).toBe(isRiverSourceAt(seed, x, y));
+      const flow = flowAccumulationAt(seed, x, y);
+      expect(flow).toBeGreaterThanOrEqual(0);
+      expect(flow).toBeLessThanOrEqual(1);
     }
   });
 });

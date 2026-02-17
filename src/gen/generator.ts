@@ -40,6 +40,7 @@ const RIVER_TIE_EPSILON = 1e-6;
 
 type RiverChunkData = {
   tiles: Set<string>;
+  sources: Set<string>;
 };
 
 type HydroRegionData = {
@@ -49,6 +50,7 @@ type HydroRegionData = {
   roiEndY: number;
   ocean: Set<string>;
   lake: Set<string>;
+  lakeBasinId: Map<string, number>;
 };
 
 const riverChunkCache = new Map<string, RiverChunkData>();
@@ -259,6 +261,7 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
 
   const seedHash = hashString(seed);
   const tiles = new Set<string>();
+  const sources = new Set<string>();
   const startX = cx * CHUNK_SIZE;
   const startY = cy * CHUNK_SIZE;
   const endX = startX + CHUNK_SIZE - 1;
@@ -309,6 +312,10 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     const elevationDrop = startElevation - currentElevation;
     if (elevationDrop < MIN_RIVER_ELEVATION_DROP) {
       return;
+    }
+
+    if (sourceX >= startX && sourceX <= endX && sourceY >= startY && sourceY <= endY) {
+      sources.add(localTileKey(sourceX - startX, sourceY - startY));
     }
 
     for (const [pathX, pathY] of tracedPath) {
@@ -382,7 +389,7 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     tiles.add(key);
   }
 
-  const built: RiverChunkData = { tiles };
+  const built: RiverChunkData = { tiles, sources };
   riverChunkCache.set(cacheKey, built);
   riverChunkCacheOrder.push(cacheKey);
   while (riverChunkCacheOrder.length > RIVER_CACHE_MAX_CHUNKS) {
@@ -472,7 +479,9 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
   }
 
   const lakeWorld = new Set<string>();
+  const lakeBasinIdWorld = new Map<string, number>();
   const basinVisited = new Set<string>();
+  let nextLakeBasinId = 1;
   for (const key of waterCandidates) {
     if (oceanWorld.has(key) || basinVisited.has(key)) {
       continue;
@@ -503,8 +512,11 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
     }
 
     if (basinTiles.length >= MIN_LAKE_COMPONENT_TILES) {
+      const basinId = nextLakeBasinId;
+      nextLakeBasinId += 1;
       for (const lakeKey of basinTiles) {
         lakeWorld.add(lakeKey);
+        lakeBasinIdWorld.set(lakeKey, basinId);
       }
     } else {
       for (const shallowKey of basinTiles) {
@@ -515,6 +527,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 
   const ocean = new Set<string>();
   const lake = new Set<string>();
+  const lakeBasinId = new Map<string, number>();
   for (let y = roiStartY; y <= roiEndY; y += 1) {
     for (let x = roiStartX; x <= roiEndX; x += 1) {
       const key = worldTileKey(x, y);
@@ -524,6 +537,10 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
       const local = localTileKey(x - roiStartX, y - roiStartY);
       if (lakeWorld.has(key)) {
         lake.add(local);
+        const basinId = lakeBasinIdWorld.get(key);
+        if (basinId !== undefined) {
+          lakeBasinId.set(local, basinId);
+        }
       } else if (oceanWorld.has(key)) {
         ocean.add(local);
       }
@@ -537,6 +554,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
     roiEndY,
     ocean,
     lake,
+    lakeBasinId,
   };
   hydroRegionCache.set(cacheKey, built);
   hydroRegionCacheOrder.push(cacheKey);
@@ -592,6 +610,76 @@ function classifyWaterTile(seed: string, tileX: number, tileY: number): Extract<
   const macroX = macroCoord(tileX);
   const macroY = macroCoord(tileY);
   return classifyWaterTileFromMacro(seed, tileX, tileY, macroX, macroY);
+}
+
+export function waterClassAt(seed: string, x: number, y: number): 'ocean' | 'lake' | null {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const waterClass = classifyWaterTile(seed, tileX, tileY);
+  if (waterClass === TILE_TYPES[0]) {
+    return 'ocean';
+  }
+  if (waterClass === TILE_TYPES[1]) {
+    return 'lake';
+  }
+  return null;
+}
+
+export function lakeBasinIdAt(seed: string, x: number, y: number): number | null {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  const region = buildHydroRegion(seed, macroX, macroY);
+  if (
+    tileX < region.roiStartX ||
+    tileX > region.roiEndX ||
+    tileY < region.roiStartY ||
+    tileY > region.roiEndY
+  ) {
+    return null;
+  }
+  const localKey = localTileKey(tileX - region.roiStartX, tileY - region.roiStartY);
+  return region.lakeBasinId.get(localKey) ?? null;
+}
+
+export function flowAccumulationAt(seed: string, x: number, y: number): number {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const centerElevation = elevationAt(seed, tileX, tileY);
+  let slopeOut = 0;
+  let slopeIn = 0;
+  for (const [dx, dy] of AXIAL_DIRECTIONS) {
+    const neighborElevation = elevationAt(seed, tileX + dx, tileY + dy);
+    const delta = centerElevation - neighborElevation;
+    if (delta > 0) {
+      slopeOut += delta;
+    } else {
+      slopeIn += -delta;
+    }
+  }
+  const seedHash = hashString(seed);
+  const localNoise = fractalNoise2D(
+    seedHash ^ 0x5173a1bd,
+    tileX * 0.045,
+    tileY * 0.045,
+    3,
+    0.57,
+    2.05,
+  );
+  const potential = (1 + slopeIn * 48) / (0.12 + slopeOut * 24);
+  return clamp01(Math.log2(1 + potential * (0.6 + localNoise * 0.8)) / 6);
+}
+
+export function isRiverSourceAt(seed: string, x: number, y: number): boolean {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const cx = chunkCoord(tileX);
+  const cy = chunkCoord(tileY);
+  const riverChunk = buildRiverChunk(seed, cx, cy);
+  const localX = tileX - cx * CHUNK_SIZE;
+  const localY = tileY - cy * CHUNK_SIZE;
+  return riverChunk.sources.has(localTileKey(localX, localY));
 }
 
 export function oceanNeighborCountAt(seed: string, x: number, y: number): number {

@@ -3,7 +3,12 @@ import {
   CHUNK_SIZE,
   chunkCoord,
   elevationAt,
+  flowAccumulationAt,
+  isRiverSourceAt,
+  lakeBasinIdAt,
+  moistureAt,
   getTileAt,
+  waterClassAt,
   waterShadeScalarAt,
   type TileType,
 } from '../gen/generator';
@@ -34,6 +39,15 @@ const MINIMAP_WORLD_UNITS_PER_PIXEL = HEX_SIZE * 0.65;
 const LOD_ZOOM_THRESHOLD = 0.8;
 const BASE_KEYBOARD_PAN_SPEED = 620;
 const BOOST_KEYBOARD_MULTIPLIER = 2.2;
+const DEBUG_MODES = [
+  'normal',
+  'elevation',
+  'moisture',
+  'ocean-mask',
+  'flow',
+  'lake-basin',
+  'river-trace',
+] as const;
 const HEX_DIRECTIONS: ReadonlyArray<[number, number]> = [
   [1, 0],
   [1, -1],
@@ -50,9 +64,12 @@ type LoadedChunk = {
   lodEnabled: boolean;
 };
 
+type DebugMode = (typeof DEBUG_MODES)[number];
+
 type OverlayElements = {
   root: HTMLDivElement;
   seedInput: HTMLInputElement;
+  debugSelect: HTMLSelectElement;
   outlineCheckbox: HTMLInputElement;
   stressValue: HTMLSpanElement;
   seedValue: HTMLSpanElement;
@@ -82,6 +99,20 @@ type MovementKeys = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function grayscaleColor(value: number): number {
+  const clamped = Math.round(clamp(value, 0, 1) * 255);
+  return (clamped << 16) | (clamped << 8) | clamped;
+}
+
+function debugBasinColor(id: number): number {
+  let v = Math.imul(id ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  v ^= v >>> 13;
+  const r = 80 + (v & 0x7f);
+  const g = 80 + ((v >>> 8) & 0x7f);
+  const b = 80 + ((v >>> 16) & 0x7f);
+  return (r << 16) | (g << 8) | b;
 }
 
 function getRenderChunkKey(cq: number, cr: number): string {
@@ -128,6 +159,7 @@ function createChunkContainer(
   cq: number,
   cr: number,
   shouldDrawOutlines: boolean,
+  debugMode: DebugMode,
 ): Container {
   const chunkContainer = new Container();
   const baseQ = cq * CHUNK_SIZE;
@@ -155,40 +187,72 @@ function createChunkContainer(
       const sample = axialToSample(q, r);
       const tile = chunkTiles[localR][localQ];
       const elevation = elevationAt(seed, sample.x, sample.y);
-      let shorelineNeighbors = 0;
-      if (tile !== 'water' && tile !== 'lake' && tile !== 'river') {
-        for (const [dq, dr] of HEX_DIRECTIONS) {
-          const neighborLocalQ = localQ + dq;
-          const neighborLocalR = localR + dr;
-          let neighborTile: TileType;
-          if (
-            neighborLocalQ >= 0 &&
-            neighborLocalQ < CHUNK_SIZE &&
-            neighborLocalR >= 0 &&
-            neighborLocalR < CHUNK_SIZE
-          ) {
-            neighborTile = chunkTiles[neighborLocalR][neighborLocalQ];
-          } else {
-            const neighborSample = axialToSample(q + dq, r + dr);
-            neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
-          }
-          if (neighborTile === 'water') {
-            shorelineNeighbors += 1;
+      let renderColor = TILE_PALETTE[tile];
+
+      if (debugMode === 'elevation') {
+        renderColor = grayscaleColor(elevation);
+      } else if (debugMode === 'moisture') {
+        renderColor = grayscaleColor(moistureAt(seed, sample.x, sample.y));
+      } else if (debugMode === 'ocean-mask') {
+        const waterClass = waterClassAt(seed, sample.x, sample.y);
+        renderColor =
+          waterClass === 'ocean' ? 0xffffff : waterClass === 'lake' ? 0x5555ff : 0x0f0f0f;
+      } else if (debugMode === 'flow') {
+        const flow = flowAccumulationAt(seed, sample.x, sample.y);
+        renderColor = grayscaleColor(flow);
+      } else if (debugMode === 'lake-basin') {
+        const basinId = lakeBasinIdAt(seed, sample.x, sample.y);
+        if (basinId !== null) {
+          renderColor = debugBasinColor(basinId);
+        } else {
+          const waterClass = waterClassAt(seed, sample.x, sample.y);
+          renderColor = waterClass === 'ocean' ? 0x204570 : 0x0f0f0f;
+        }
+      } else if (debugMode === 'river-trace') {
+        if (isRiverSourceAt(seed, sample.x, sample.y)) {
+          renderColor = 0xffda4d;
+        } else if (tile === 'river') {
+          renderColor = 0x2dcfff;
+        } else if (tile === 'water' || tile === 'lake') {
+          renderColor = 0x14324f;
+        } else {
+          renderColor = grayscaleColor(clamp(elevation * 0.7, 0, 1));
+        }
+      } else {
+        let shorelineNeighbors = 0;
+        if (tile !== 'water' && tile !== 'lake' && tile !== 'river') {
+          for (const [dq, dr] of HEX_DIRECTIONS) {
+            const neighborLocalQ = localQ + dq;
+            const neighborLocalR = localR + dr;
+            let neighborTile: TileType;
+            if (
+              neighborLocalQ >= 0 &&
+              neighborLocalQ < CHUNK_SIZE &&
+              neighborLocalR >= 0 &&
+              neighborLocalR < CHUNK_SIZE
+            ) {
+              neighborTile = chunkTiles[neighborLocalR][neighborLocalQ];
+            } else {
+              const neighborSample = axialToSample(q + dq, r + dr);
+              neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
+            }
+            if (neighborTile === 'water') {
+              shorelineNeighbors += 1;
+            }
           }
         }
+
+        const waterShade = tile === 'water' || tile === 'lake'
+          ? waterShadeScalarAt(seed, sample.x, sample.y)
+          : null;
+        renderColor = colorForRenderedTile(
+          tile,
+          TILE_PALETTE[tile],
+          elevation,
+          shorelineNeighbors,
+          waterShade,
+        );
       }
-
-      const waterShade = (tile === 'water' || tile === 'lake')
-        ? waterShadeScalarAt(seed, sample.x, sample.y)
-        : null;
-
-      const renderColor = colorForRenderedTile(
-        tile,
-        TILE_PALETTE[tile],
-        elevation,
-        shorelineNeighbors,
-        waterShade,
-      );
       const points = hexPolygonPoints(center.x - basePixel.x, center.y - basePixel.y, HEX_SIZE);
 
       chunkGraphics.poly(points, true).fill(renderColor);
@@ -235,6 +299,21 @@ function createOverlay(seed: string): OverlayElements {
   applyButton.textContent = 'Apply';
   applyButton.style.cursor = 'pointer';
   seedRow.append(seedLabel, seedInput, applyButton);
+
+  const debugRow = document.createElement('div');
+  debugRow.style.marginTop = '6px';
+  const debugLabel = document.createElement('span');
+  debugLabel.textContent = 'Debug mode: ';
+  const debugSelect = document.createElement('select');
+  debugSelect.style.cursor = 'pointer';
+  for (const mode of DEBUG_MODES) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = mode;
+    debugSelect.appendChild(option);
+  }
+  debugSelect.value = 'normal';
+  debugRow.append(debugLabel, debugSelect);
 
   const outlineRow = document.createElement('div');
   outlineRow.style.marginTop = '6px';
@@ -426,6 +505,7 @@ function createOverlay(seed: string): OverlayElements {
 
   root.append(
     seedRow,
+    debugRow,
     outlineRow,
     seedValueRow,
     axialRow,
@@ -459,6 +539,9 @@ function createOverlay(seed: string): OverlayElements {
 
   seedInput.addEventListener('change', applySeed);
   applyButton.addEventListener('click', applySeed);
+  debugSelect.addEventListener('change', () => {
+    root.dispatchEvent(new CustomEvent<DebugMode>('debugmodechange', { detail: debugSelect.value as DebugMode }));
+  });
   outlineCheckbox.addEventListener('change', () => {
     root.dispatchEvent(new CustomEvent<boolean>('outlinechange', { detail: outlineCheckbox.checked }));
   });
@@ -479,6 +562,7 @@ function createOverlay(seed: string): OverlayElements {
   return {
     root,
     seedInput,
+    debugSelect,
     outlineCheckbox,
     stressValue,
     seedValue,
@@ -520,6 +604,7 @@ export async function startMapExplorer(): Promise<void> {
   app.stage.addChild(world);
 
   let activeSeed = initialSeed;
+  let debugMode: DebugMode = 'normal';
   const loadedChunks = new Map<string, LoadedChunk>();
   let cameraDirty = true;
   let autoBordersEnabled = true;
@@ -587,7 +672,7 @@ export async function startMapExplorer(): Promise<void> {
       return;
     }
 
-    const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines);
+    const container = createChunkContainer(activeSeed, cq, cr, renderedWithOutlines, debugMode);
     world.addChild(container);
     const lodEnabled = shouldUseLodMode(world.scale.x);
     if (lodEnabled) {
@@ -656,6 +741,7 @@ export async function startMapExplorer(): Promise<void> {
     const roundedCenter = roundAxial(centerAxial.q, centerAxial.r);
 
     overlay.seedValue.textContent = activeSeed;
+    overlay.debugSelect.value = debugMode;
     overlay.axialValue.textContent = `${roundedCenter.q}, ${roundedCenter.r}`;
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
@@ -729,6 +815,16 @@ export async function startMapExplorer(): Promise<void> {
     activeSeed = seedEvent.detail;
     overlay.seedInput.value = activeSeed;
     writeSeedToUrl(activeSeed);
+    clearLoadedChunks();
+    cameraDirty = true;
+  });
+
+  overlay.root.addEventListener('debugmodechange', (event: Event) => {
+    const debugEvent = event as CustomEvent<DebugMode>;
+    if (debugEvent.detail === debugMode) {
+      return;
+    }
+    debugMode = debugEvent.detail;
     clearLoadedChunks();
     cameraDirty = true;
   });
@@ -829,6 +925,16 @@ export async function startMapExplorer(): Promise<void> {
       case 'Space':
         if (!event.repeat && stressEnabled) {
           stressPaused = !stressPaused;
+        }
+        event.preventDefault();
+        break;
+      case 'Backquote':
+        if (!event.repeat) {
+          const index = DEBUG_MODES.indexOf(debugMode);
+          debugMode = DEBUG_MODES[(index + 1) % DEBUG_MODES.length];
+          overlay.debugSelect.value = debugMode;
+          clearLoadedChunks();
+          cameraDirty = true;
         }
         event.preventDefault();
         break;
