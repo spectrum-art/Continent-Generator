@@ -213,13 +213,13 @@ function createOverlay(seed: string): OverlayElements {
   const outlineRow = document.createElement('div');
   outlineRow.style.marginTop = '6px';
   const outlineLabel = document.createElement('span');
-  outlineLabel.textContent = 'Outlines: ';
+  outlineLabel.textContent = 'Auto borders (zoomed-in only): ';
   const outlineModeValue = document.createElement('span');
-  outlineModeValue.textContent = 'auto';
+  outlineModeValue.textContent = 'enabled';
   outlineModeValue.style.marginRight = '6px';
   const outlineToggle = document.createElement('button');
   outlineToggle.type = 'button';
-  outlineToggle.textContent = 'Toggle';
+  outlineToggle.textContent = 'Disable';
   outlineToggle.style.cursor = 'pointer';
   outlineRow.append(outlineLabel, outlineModeValue, outlineToggle);
 
@@ -404,12 +404,10 @@ function createOverlay(seed: string): OverlayElements {
   seedInput.addEventListener('change', applySeed);
   applyButton.addEventListener('click', applySeed);
   outlineToggle.addEventListener('click', () => {
-    const modes = ['auto', 'on', 'off'] as const;
-    const current = outlineModeValue.textContent ?? 'auto';
-    const idx = modes.indexOf(current as (typeof modes)[number]);
-    const next = modes[(idx + 1) % modes.length];
-    outlineModeValue.textContent = next;
-    root.dispatchEvent(new CustomEvent<string>('outlinechange', { detail: next }));
+    const enabled = outlineModeValue.textContent !== 'enabled';
+    outlineModeValue.textContent = enabled ? 'enabled' : 'disabled';
+    outlineToggle.textContent = enabled ? 'Disable' : 'Enable';
+    root.dispatchEvent(new CustomEvent<boolean>('outlinechange', { detail: enabled }));
   });
   stressToggle.addEventListener('click', () => {
     const current = stressValue.textContent === 'on';
@@ -468,7 +466,7 @@ export async function startMapExplorer(): Promise<void> {
   let activeSeed = initialSeed;
   const loadedChunks = new Map<string, LoadedChunk>();
   let cameraDirty = true;
-  let outlineMode: 'auto' | 'on' | 'off' = 'auto';
+  let autoBordersEnabled = true;
   let renderedWithOutlines = false;
   let stressEnabled = false;
   let stressPaused = false;
@@ -496,9 +494,7 @@ export async function startMapExplorer(): Promise<void> {
   };
 
   function shouldDrawOutlinesAtZoom(zoom: number): boolean {
-    if (outlineMode === 'on') return true;
-    if (outlineMode === 'off') return false;
-    return zoom >= OUTLINE_ZOOM_THRESHOLD;
+    return autoBordersEnabled && zoom >= OUTLINE_ZOOM_THRESHOLD;
   }
 
   function clearLoadedChunks(): void {
@@ -584,7 +580,7 @@ export async function startMapExplorer(): Promise<void> {
     overlay.zoomValue.textContent = world.scale.x.toFixed(3);
     overlay.loadedChunksValue.textContent = `${loadedChunks.size}`;
     overlay.totalGeneratedValue.textContent = `${totalChunksGenerated}`;
-    overlay.outlineModeValue.textContent = outlineMode;
+    overlay.outlineModeValue.textContent = autoBordersEnabled ? 'enabled' : 'disabled';
     overlay.stressValue.textContent = stressEnabled ? (stressPaused ? 'paused' : 'on') : 'off';
     overlay.stressElapsedValue.textContent = `${(stressElapsedMs / 1000).toFixed(1)}s`;
     overlay.stressChunkBandValue.textContent = Number.isFinite(stressChunkMin)
@@ -654,8 +650,8 @@ export async function startMapExplorer(): Promise<void> {
   });
 
   overlay.root.addEventListener('outlinechange', (event: Event) => {
-    const outlineEvent = event as CustomEvent<'auto' | 'on' | 'off'>;
-    outlineMode = outlineEvent.detail;
+    const outlineEvent = event as CustomEvent<boolean>;
+    autoBordersEnabled = outlineEvent.detail;
     const nextOutlineState = shouldDrawOutlinesAtZoom(world.scale.x);
     if (nextOutlineState !== renderedWithOutlines) {
       renderedWithOutlines = nextOutlineState;
