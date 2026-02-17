@@ -221,8 +221,26 @@ function createOverlay(seed: string): OverlayElements {
   minimapRateValue.textContent = '0.0';
   minimapRateRow.append(minimapRateLabel, minimapRateValue);
 
+  const legendToggle = document.createElement('button');
+  legendToggle.type = 'button';
+  legendToggle.textContent = 'Key';
+  legendToggle.title = 'Toggle legend';
+  legendToggle.style.position = 'absolute';
+  legendToggle.style.top = '8px';
+  legendToggle.style.right = '8px';
+  legendToggle.style.width = '28px';
+  legendToggle.style.height = '22px';
+  legendToggle.style.border = '1px solid rgba(255, 255, 255, 0.28)';
+  legendToggle.style.borderRadius = '4px';
+  legendToggle.style.background = 'rgba(0, 0, 0, 0.25)';
+  legendToggle.style.color = '#e8e8e8';
+  legendToggle.style.cursor = 'pointer';
+  legendToggle.style.font = '11px/1 monospace';
+
   const legendRow = document.createElement('div');
   legendRow.style.marginTop = '6px';
+  legendRow.style.display = 'none';
+  legendRow.style.maxWidth = '140px';
   const legendTitle = document.createElement('div');
   legendTitle.textContent = 'Legend';
   legendTitle.style.marginBottom = '4px';
@@ -326,6 +344,7 @@ function createOverlay(seed: string): OverlayElements {
     minimapRateRow,
     legendRow,
     minimapRow,
+    legendToggle,
   );
   document.body.appendChild(root);
   const minimapContext = minimapCanvas.getContext('2d');
@@ -358,6 +377,10 @@ function createOverlay(seed: string): OverlayElements {
   });
   resetStatsButton.addEventListener('click', () => {
     root.dispatchEvent(new CustomEvent('resetstats'));
+  });
+  legendToggle.addEventListener('click', () => {
+    const isVisible = legendRow.style.display !== 'none';
+    legendRow.style.display = isVisible ? 'none' : 'block';
   });
 
   return {
