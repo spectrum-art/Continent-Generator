@@ -42,7 +42,9 @@ export function colorForRenderedTile(
   } else if (tile === 'river') {
     shaded = shadeColor(baseColor, 0.88 + elevation * 0.22);
   } else {
-    shaded = shadeColor(baseColor, 0.62 + elevation * 0.92);
+    const baseFactor = 0.5 + elevation * 1.22;
+    const rockBoost = tile === 'mountain' || tile === 'rock' ? 0.12 : 0;
+    shaded = shadeColor(baseColor, baseFactor + rockBoost);
   }
 
   if (shorelineNeighbors > 0 && tile !== 'sand' && tile !== 'water' && tile !== 'lake' && tile !== 'river') {

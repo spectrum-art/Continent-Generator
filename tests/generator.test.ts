@@ -93,6 +93,42 @@ describe('generator determinism', () => {
       expect(flow).toBeLessThanOrEqual(1);
     }
   });
+
+  it('keeps elevation directional bias within a bounded isotropy ratio', () => {
+    const seed = 'default';
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+    const sums = new Array<number>(dirs.length).fill(0);
+    const counts = new Array<number>(dirs.length).fill(0);
+    const step = 7;
+
+    for (let y = -84; y <= 84; y += 12) {
+      for (let x = -84; x <= 84; x += 11) {
+        for (let i = 0; i < dirs.length; i += 1) {
+          const [dx, dy] = dirs[i];
+          const forward = elevationAt(seed, x + dx * step, y + dy * step);
+          const backward = elevationAt(seed, x - dx * step, y - dy * step);
+          sums[i] += Math.abs(forward - backward);
+          counts[i] += 1;
+        }
+      }
+    }
+
+    const means = sums.map((sum, i) => sum / Math.max(1, counts[i]));
+    const maxMean = Math.max(...means);
+    const minMean = Math.min(...means);
+    const ratio = maxMean / Math.max(1e-6, minMean);
+    expect(
+      ratio,
+      `elevation directional isotropy ratio=${ratio.toFixed(3)} expected <= 1.5`,
+    ).toBeLessThanOrEqual(1.5);
+  });
 });
 
 describe('chunk helpers', () => {
