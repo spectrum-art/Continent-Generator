@@ -1,36 +1,50 @@
 # Map Explorer Plan
 
-## Milestone 7.5: Seam Fix + Rivers/Lakes Tuning + Minimap/UI + Perf
+## Milestone 8: Visual Correctness + Verification + LOD
 
-- [x] `A1` minimap supersampling (`128 -> 192` internal render size).
-- [x] Gate `A1` with `npm test` and `npm run build`.
-- [x] `A2` legend key toggle UI (default hidden, no layout space when closed).
-- [x] Gate `A2` with `npm test` and `npm run build`.
+- [x] `A` snapshot harness:
+- [x] Add deterministic main/minimap raster renderer.
+- [x] Add `npm run snapshot` command.
+- [x] Write PNG artifacts with stable names to `artifacts/`.
+- [x] Verify repeated renders hash-identically.
+- [x] Gate with `npm test`, `npm run build`, and `npm run snapshot`.
 
-- [x] `B1` migrate water classification to world-anchored hydro macro basis.
-- [x] Gate `B1` with `npm test` and `npm run build`.
-- [x] `B2` add overlap consistency seam test for macro-basis water classification.
-- [x] Gate `B2` with `npm test` and `npm run build`.
+- [x] `B` minimap color correctness:
+- [x] Keep minimap supersampling (`192 -> 128` display).
+- [x] Route minimap sampling through a palette-only helper.
+- [x] Add automated minimap color-set test (no per-tile shading).
+- [x] Gate with `npm test` and `npm run build`.
 
-- [x] `C1` tune river source density and pruning (min length + elevation drop).
-- [x] Gate `C1` with `npm test` and `npm run build`.
-- [x] `C2` add basin-based lake filtering on the same macro basis.
-- [x] Gate `C2` with `npm test` and `npm run build`.
-- [x] `C3` add/raise river-lake coverage and connectivity assertions:
-- [x] River coverage target `0.5%..4%` in `256x256` (seed `default`).
-- [x] Largest river component `>= 60`.
-- [x] Lake basin count in `1..12`.
-- [x] Gate `C3` with `npm test` and `npm run build`.
+- [x] `C` shore tightening and correctness:
+- [x] Tighten shoreline band by 20% (`0.052`).
+- [x] Restrict sand classification to ocean-adjacent land.
+- [x] Add sand coverage cap + ocean-adjacency generator tests.
+- [x] Gate with `npm test` and `npm run build`.
 
-- [x] `D1` add WASD camera movement with zoom-scaled speed, Shift boost, and Space stress pause.
-- [x] Gate `D1` with `npm test` and `npm run build`.
+- [x] `D` water seam scalar verification:
+- [x] Add deterministic water shading scalar in generator.
+- [x] Extend overlap test to compare both classification and shading scalar.
+- [x] Use scalar in renderer water/lake shading path.
+- [x] Gate with `npm test` and `npm run build`.
 
-- [x] `E1` apply chunk-level rendering optimization (chunk tile cache; one graphics object per chunk).
-- [x] Gate `E1` with `npm test` and `npm run build`.
-- [x] `E2` expose stress performance verification status in overlay (`ok/warn/idle`).
-- [x] Gate `E2` with `npm test` and `npm run build`.
+- [x] `E` river coherence:
+- [x] Remove secondary random widening branch pass.
+- [x] Raise coherence tests: largest component `>= 80`, component count `<= 25`.
+- [x] Keep coverage test in `0.5%..4%` band.
+- [x] Gate with `npm test` and `npm run build`.
 
-- [x] `F1` update outline toggle wording/behavior to zoom-gated auto borders.
-- [x] Gate `F1` with `npm test` and `npm run build`.
+- [ ] `F` lake morphology compactness pass.
+Deferred in Milestone 8. Current lake control remains deterministic basin filtering (`MIN_LAKE_COMPONENT_TILES`).
 
-- [x] `G1` update docs/spec and docs/plan with milestone7.5 outcomes and tuned constants.
+- [x] `G` low-zoom LOD:
+- [x] Add `LOD_ZOOM_THRESHOLD` draw-mode switch.
+- [x] Use chunk `cacheAsTexture` when zoomed out.
+- [x] Add overlay counters: draw mode, chunk sprites, approx tile draws.
+- [x] Gate with `npm test` and `npm run build`.
+
+- [x] `H` UI polish:
+- [x] Replace outline toggle button with checkbox.
+- [x] Replace text legend toggle with Material Symbols key icon.
+- [x] Gate with `npm test` and `npm run build`.
+
+- [x] `I` docs update for Milestone 8 scope and verification criteria.
