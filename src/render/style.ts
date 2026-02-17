@@ -44,8 +44,11 @@ export function colorForRenderedTile(
   } else if (tile === 'river') {
     const flow = clamp(riverFlow ?? 0.4, 0, 1);
     const slopeFactor = slopeLight === null ? 1 : 0.86 + (slopeLight - 0.5) * 0.22;
-    const riverBody = shadeColor(baseColor, (0.7 + elevation * 0.15 + flow * 0.26) * slopeFactor);
-    shaded = mixColor(riverBody, 0x2b6a95, 0.2 + flow * 0.22);
+    const riverBody = shadeColor(baseColor, (0.68 + elevation * 0.16 + flow * 0.24) * slopeFactor);
+    const aquaticTone = mixColor(0x2f7ca9, 0x1b5178, flow * 0.65);
+    const bankBlend = clamp(shorelineNeighbors / 6, 0, 1);
+    const terrainBlend = mixColor(riverBody, 0x3f6d54, 0.1 + (1 - bankBlend) * 0.12);
+    shaded = mixColor(terrainBlend, aquaticTone, 0.24 + flow * 0.22 + bankBlend * 0.14);
   } else {
     const baseFactor = 0.5 + elevation * 1.22;
     const rockBoost = tile === 'mountain' || tile === 'rock' ? 0.12 : 0;

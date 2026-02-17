@@ -247,7 +247,7 @@ function createChunkContainer(
         }
       } else {
         let shorelineNeighbors = 0;
-        if (tile !== 'water' && tile !== 'lake' && tile !== 'river') {
+        if (tile !== 'water' && tile !== 'lake') {
           for (const [dq, dr] of HEX_DIRECTIONS) {
             const neighborLocalQ = localQ + dq;
             const neighborLocalR = localR + dr;
@@ -263,7 +263,7 @@ function createChunkContainer(
               const neighborSample = axialToSample(q + dq, r + dr);
               neighborTile = getTileAt(seed, neighborSample.x, neighborSample.y);
             }
-            if (neighborTile === 'water') {
+            if (neighborTile === 'water' || neighborTile === 'lake') {
               shorelineNeighbors += 1;
             }
           }

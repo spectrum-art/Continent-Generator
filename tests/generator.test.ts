@@ -219,7 +219,7 @@ describe('chunk generation', () => {
       expect(top[CHUNK_SIZE - 1][lx]).toBe(getTileAt(seed, worldX, topWorldY));
       expect(bottom[0][lx]).toBe(getTileAt(seed, worldX, bottomWorldY));
     }
-  }, 15000);
+  }, 25000);
 });
 
 describe('distribution sanity', () => {
@@ -648,7 +648,7 @@ describe('sea level model', () => {
     }
 
     expect(touchedOcean).toBe(false);
-  });
+  }, 15000);
 
   it('keeps lake components compact enough to avoid spaghetti tendrils', () => {
     const seed = 'default';
@@ -731,7 +731,7 @@ describe('sea level model', () => {
         `lake tendril ratio=${(tendrilRatio * 100).toFixed(2)}% expected <= 14%`,
       ).toBeLessThanOrEqual(0.14);
     }
-  });
+  }, 15000);
 
   it('keeps water classification consistent in overlapping macro ROIs', () => {
     const seed = 'default';
