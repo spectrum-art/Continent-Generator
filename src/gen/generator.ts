@@ -22,7 +22,8 @@ export const MIN_RIVER_LENGTH = 11;
 export const MIN_RIVER_ELEVATION_DROP = 0.03;
 export const SHORELINE_BAND = 0.065;
 export const HYDRO_MACRO_SIZE = 256;
-export const HYDRO_MACRO_MARGIN = 64;
+export const HYDRO_MACRO_MARGIN = 128;
+export const MIN_LAKE_COMPONENT_TILES = 20;
 
 const TILE_TYPES: TileType[] = ['water', 'lake', 'sand', 'grass', 'forest', 'mountain', 'rock', 'river'];
 const AXIAL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -119,6 +120,11 @@ function localTileKey(localX: number, localY: number): string {
 
 function worldTileKey(tileX: number, tileY: number): string {
   return `${tileX},${tileY}`;
+}
+
+function parseTileKey(key: string): [number, number] {
+  const [x, y] = key.split(',');
+  return [Number(x), Number(y)];
 }
 
 function latticeValue(seedHash: number, x: number, y: number): number {
@@ -477,6 +483,48 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
     }
   }
 
+  const lakeWorld = new Set<string>();
+  const basinVisited = new Set<string>();
+  for (const key of waterCandidates) {
+    if (oceanWorld.has(key) || basinVisited.has(key)) {
+      continue;
+    }
+
+    const basinQueue = [key];
+    const basinTiles: string[] = [];
+    basinVisited.add(key);
+
+    while (basinQueue.length > 0) {
+      const current = basinQueue.shift() as string;
+      basinTiles.push(current);
+      const [x, y] = parseTileKey(current);
+
+      for (const [dx, dy] of AXIAL_DIRECTIONS) {
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (nextX < roiStartX || nextX > roiEndX || nextY < roiStartY || nextY > roiEndY) {
+          continue;
+        }
+        const nextKey = worldTileKey(nextX, nextY);
+        if (!waterCandidates.has(nextKey) || oceanWorld.has(nextKey) || basinVisited.has(nextKey)) {
+          continue;
+        }
+        basinVisited.add(nextKey);
+        basinQueue.push(nextKey);
+      }
+    }
+
+    if (basinTiles.length >= MIN_LAKE_COMPONENT_TILES) {
+      for (const lakeKey of basinTiles) {
+        lakeWorld.add(lakeKey);
+      }
+    } else {
+      for (const shallowKey of basinTiles) {
+        oceanWorld.add(shallowKey);
+      }
+    }
+  }
+
   const ocean = new Set<string>();
   const lake = new Set<string>();
   for (let y = roiStartY; y <= roiEndY; y += 1) {
@@ -486,10 +534,10 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
         continue;
       }
       const local = localTileKey(x - roiStartX, y - roiStartY);
-      if (oceanWorld.has(key)) {
-        ocean.add(local);
-      } else {
+      if (lakeWorld.has(key)) {
         lake.add(local);
+      } else if (oceanWorld.has(key)) {
+        ocean.add(local);
       }
     }
   }
@@ -514,7 +562,7 @@ function buildHydroRegion(seed: string, regionX: number, regionY: number): Hydro
 }
 
 function macroCoord(n: number): number {
-  return Math.floor(n / HYDRO_MACRO_SIZE);
+  return Math.floor((n - HYDRO_MACRO_SIZE / 2) / HYDRO_MACRO_SIZE);
 }
 
 export function classifyWaterTileFromMacro(
@@ -530,11 +578,7 @@ export function classifyWaterTileFromMacro(
 
   const canonicalMacroX = macroCoord(tileX);
   const canonicalMacroY = macroCoord(tileY);
-  const region = buildHydroRegion(
-    seed,
-    macroX === canonicalMacroX ? macroX : canonicalMacroX,
-    macroY === canonicalMacroY ? macroY : canonicalMacroY,
-  );
+  const region = buildHydroRegion(seed, canonicalMacroX, canonicalMacroY);
   if (
     tileX < region.roiStartX ||
     tileX > region.roiEndX ||
