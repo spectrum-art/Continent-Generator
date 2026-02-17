@@ -6,6 +6,7 @@ import {
   HYDRO_MACRO_MARGIN,
   HYDRO_MACRO_SIZE,
   MAX_RIVER_STEPS,
+  MAX_LAKE_COMPACTNESS,
   SHORELINE_BAND,
   classifyWaterTileFromMacro,
   chunkCoord,
@@ -386,6 +387,89 @@ describe('sea level model', () => {
     }
 
     expect(touchedOcean).toBe(false);
+  });
+
+  it('keeps lake components compact enough to avoid spaghetti tendrils', () => {
+    const seed = 'default';
+    const size = 256;
+    const half = size / 2;
+    const lakeTiles = new Set<string>();
+    const visited = new Set<string>();
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [1, -1],
+      [0, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, 1],
+    ];
+
+    for (let y = -half; y < half; y += 1) {
+      for (let x = -half; x < half; x += 1) {
+        if (getTileAt(seed, x, y) === 'lake') {
+          lakeTiles.add(`${x},${y}`);
+        }
+      }
+    }
+
+    expect(lakeTiles.size).toBeGreaterThan(0);
+
+    for (const key of lakeTiles) {
+      if (visited.has(key)) continue;
+      const queue = [key];
+      const component: string[] = [];
+      visited.add(key);
+
+      while (queue.length > 0) {
+        const current = queue.shift() as string;
+        component.push(current);
+        const [xStr, yStr] = current.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+        for (const [dx, dy] of dirs) {
+          const nextKey = `${x + dx},${y + dy}`;
+          if (!lakeTiles.has(nextKey) || visited.has(nextKey)) continue;
+          visited.add(nextKey);
+          queue.push(nextKey);
+        }
+      }
+
+      if (component.length < 40) {
+        continue;
+      }
+
+      const componentSet = new Set(component);
+      let perimeter = 0;
+      let tendrilTiles = 0;
+      for (const tileKey of component) {
+        const [xStr, yStr] = tileKey.split(',');
+        const x = Number(xStr);
+        const y = Number(yStr);
+        let neighbors = 0;
+        for (const [dx, dy] of dirs) {
+          const neighborKey = `${x + dx},${y + dy}`;
+          if (componentSet.has(neighborKey)) {
+            neighbors += 1;
+          } else {
+            perimeter += 1;
+          }
+        }
+        if (neighbors <= 1) {
+          tendrilTiles += 1;
+        }
+      }
+
+      const compactness = (perimeter * perimeter) / component.length;
+      const tendrilRatio = tendrilTiles / component.length;
+      expect(
+        compactness,
+        `lake compactness=${compactness.toFixed(2)} expected <= ${MAX_LAKE_COMPACTNESS + 40}`,
+      ).toBeLessThanOrEqual(MAX_LAKE_COMPACTNESS + 40);
+      expect(
+        tendrilRatio,
+        `lake tendril ratio=${(tendrilRatio * 100).toFixed(2)}% expected <= 14%`,
+      ).toBeLessThanOrEqual(0.14);
+    }
   });
 
   it('keeps water classification consistent in overlapping macro ROIs', () => {
