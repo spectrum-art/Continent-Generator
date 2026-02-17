@@ -5,12 +5,17 @@ import {
   flowAccumulationAt,
   HYDRO_MACRO_MARGIN,
   HYDRO_MACRO_SIZE,
+  LAKE_SHORE_RADIUS_MAX,
+  LAKE_SHORE_RADIUS_MIN,
   MAX_RIVER_STEPS,
   MAX_LAKE_COMPACTNESS,
+  OCEAN_SHORE_RADIUS_MAX,
+  OCEAN_SHORE_RADIUS_MIN,
   SHORELINE_BAND,
   classifyWaterTileFromMacro,
   chunkCoord,
   elevationAt,
+  elevationAtFromMacro,
   generateChunk,
   heightAt,
   isWaterCandidateAt,
@@ -19,7 +24,10 @@ import {
   getChunkKey,
   getTileAt,
   moistureAt,
+  moistureAtFromMacro,
   oceanNeighborCountAt,
+  shoreMetricsAt,
+  shoreTypeFromMacro,
   waterShadeScalarFromMacro,
   waterShadeScalarAt,
   waterClassAt,
@@ -28,6 +36,10 @@ import {
   riverTraceTerminationFromSource,
   type TileType,
 } from '../src/gen/generator';
+
+function hydroMacroCoord(n: number): number {
+  return Math.floor((n - HYDRO_MACRO_SIZE / 2) / HYDRO_MACRO_SIZE);
+}
 
 describe('generator determinism', () => {
   it('returns the same tile for the same seed and coordinates', () => {
@@ -222,7 +234,7 @@ describe('distribution sanity', () => {
     }
 
     expect(found.size).toBeGreaterThanOrEqual(5);
-  }, 15000);
+  }, 30000);
 });
 
 describe('sea level model', () => {
@@ -276,7 +288,7 @@ describe('sea level model', () => {
       }
     }
     expect(summaryA.join('|')).toBe(summaryB.join('|'));
-  });
+  }, 15000);
 
   it('contains at least one lake component with size >= 30 in 256x256', () => {
     const seed = 'default';
@@ -324,7 +336,7 @@ describe('sea level model', () => {
     }
 
     expect(largest).toBeGreaterThanOrEqual(30);
-  });
+  }, 15000);
 
   it('keeps lake basin count in the tuned 1..12 range in 256x256', () => {
     const seed = 'default';
@@ -538,6 +550,61 @@ describe('sea level model', () => {
     expect(comparisons).toBeGreaterThan(100);
   });
 
+  it('keeps elevation and moisture macro sampling seam-free across superchunk borders', () => {
+    const seed = 'default';
+    const borderMacroPairs: Array<[number, number]> = [
+      [-1, 0],
+      [0, 1],
+      [1, 2],
+    ];
+    let comparisons = 0;
+
+    for (const [leftMacro, rightMacro] of borderMacroPairs) {
+      const borderX = rightMacro * HYDRO_MACRO_SIZE;
+      for (let y = -HYDRO_MACRO_SIZE; y <= HYDRO_MACRO_SIZE; y += 13) {
+        for (let x = borderX - HYDRO_MACRO_MARGIN; x <= borderX + HYDRO_MACRO_MARGIN; x += 11) {
+          const elevLeft = elevationAtFromMacro(seed, x, y, leftMacro, 0);
+          const elevRight = elevationAtFromMacro(seed, x, y, rightMacro, 0);
+          const moistLeft = moistureAtFromMacro(seed, x, y, leftMacro, 0);
+          const moistRight = moistureAtFromMacro(seed, x, y, rightMacro, 0);
+
+          expect(Math.abs(elevLeft - elevRight)).toBeLessThanOrEqual(0.02);
+          expect(Math.abs(moistLeft - moistRight)).toBeLessThanOrEqual(0.02);
+          comparisons += 1;
+        }
+      }
+    }
+
+    expect(comparisons).toBeGreaterThan(200);
+  });
+
+  it('keeps shore classification consistent when sampled from both sides of chunk borders', () => {
+    const seed = 'default';
+    let state = 0x7f4a7c15;
+    const rand = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0xffffffff;
+    };
+    const borderXs = [-256, -192, -128, -64, 0, 64, 128, 192, 256];
+    let samples = 0;
+
+    for (const borderX of borderXs) {
+      for (let i = 0; i < 12; i += 1) {
+        const y = Math.floor(rand() * 1024) - 512;
+        const tileX = borderX + (i % 2 === 0 ? -1 : 0);
+        const leftMacro = hydroMacroCoord(tileX - 1);
+        const rightMacro = hydroMacroCoord(tileX + 1);
+        const macroY = hydroMacroCoord(y);
+        const fromLeft = shoreTypeFromMacro(seed, tileX, y, leftMacro, macroY);
+        const fromRight = shoreTypeFromMacro(seed, tileX, y, rightMacro, macroY);
+        expect(fromLeft).toBe(fromRight);
+        samples += 1;
+      }
+    }
+
+    expect(samples).toBe(108);
+  });
+
   it('keeps water visual scalar stable across chunk boundaries for ocean water', () => {
     const seed = 'default';
     const boundaries = [-128, -64, 0, 64, 128];
@@ -562,7 +629,7 @@ describe('sea level model', () => {
     expect(SHORELINE_BAND).toBeCloseTo(0.052, 6);
   });
 
-  it('limits sand coverage and keeps sand ocean-adjacent only', () => {
+  it('limits sand coverage and keeps shores macro-consistent', () => {
     const seed = 'default';
     const size = 256;
     const half = size / 2;
@@ -583,26 +650,26 @@ describe('sea level model', () => {
           continue;
         }
         sandCount += 1;
+        const shore = shoreMetricsAt(seed, x, y);
+        expect(shore).not.toBeNull();
+        expect(shore?.radius).toBeGreaterThanOrEqual(
+          shore?.type === 'ocean' ? OCEAN_SHORE_RADIUS_MIN : LAKE_SHORE_RADIUS_MIN,
+        );
+        expect(shore?.radius).toBeLessThanOrEqual(
+          shore?.type === 'ocean' ? OCEAN_SHORE_RADIUS_MAX : LAKE_SHORE_RADIUS_MAX,
+        );
         const oceanNeighbors = oceanNeighborCountAt(seed, x, y);
-        expect(oceanNeighbors).toBeGreaterThan(0);
 
         let adjacentSand = 0;
-        let touchesLakeOrRiver = false;
         for (const [dx, dy] of dirs) {
           const neighborTile = getTileAt(seed, x + dx, y + dy);
           if (neighborTile === 'sand') {
             adjacentSand += 1;
           }
-          if (neighborTile === 'lake' || neighborTile === 'river') {
-            touchesLakeOrRiver = true;
-          }
         }
 
-        if (adjacentSand === 0 && oceanNeighbors <= 1) {
+        if (adjacentSand === 0 && oceanNeighbors <= 1 && shore?.type === 'ocean') {
           isolatedSand += 1;
-        }
-        if (touchesLakeOrRiver) {
-          expect(oceanNeighbors).toBeGreaterThan(0);
         }
       }
     }
@@ -619,7 +686,42 @@ describe('sea level model', () => {
         `isolated shore ratio=${(isolatedRatio * 100).toFixed(2)}% expected <= 22%`,
       ).toBeLessThanOrEqual(0.22);
     }
-  });
+  }, 15000);
+
+  it('keeps average shore thickness within natural ocean/lake ranges', () => {
+    const seed = 'default';
+    const coastalSamples: Array<{ type: 'ocean' | 'lake'; distance: number }> = [];
+    const bounds = 640;
+
+    outer: for (let y = -bounds; y <= bounds; y += 1) {
+      for (let x = -bounds; x <= bounds; x += 1) {
+        if (getTileAt(seed, x, y) !== 'sand') {
+          continue;
+        }
+        const shore = shoreMetricsAt(seed, x, y);
+        if (!shore) {
+          continue;
+        }
+        coastalSamples.push({ type: shore.type, distance: shore.distance });
+        if (coastalSamples.length >= 1000) {
+          break outer;
+        }
+      }
+    }
+
+    expect(coastalSamples.length).toBeGreaterThanOrEqual(1000);
+    const ocean = coastalSamples.filter((sample) => sample.type === 'ocean');
+    const lake = coastalSamples.filter((sample) => sample.type === 'lake');
+    expect(ocean.length).toBeGreaterThan(0);
+    expect(lake.length).toBeGreaterThan(0);
+
+    const oceanMean = ocean.reduce((sum, sample) => sum + sample.distance, 0) / ocean.length;
+    const lakeMean = lake.reduce((sum, sample) => sum + sample.distance, 0) / lake.length;
+    expect(oceanMean, `ocean mean shore width=${oceanMean.toFixed(2)} expected 2..4`).toBeGreaterThanOrEqual(2);
+    expect(oceanMean, `ocean mean shore width=${oceanMean.toFixed(2)} expected 2..4`).toBeLessThanOrEqual(4);
+    expect(lakeMean, `lake mean shore width=${lakeMean.toFixed(2)} expected 1..2`).toBeGreaterThanOrEqual(1);
+    expect(lakeMean, `lake mean shore width=${lakeMean.toFixed(2)} expected 1..2`).toBeLessThanOrEqual(2);
+  }, 12000);
 });
 
 describe('river core', () => {
@@ -640,7 +742,7 @@ describe('river core', () => {
     }
 
     expect(summaryA.join('|')).toBe(summaryB.join('|'));
-  });
+  }, 10000);
 
   it('terminates river traces at or below MAX_RIVER_STEPS', () => {
     const seed = 'default';

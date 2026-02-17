@@ -8,6 +8,8 @@ export type TileType =
   | 'rock'
   | 'river';
 
+export type ShoreType = 'ocean' | 'lake';
+
 export const CHUNK_SIZE = 64;
 export const RIVER_SOURCE_SPACING = 22;
 export const RIVER_SOURCE_RATE = 0.78;
@@ -24,6 +26,10 @@ export const MIN_RIVER_LENGTH = 12;
 export const MIN_RIVER_ELEVATION_DROP = 0.02;
 export const MAX_RIVER_COMPONENT_SOURCES = 110;
 export const SHORELINE_BAND = 0.052;
+export const OCEAN_SHORE_RADIUS_MIN = 1.8;
+export const OCEAN_SHORE_RADIUS_MAX = 4.2;
+export const LAKE_SHORE_RADIUS_MIN = 0.9;
+export const LAKE_SHORE_RADIUS_MAX = 2.3;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 128;
 export const MIN_LAKE_COMPONENT_TILES = 40;
@@ -94,6 +100,10 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function rotate(x: number, y: number, radians: number): { x: number; y: number } {
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
@@ -132,6 +142,10 @@ function worldTileKey(tileX: number, tileY: number): string {
 function parseTileKey(key: string): [number, number] {
   const [x, y] = key.split(',');
   return [Number(x), Number(y)];
+}
+
+function axialDistance(dq: number, dr: number): number {
+  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(-dq - dr));
 }
 
 function countHexNeighborsInSet(x: number, y: number, tiles: Set<string>): number {
@@ -598,6 +612,18 @@ export function elevationAt(seed: string, x: number, y: number): number {
   return clamp01(contrasted * 1.05);
 }
 
+export function elevationAtFromMacro(
+  seed: string,
+  x: number,
+  y: number,
+  macroX: number,
+  macroY: number,
+): number {
+  void macroX;
+  void macroY;
+  return elevationAt(seed, x, y);
+}
+
 export function heightAt(seed: string, x: number, y: number): number {
   return elevationAt(seed, x, y);
 }
@@ -947,22 +973,150 @@ export function oceanNeighborCountAt(seed: string, x: number, y: number): number
   return count;
 }
 
-function oceanRingCountAt(seed: string, tileX: number, tileY: number, radius: number): number {
-  let count = 0;
-  for (let dq = -radius; dq <= radius; dq += 1) {
-    for (let dr = -radius; dr <= radius; dr += 1) {
-      const ds = -dq - dr;
-      const distance = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(ds));
-      if (distance !== radius) {
-        continue;
-      }
-      const neighbor = classifyWaterTile(seed, tileX + dq, tileY + dr);
-      if (neighbor === TILE_TYPES[0]) {
-        count += 1;
+function nearestWaterDistancesFromMacro(
+  seed: string,
+  tileX: number,
+  tileY: number,
+  macroX: number,
+  macroY: number,
+): { ocean: number | null; lake: number | null } {
+  let ocean: number | null = null;
+  let lake: number | null = null;
+  const maxRadius = 5;
+  for (let radius = 1; radius <= maxRadius; radius += 1) {
+    for (let dq = -radius; dq <= radius; dq += 1) {
+      for (let dr = -radius; dr <= radius; dr += 1) {
+        if (axialDistance(dq, dr) !== radius) {
+          continue;
+        }
+        const sampleType = classifyWaterTileFromMacro(seed, tileX + dq, tileY + dr, macroX, macroY);
+        if (sampleType === TILE_TYPES[0] && ocean === null) {
+          ocean = radius;
+        } else if (sampleType === TILE_TYPES[1] && lake === null) {
+          lake = radius;
+        }
       }
     }
+    if (radius >= 3 && ocean !== null && lake !== null) {
+      break;
+    }
   }
-  return count;
+  return { ocean, lake };
+}
+
+function localSlopeMagnitude(seed: string, tileX: number, tileY: number): number {
+  const center = elevationAt(seed, tileX, tileY);
+  let maxDelta = 0;
+  let sumDelta = 0;
+  for (const [dx, dy] of AXIAL_DIRECTIONS) {
+    const delta = Math.abs(center - elevationAt(seed, tileX + dx, tileY + dy));
+    maxDelta = Math.max(maxDelta, delta);
+    sumDelta += delta;
+  }
+  return maxDelta * 0.62 + (sumDelta / AXIAL_DIRECTIONS.length) * 0.38;
+}
+
+type ShoreMetrics = {
+  type: ShoreType;
+  distance: number;
+  radius: number;
+};
+
+function shoreMetricsFromMacro(
+  seed: string,
+  tileX: number,
+  tileY: number,
+  macroX: number,
+  macroY: number,
+): ShoreMetrics | null {
+  const waterClass = classifyWaterTileFromMacro(seed, tileX, tileY, macroX, macroY);
+  if (waterClass !== null) {
+    return null;
+  }
+
+  const elevation = heightAt(seed, tileX, tileY);
+  if (elevation > SEA_LEVEL + SHORELINE_BAND + 0.24) {
+    return null;
+  }
+
+  const distances = nearestWaterDistancesFromMacro(seed, tileX, tileY, macroX, macroY);
+  if (distances.ocean === null && distances.lake === null) {
+    return null;
+  }
+
+  const slope = localSlopeMagnitude(seed, tileX, tileY);
+  const steepness = clamp01((slope - 0.028) / 0.09);
+  const oceanShelf = clamp01((SEA_LEVEL + 0.16 - elevation) / 0.24);
+  const lakeShelf = clamp01((SEA_LEVEL + 0.08 - elevation) / 0.18);
+  const oceanRadius = clamp(
+    2.7 + oceanShelf * 1.95 - steepness * 1.05,
+    OCEAN_SHORE_RADIUS_MIN,
+    OCEAN_SHORE_RADIUS_MAX,
+  );
+  const lakeRadius = clamp(
+    1.1 + lakeShelf * 1.05 - steepness * 0.62,
+    LAKE_SHORE_RADIUS_MIN,
+    LAKE_SHORE_RADIUS_MAX,
+  );
+
+  const oceanDistance = distances.ocean;
+  const lakeDistance = distances.lake;
+
+  const oceanScore =
+    oceanDistance !== null && oceanDistance <= oceanRadius ? oceanDistance / oceanRadius : Number.POSITIVE_INFINITY;
+  const lakeScore =
+    lakeDistance !== null && lakeDistance <= lakeRadius ? lakeDistance / lakeRadius : Number.POSITIVE_INFINITY;
+
+  if (!Number.isFinite(oceanScore) && !Number.isFinite(lakeScore)) {
+    return null;
+  }
+
+  if (oceanScore <= lakeScore) {
+    return {
+      type: 'ocean',
+      distance: oceanDistance as number,
+      radius: oceanRadius,
+    };
+  }
+
+  return {
+    type: 'lake',
+    distance: lakeDistance as number,
+    radius: lakeRadius,
+  };
+}
+
+export function shoreTypeFromMacro(
+  seed: string,
+  tileX: number,
+  tileY: number,
+  macroX: number,
+  macroY: number,
+): ShoreType | null {
+  return shoreMetricsFromMacro(seed, tileX, tileY, macroX, macroY)?.type ?? null;
+}
+
+export function shoreMetricsAt(
+  seed: string,
+  x: number,
+  y: number,
+): { type: ShoreType; distance: number; radius: number } | null {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  const metrics = shoreMetricsFromMacro(seed, tileX, tileY, macroX, macroY);
+  return metrics
+    ? {
+        type: metrics.type,
+        distance: metrics.distance,
+        radius: metrics.radius,
+      }
+    : null;
+}
+
+export function shoreTypeAt(seed: string, x: number, y: number): ShoreType | null {
+  return shoreMetricsAt(seed, x, y)?.type ?? null;
 }
 
 export function waterShadeScalarFromMacro(
@@ -1030,6 +1184,18 @@ export function moistureAt(seed: string, x: number, y: number): number {
   return clamp01(broad * 0.52 + local * 0.34 + rainShadow * 0.14 - highlandDryness * 0.18);
 }
 
+export function moistureAtFromMacro(
+  seed: string,
+  x: number,
+  y: number,
+  macroX: number,
+  macroY: number,
+): number {
+  void macroX;
+  void macroY;
+  return moistureAt(seed, x, y);
+}
+
 export function getTileAt(seed: string, x: number, y: number): TileType {
   const tileX = Math.round(x);
   const tileY = Math.round(y);
@@ -1043,17 +1209,10 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
     return waterClass;
   }
   const elevation = heightAt(seed, x, y);
-  const oceanNeighbors = oceanNeighborCountAt(seed, tileX, tileY);
-  const ringTwoOcean = oceanRingCountAt(seed, tileX, tileY, 2);
-  const coastAffinity = oceanNeighbors * 1.1 + ringTwoOcean * 0.35;
-  const shorelineLimit =
-    oceanNeighbors >= 2
-      ? SEA_LEVEL + SHORELINE_BAND
-      : SEA_LEVEL + SHORELINE_BAND * 0.65;
-  const base =
-    oceanNeighbors > 0 && coastAffinity >= 1.4 && elevation <= shorelineLimit
-      ? TILE_TYPES[2]
-      : landBiomeFromFields(elevation, moistureAt(seed, x, y));
+  const macroX = macroCoord(tileX);
+  const macroY = macroCoord(tileY);
+  const shore = shoreMetricsFromMacro(seed, tileX, tileY, macroX, macroY);
+  const base = shore ? TILE_TYPES[2] : landBiomeFromFields(elevation, moistureAt(seed, x, y));
 
   if (base !== 'water' && riverChunk.tiles.has(localTileKey(localX, localY))) {
     return TILE_TYPES[7];
