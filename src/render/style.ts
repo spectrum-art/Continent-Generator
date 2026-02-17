@@ -40,7 +40,8 @@ export function colorForRenderedTile(
     const scalar = waterShade ?? 0.5;
     shaded = shadeColor(baseColor, 1.08 - scalar * 0.48);
   } else if (tile === 'river') {
-    shaded = shadeColor(baseColor, 0.88 + elevation * 0.22);
+    const riverBody = shadeColor(baseColor, 0.78 + elevation * 0.18);
+    shaded = mixColor(riverBody, 0x2f6c96, 0.24);
   } else {
     const baseFactor = 0.5 + elevation * 1.22;
     const rockBoost = tile === 'mountain' || tile === 'rock' ? 0.12 : 0;

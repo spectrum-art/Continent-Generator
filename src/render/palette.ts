@@ -1,14 +1,14 @@
 import type { TileType } from '../gen/generator';
 
 export const TILE_PALETTE: Record<TileType, number> = {
-  water: 0x2d6cdf,
-  lake: 0x235ab5,
-  river: 0x3f8ef2,
-  sand: 0xe2cf89,
-  grass: 0x63b359,
-  forest: 0x2f7a43,
-  mountain: 0x8d8f98,
-  rock: 0x6a6972,
+  water: 0x2b669e,
+  lake: 0x3f79aa,
+  river: 0x4f8db5,
+  sand: 0xd9c27a,
+  grass: 0x5fa754,
+  forest: 0x2f6f3f,
+  mountain: 0x8e8d93,
+  rock: 0x5b616a,
 };
 
 function toHex(color: number): string {
