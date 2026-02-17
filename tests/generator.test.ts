@@ -20,6 +20,7 @@ import {
   moistureAt,
   oceanNeighborCountAt,
   waterShadeScalarFromMacro,
+  waterShadeScalarAt,
   waterClassAt,
   signedHeightAt,
   riverTraceLengthFromSource,
@@ -414,6 +415,26 @@ describe('sea level model', () => {
     }
 
     expect(comparisons).toBeGreaterThan(100);
+  });
+
+  it('keeps water visual scalar stable across chunk boundaries for ocean water', () => {
+    const seed = 'default';
+    const boundaries = [-128, -64, 0, 64, 128];
+
+    for (const bx of boundaries) {
+      for (let y = -128; y <= 128; y += 5) {
+        const leftClass = waterClassAt(seed, bx - 1, y);
+        const rightClass = waterClassAt(seed, bx, y);
+        if (leftClass !== 'ocean' || rightClass !== 'ocean') {
+          continue;
+        }
+        const leftScalar = waterShadeScalarAt(seed, bx - 1, y);
+        const rightScalar = waterShadeScalarAt(seed, bx, y);
+        expect(leftScalar).not.toBeNull();
+        expect(rightScalar).not.toBeNull();
+        expect(Math.abs((leftScalar as number) - (rightScalar as number))).toBeLessThan(0.22);
+      }
+    }
   });
 
   it('uses a 20% tighter shoreline band than the prior 0.065 value', () => {
