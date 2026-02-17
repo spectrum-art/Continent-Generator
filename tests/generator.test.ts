@@ -480,7 +480,7 @@ describe('river core', () => {
     ).toBeLessThanOrEqual(0.04);
   });
 
-  it('has at least one river component with length >= 60 in 256x256 sample', () => {
+  it('has at least one river component with length >= 80 in 256x256 sample', () => {
     const seed = 'default';
     const size = 256;
     const half = size / 2;
@@ -504,10 +504,12 @@ describe('river core', () => {
     }
 
     let largest = 0;
+    let components = 0;
     for (const key of riverTiles) {
       if (visited.has(key)) {
         continue;
       }
+      components += 1;
 
       const queue = [key];
       visited.add(key);
@@ -535,6 +537,7 @@ describe('river core', () => {
       }
     }
 
-    expect(largest, `largest river component length=${largest} expected >= 60`).toBeGreaterThanOrEqual(60);
+    expect(largest, `largest river component length=${largest} expected >= 80`).toBeGreaterThanOrEqual(80);
+    expect(components, `river component count=${components} expected <= 25`).toBeLessThanOrEqual(25);
   });
 });

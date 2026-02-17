@@ -366,7 +366,7 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     const worldX = startX + localX;
     const worldY = startY + localY;
     const widenPick = (hashCoord(seedHash, worldX, worldY, 809) & 0xff) / 0xff;
-    if (widenPick > 0.805) {
+    if (widenPick > 0.92) {
       continue;
     }
     const dirIndex = hashCoord(seedHash, worldX, worldY, 811) % AXIAL_DIRECTIONS.length;
@@ -375,17 +375,6 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     const ny = localY + dy;
     if (nx >= 0 && nx < CHUNK_SIZE && ny >= 0 && ny < CHUNK_SIZE) {
       widened.add(localTileKey(nx, ny));
-    }
-
-    const secondaryPick = (hashCoord(seedHash, worldX, worldY, 823) & 0xff) / 0xff;
-    if (secondaryPick < 0.3) {
-      const secondaryDirIndex = hashCoord(seedHash, worldX, worldY, 827) % AXIAL_DIRECTIONS.length;
-      const [sx, sy] = AXIAL_DIRECTIONS[secondaryDirIndex];
-      const secondaryX = localX + sx;
-      const secondaryY = localY + sy;
-      if (secondaryX >= 0 && secondaryX < CHUNK_SIZE && secondaryY >= 0 && secondaryY < CHUNK_SIZE) {
-        widened.add(localTileKey(secondaryX, secondaryY));
-      }
     }
   }
   tiles.clear();
