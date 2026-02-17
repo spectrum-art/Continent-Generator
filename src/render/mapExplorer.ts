@@ -565,6 +565,7 @@ function createOverlay(seed: string): OverlayElements {
   perfToggleButton.textContent = 'Show Perf HUD';
   perfToggleButton.style.cursor = 'pointer';
   perfToggleButton.style.marginTop = '6px';
+  perfToggleButton.dataset.testid = 'perf-toggle';
 
   const perfPanel = document.createElement('div');
   perfPanel.style.display = 'none';
@@ -596,6 +597,7 @@ function createOverlay(seed: string): OverlayElements {
   perfCopyButton.type = 'button';
   perfCopyButton.textContent = 'Copy perf snapshot';
   perfCopyButton.style.cursor = 'pointer';
+  perfCopyButton.dataset.testid = 'perf-copy';
   const perfCopyStatus = document.createElement('span');
   perfCopyStatus.textContent = '';
   perfCopyRow.append(perfCopyButton, perfCopyStatus);
@@ -607,6 +609,7 @@ function createOverlay(seed: string): OverlayElements {
   scenarioRow.style.gap = '6px';
   const scenarioSelect = document.createElement('select');
   scenarioSelect.style.cursor = 'pointer';
+  scenarioSelect.dataset.testid = 'scenario-select';
   for (const scenario of PERF_SCENARIOS) {
     const option = document.createElement('option');
     option.value = scenario.id;
@@ -617,10 +620,12 @@ function createOverlay(seed: string): OverlayElements {
   scenarioRunButton.type = 'button';
   scenarioRunButton.textContent = 'Run';
   scenarioRunButton.style.cursor = 'pointer';
+  scenarioRunButton.dataset.testid = 'scenario-run';
   const scenarioRunAllButton = document.createElement('button');
   scenarioRunAllButton.type = 'button';
   scenarioRunAllButton.textContent = 'Run all';
   scenarioRunAllButton.style.cursor = 'pointer';
+  scenarioRunAllButton.dataset.testid = 'scenario-run-all';
   scenarioRow.append(scenarioSelect, scenarioRunButton, scenarioRunAllButton);
 
   const scenarioStatusRow = document.createElement('div');
@@ -629,6 +634,7 @@ function createOverlay(seed: string): OverlayElements {
   scenarioStatusLabel.textContent = 'Scenario status: ';
   const scenarioStatusValue = document.createElement('span');
   scenarioStatusValue.textContent = 'idle';
+  scenarioStatusValue.dataset.testid = 'scenario-status';
   scenarioStatusRow.append(scenarioStatusLabel, scenarioStatusValue);
 
   const perfReportValue = document.createElement('pre');
@@ -637,6 +643,7 @@ function createOverlay(seed: string): OverlayElements {
   perfReportValue.style.whiteSpace = 'pre-wrap';
   perfReportValue.style.maxHeight = '120px';
   perfReportValue.style.overflow = 'auto';
+  perfReportValue.dataset.testid = 'scenario-report';
 
   perfPanel.append(
     perfFrameValue,
