@@ -9,7 +9,7 @@ export type TileType =
   | 'river';
 
 export const CHUNK_SIZE = 64;
-export const RIVER_SOURCE_SPACING = 12;
+export const RIVER_SOURCE_SPACING = 14;
 export const RIVER_SOURCE_RATE = 1;
 export const MIN_SOURCE_ELEVATION = 0.5;
 export const MAX_RIVER_STEPS = 360;
@@ -18,6 +18,8 @@ export const RIVER_WATER_STOP_ELEVATION = SEA_LEVEL;
 export const RIVER_UPHILL_TOLERANCE = 0.005;
 export const MAJOR_SOURCE_SPACING = 72;
 export const MAJOR_MIN_SOURCE_ELEVATION = 0.6;
+export const MIN_RIVER_LENGTH = 11;
+export const MIN_RIVER_ELEVATION_DROP = 0.03;
 export const SHORELINE_BAND = 0.065;
 export const HYDRO_MACRO_SIZE = 256;
 export const HYDRO_MACRO_MARGIN = 64;
@@ -266,7 +268,9 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     let x = sourceX;
     let y = sourceY;
     let currentElevation = elevationAt(seed, x, y);
+    const startElevation = currentElevation;
     const seen = new Set<string>();
+    const tracedPath: Array<[number, number]> = [];
 
     for (let step = 0; step < MAX_RIVER_STEPS; step += 1) {
       const pathKey = localTileKey(x, y);
@@ -274,10 +278,7 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
         break;
       }
       seen.add(pathKey);
-
-      if (x >= startX && x <= endX && y >= startY && y <= endY) {
-        tiles.add(localTileKey(x - startX, y - startY));
-      }
+      tracedPath.push([x, y]);
 
       if (currentElevation <= RIVER_WATER_STOP_ELEVATION) {
         break;
@@ -294,6 +295,21 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       x = next.x;
       y = next.y;
       currentElevation = next.elevation;
+    }
+
+    if (tracedPath.length < MIN_RIVER_LENGTH) {
+      return;
+    }
+
+    const elevationDrop = startElevation - currentElevation;
+    if (elevationDrop < MIN_RIVER_ELEVATION_DROP) {
+      return;
+    }
+
+    for (const [pathX, pathY] of tracedPath) {
+      if (pathX >= startX && pathX <= endX && pathY >= startY && pathY <= endY) {
+        tiles.add(localTileKey(pathX - startX, pathY - startY));
+      }
     }
   }
 
@@ -337,15 +353,18 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
     }
   }
 
-  const widened = new Set<string>();
+  const widened = new Set<string>(tiles);
   for (const key of tiles) {
-    widened.add(key);
     const [localXStr, localYStr] = key.split(',');
     const localX = Number(localXStr);
     const localY = Number(localYStr);
     const worldX = startX + localX;
     const worldY = startY + localY;
-    const dirIndex = hashCoord(seedHash, worldX, worldY, 601) % AXIAL_DIRECTIONS.length;
+    const widenPick = (hashCoord(seedHash, worldX, worldY, 809) & 0xff) / 0xff;
+    if (widenPick > 0.805) {
+      continue;
+    }
+    const dirIndex = hashCoord(seedHash, worldX, worldY, 811) % AXIAL_DIRECTIONS.length;
     const [dx, dy] = AXIAL_DIRECTIONS[dirIndex];
     const nx = localX + dx;
     const ny = localY + dy;
@@ -353,14 +372,14 @@ function buildRiverChunk(seed: string, cx: number, cy: number): RiverChunkData {
       widened.add(localTileKey(nx, ny));
     }
 
-    const extraPick = (hashCoord(seedHash, worldX, worldY, 607) & 0xff) / 0xff;
-    if (extraPick < 0.7) {
-      const extraDirIndex = hashCoord(seedHash, worldX, worldY, 613) % AXIAL_DIRECTIONS.length;
-      const [ex, ey] = AXIAL_DIRECTIONS[extraDirIndex];
-      const exx = localX + ex;
-      const eyy = localY + ey;
-      if (exx >= 0 && exx < CHUNK_SIZE && eyy >= 0 && eyy < CHUNK_SIZE) {
-        widened.add(localTileKey(exx, eyy));
+    const secondaryPick = (hashCoord(seedHash, worldX, worldY, 823) & 0xff) / 0xff;
+    if (secondaryPick < 0.3) {
+      const secondaryDirIndex = hashCoord(seedHash, worldX, worldY, 827) % AXIAL_DIRECTIONS.length;
+      const [sx, sy] = AXIAL_DIRECTIONS[secondaryDirIndex];
+      const secondaryX = localX + sx;
+      const secondaryY = localY + sy;
+      if (secondaryX >= 0 && secondaryX < CHUNK_SIZE && secondaryY >= 0 && secondaryY < CHUNK_SIZE) {
+        widened.add(localTileKey(secondaryX, secondaryY));
       }
     }
   }
