@@ -231,9 +231,10 @@ function landBiomeFromFields(elevation: number, moisture: number, drainage: numb
   if (elevation > 0.86) return TILE_TYPES[6];
   if (elevation > 0.74 && moisture < 0.34) return TILE_TYPES[6];
   if (elevation > 0.69) return TILE_TYPES[5];
-  const humidIndex = moisture * 0.7 + drainage * 0.3;
-  if (humidIndex > 0.62 && elevation > SEA_LEVEL + 0.03 && elevation < 0.73) return TILE_TYPES[4];
-  if (moisture > 0.64 && drainage > 0.26 && elevation > SEA_LEVEL + 0.02 && elevation < 0.72) return TILE_TYPES[4];
+  const lowland = clamp01((0.74 - elevation) / 0.26);
+  const humidIndex = moisture * 0.62 + drainage * 0.23 + lowland * 0.15;
+  if (humidIndex > 0.61 && elevation > SEA_LEVEL + 0.03 && elevation < 0.73) return TILE_TYPES[4];
+  if (moisture > 0.58 && drainage > 0.34 && elevation > SEA_LEVEL + 0.02 && elevation < 0.72) return TILE_TYPES[4];
   return TILE_TYPES[3];
 }
 
@@ -1398,7 +1399,8 @@ function rawLandBiomeAt(seed: string, tileX: number, tileY: number): TileType {
   const elevation = heightAt(seed, tileX, tileY);
   const moisture = moistureAt(seed, tileX, tileY);
   // Use a cheap local proxy here so neighborhood smoothing remains fast and deterministic.
-  const drainage = clamp01(moisture * 0.72 + clamp01((elevation - SEA_LEVEL) * 2.4) * 0.28);
+  const lowland = clamp01((0.74 - elevation) / 0.26);
+  const drainage = clamp01(moisture * 0.58 + lowland * 0.42);
   return landBiomeFromFields(elevation, moisture, drainage);
 }
 
@@ -1459,6 +1461,8 @@ export function getTileAt(seed: string, x: number, y: number): TileType {
       base = TILE_TYPES[3];
     } else if (raw === 'grass' && modalBiome === 'forest' && modalCount >= 4 && moisture > 0.52 && drainage > 0.3) {
       base = TILE_TYPES[4];
+    } else if ((raw === 'mountain' || raw === 'rock') && modalBiome === 'grass' && modalCount >= 4 && elevation < 0.76) {
+      base = TILE_TYPES[3];
     }
   }
 
