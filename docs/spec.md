@@ -8,42 +8,49 @@ Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinit
 - No runtime AI features
 - No platform-specific dependencies
 
-## Milestone 8 Acceptance Criteria
-1. Snapshot tooling exists and is deterministic:
-- `npm run snapshot` writes PNG artifacts (`main` + `minimap`) under `artifacts/`.
-- Filenames encode seed/zoom/center coordinates.
-- Snapshot run validates deterministic bytes by hashing repeated renders.
-2. Minimap remains supersampled (`192x192` internal, `128x128` display) and uses only base biome palette colors (no elevation modulation).
-3. Shoreline/sand behavior:
-- shoreline band tightened by 20% (`0.065 -> 0.052`)
-- shoreline classification uses ocean adjacency only (not lake/river adjacency)
-- tests enforce sand coverage ceiling and ocean-adjacent-only sand placement.
-4. Water seam correctness:
-- ocean/lake classification remains macro-anchored and overlap-consistent.
-- water shading scalar is deterministic and overlap-consistent across macro boundaries.
-5. Rivers are constrained for coherence:
-- random secondary widening removed to reduce confetti branches.
-- tests enforce coverage band (`0.5%..4%`), at least one component length `>= 80`, and component count `<= 25` in a `256x256` sample.
-6. Main-view shading:
-- stronger elevation response for land.
-- water/lake shading driven by deterministic depth-like scalar.
-- minimap remains unshaded palette-only.
-7. Low-zoom LOD:
-- renderer switches to `cacheAsTexture` chunk rendering below `LOD_ZOOM_THRESHOLD = 0.8`.
-- overlay exposes draw mode (`hex`/`lod`), chunk sprite count, and approximate tile draw count.
-8. UI polish:
-- outline control is a checkbox labeled `Show tile borders when zoomed`.
-- legend toggle uses Material Symbols key icon (not text label).
-9. Runtime controls retained:
-- mouse pan/zoom, WASD + Shift movement, Space stress pause, seed URL sharing, stress telemetry.
-10. `npm test` and `npm run build` remain green after each committed checkpoint.
+## Milestone 9 Acceptance Criteria
+1. Terrain debug render modes are available in overlay + keybind:
+- `normal`, `elevation`, `moisture`, `ocean-mask`, `flow`, `lake-basin`, `river-trace`
+- deterministic per seed and compatible with chunk streaming.
+2. Water visuals are seam-safe:
+- macro overlap classification tests remain green.
+- water visual scalar seam checks pass across chunk boundaries.
+3. Hydrology v3 (deterministic trace rivers):
+- sparse deterministic sources and downhill tracing with merge support.
+- traces terminate to ocean/lake/merge or are pruned by minimum quality.
+- river tests validate determinism, max step bound, minimum long component, and sink-termination ratio.
+4. Lakes v3 basin constraints:
+- ocean/lake split uses macro-connected flood fill.
+- tendril pruning and compactness checks prevent spaghetti lakes.
+- tests enforce basin presence/count bounds and compactness/tendril limits.
+5. Shoreline coherence:
+- shoreline remains ocean-only and tightened (`SHORELINE_BAND = 0.052`).
+- tests enforce ocean adjacency, coverage cap, and isolated-thread guard.
+6. Elevation readability + bias guard:
+- stronger main-view land shading contrast.
+- directional isotropy sanity test guards against strong axis bias in elevation sampling.
+- minimap remains base-palette-only (no elevation modulation).
+7. Palette separation + river integration:
+- water/lake/river/rock hues are clearly separated via single-source palette.
+- river shading is softened to read as terrain-integrated water.
+8. Low-zoom LOD, stress mode, and existing controls remain intact.
+9. `npm test` and `npm run build` pass for each checkpoint commit.
 
-## Tuned Constants (Milestone 8)
+## Tuned Constants (Milestone 9)
+- `SEA_LEVEL = 0.45`
 - `SHORELINE_BAND = 0.052`
 - `HYDRO_MACRO_SIZE = 256`
 - `HYDRO_MACRO_MARGIN = 128`
 - `MIN_LAKE_COMPONENT_TILES = 40`
-- River coverage/coherence guardrails verified by tests:
-- coverage `0.5%..4%`
+- `MAX_LAKE_COMPACTNESS = 220`
+- `LAKE_TENDRIL_PRUNE_PASSES = 3`
+- `RIVER_SOURCE_SPACING = 22`
+- `RIVER_SOURCE_RATE = 0.78`
+- `RIVER_SOURCE_MARGIN = 176`
+- `MAX_RIVER_STEPS = 420`
+- `MIN_RIVER_LENGTH = 12`
+- `MIN_RIVER_ELEVATION_DROP = 0.02`
+- River coverage/coherence guardrails in tests (`256x256` sample):
+- coverage `0.35%..4%`
 - largest component `>= 80`
-- component count `<= 25`
+- sink termination ratio `>= 55%` (sampled sources)
