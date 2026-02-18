@@ -1000,6 +1000,9 @@ function applyRiverIncision(
   }
   for (let i = 0; i < total; i += 1) {
     elevationSigned[i] = Math.max(-1.2, elevationSigned[i] + delta[i]);
+    if (river[i] === 1) {
+      elevationSigned[i] = Math.max(elevationSigned[i], seaLevel + 0.004);
+    }
   }
 }
 
@@ -1028,6 +1031,58 @@ function applySlopeFeedbackPass(
     }
   }
   elevationSigned.set(next);
+}
+
+type ContinuousPlateSample = {
+  uplift: number;
+  driftX: number;
+  driftY: number;
+  coherence: number;
+};
+
+function sampleContinuousPlateField(
+  plates: Plate[],
+  nx: number,
+  ny: number,
+  aspectMetric: number,
+): ContinuousPlateSample {
+  let upliftSum = 0;
+  let driftXSum = 0;
+  let driftYSum = 0;
+  let weightSum = 0;
+  const falloff = 7.4 + plates.length * 0.08;
+
+  for (let i = 0; i < plates.length; i += 1) {
+    const plate = plates[i];
+    const dx = (nx - plate.x) * aspectMetric;
+    const dy = ny - plate.y;
+    const d2 = dx * dx + dy * dy;
+    const w = Math.exp(-d2 * falloff);
+    upliftSum += plate.uplift * w;
+    driftXSum += plate.driftX * w;
+    driftYSum += plate.driftY * w;
+    weightSum += w;
+  }
+
+  if (weightSum <= 1e-6) {
+    return {
+      uplift: 0,
+      driftX: 0,
+      driftY: 0,
+      coherence: 0,
+    };
+  }
+
+  const invW = 1 / weightSum;
+  const driftX = driftXSum * invW;
+  const driftY = driftYSum * invW;
+  const coherence = clamp01(Math.hypot(driftX, driftY));
+  return {
+    uplift: upliftSum * invW,
+    driftX,
+    driftY,
+    coherence,
+  };
 }
 
 export function generateContinent(input: ContinentControls): GeneratedContinent {
@@ -1070,65 +1125,45 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     const warpY = (fbm(noiseSeed ^ 0x7e5f08cb, nx0 * 2.7, ny0 * 2.7, 2, 0.55, 2.1) - 0.5) * 0.06;
     const nx = clamp01(nx0 + warpX);
     const ny = clamp01(ny0 + warpY);
-
-    let nearest = Number.POSITIVE_INFINITY;
-    let second = Number.POSITIVE_INFINITY;
-    let nearestPlate = 0;
-    let secondPlate = 0;
-
-    for (let i = 0; i < plates.length; i += 1) {
-      const plate = plates[i];
-      const dx = (nx - plate.x) * aspectMetric;
-      const dy = ny - plate.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < nearest) {
-        second = nearest;
-        secondPlate = nearestPlate;
-        nearest = d2;
-        nearestPlate = i;
-      } else if (d2 < second) {
-        second = d2;
-        secondPlate = i;
-      }
-    }
-
-    const plateA = plates[nearestPlate];
-    const plateB = plates[secondPlate];
-    const gap = Math.sqrt(Math.max(0, second)) - Math.sqrt(Math.max(0, nearest));
-    const boundary = clamp01(1 - gap * 8.8);
-
-    const vx = plateB.x - plateA.x;
-    const vy = plateB.y - plateA.y;
-    const len = Math.hypot(vx, vy) || 1;
-    const nxBoundary = vx / len;
-    const nyBoundary = vy / len;
-    const relX = plateA.driftX - plateB.driftX;
-    const relY = plateA.driftY - plateB.driftY;
-    const along = relX * nxBoundary + relY * nyBoundary;
-    const cross = relX * nyBoundary - relY * nxBoundary;
-
-    const convergent = Math.max(0, -along);
-    const divergent = Math.max(0, along);
-    const transform = Math.abs(cross);
-
-    const boundaryUplift =
-      boundary *
-      ((0.35 + reliefNorm * 0.35 + peakNorm * 0.25) * convergent -
-        (0.18 + reliefNorm * 0.2) * divergent +
-        (0.08 + reliefNorm * 0.06) * transform);
+    const plateSample = sampleContinuousPlateField(plates, nx, ny, aspectMetric);
 
     const noiseX = nx * aspectMetric;
     const noiseY = ny;
+    const macroSlope =
+      (nx - 0.5) * (0.12 + fragNorm * 0.04) +
+      (ny - 0.5) * (0.08 + fragNorm * 0.05);
+    const basin = fbm(
+      noiseSeed ^ 0x3d6f8d5f,
+      noiseX * 1.3 + plateSample.driftX * 0.9,
+      noiseY * 1.3 + plateSample.driftY * 0.9,
+      3,
+      0.58,
+      2.05,
+    ) - 0.5;
+    const upliftBands = fbm(
+      noiseSeed ^ 0x1e7305c7,
+      noiseX * 2.2 + plateSample.driftX * 2.6,
+      noiseY * 2.2 + plateSample.driftY * 2.6,
+      3,
+      0.56,
+      2.1,
+    ) - 0.5;
     const low = fbm(noiseSeed, noiseX * 2.2, noiseY * 2.2, 5, 0.58, 2);
     const regional = fbm(noiseSeed ^ 0x51d7348b, noiseX * 6.4, noiseY * 6.4, 4, 0.55, 2.1);
     const rugged = fbm(noiseSeed ^ 0x2f43ac91, noiseX * 18.5, noiseY * 18.5, 3, 0.5, 2.3);
     const micro = fbm(noiseSeed ^ 0xf18bd7cf, noiseX * 44, noiseY * 44, 2, 0.45, 2.4);
-    const ridgeLine = Math.pow(
-      1 - Math.abs(fbm(noiseSeed ^ 0x6bbd3d3d, noiseX * 10 + noiseY * 4.5, noiseY * 8.5, 2, 0.54, 2.1) - 0.5) * 2,
-      1.3 + peakNorm * 1.8,
+    const ridgeGuide = ridgedFbm(
+      noiseSeed ^ 0x6bbd3d3d,
+      noiseX * 9.2 + plateSample.driftX * 2.2 + basin * 2.5,
+      noiseY * 7.6 + plateSample.driftY * 2.2 - basin * 2.5,
+      3,
+      0.56,
+      2.12,
     );
-
-    const plateBody = plateA.uplift * (0.16 + reliefNorm * 0.2);
+    const driftShear = 1 - plateSample.coherence;
+    const plateBody =
+      plateSample.uplift * (0.2 + reliefNorm * 0.24) +
+      driftShear * (0.05 + reliefNorm * 0.14);
 
     const centerX = (nx - 0.5) * 2 * aspectMetric;
     const centerY = (ny - 0.5) * 2;
@@ -1147,10 +1182,12 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     const edgeSeaBias = (1 - interior) * (1.08 + fragNorm * 0.25 + islandNorm * 0.48);
 
     return (
-      0.45 +
+      0.41 +
       plateBody +
-      boundaryUplift +
-      ridgeLine * boundary * (0.12 + peakNorm * 0.2) +
+      upliftBands * (0.19 + reliefNorm * 0.18) +
+      basin * (0.18 + fragNorm * 0.14) +
+      ridgeGuide * (0.09 + peakNorm * 0.15) +
+      macroSlope * 0.38 +
       (low - 0.5) * (0.45 + reliefNorm * 0.35) +
       (regional - 0.5) * (0.3 + fragNorm * 0.35 + islandNorm * 0.15) +
       (rugged - 0.5) * (0.08 + reliefNorm * 0.22) +
@@ -1358,7 +1395,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       seen.add(current);
       path.push(current);
 
-      if (ocean[current] === 1 || lake[current] === 1) {
+      if (ocean[current] === 1) {
         reachesWater = true;
         break;
       }
@@ -1434,6 +1471,56 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     tributarySources.push(source);
     selectedSources.push(source);
     markRiverPath(traced.path);
+  }
+
+  let riverPixels = 0;
+  for (let i = 0; i < river.length; i += 1) {
+    riverPixels += river[i];
+  }
+  const fallbackTarget = Math.round((width * height) * (0.00018 + riverMix * 0.00035));
+  if (riverPixels < fallbackTarget) {
+    const fallbackCandidates: Array<{ index: number; score: number }> = [];
+    for (let i = 0; i < total; i += 1) {
+      if (
+        land[i] === 0 ||
+        river[i] === 1 ||
+        flow[i] < 0.012 ||
+        elevationSigned[i] < seaLevel + 0.025 ||
+        distanceToOcean[i] < 8
+      ) {
+        continue;
+      }
+      const inland = clamp01(distanceToOcean[i] / 20);
+      const score = flow[i] * 0.72 + inland * 0.48 + moisture[i] * 0.14;
+      fallbackCandidates.push({ index: i, score });
+    }
+    fallbackCandidates.sort((a, b) => b.score - a.score);
+    const fallbackSpacing = Math.max(8, Math.floor(tributarySpacing * 0.58));
+    const fallbackMax = Math.max(24, Math.round(maxSources * 1.6));
+
+    for (let i = 0; i < fallbackCandidates.length && riverPixels < fallbackTarget && i < fallbackMax * 6; i += 1) {
+      const source = fallbackCandidates[i].index;
+      if (!sourceFarEnough(source, fallbackSpacing)) {
+        continue;
+      }
+      const traced = tracePath(source, true);
+      if (!traced.reachesWater || traced.path.length < Math.max(12, tributaryMinLength - 3)) {
+        continue;
+      }
+      const last = traced.path[Math.max(0, traced.path.length - 1)];
+      const drop = elevationSigned[source] - elevationSigned[last];
+      if (drop < Math.max(0.006, tributaryMinDrop * 0.4)) {
+        continue;
+      }
+      selectedSources.push(source);
+      for (let p = 0; p < traced.path.length; p += 1) {
+        const index = traced.path[p];
+        if (land[index] === 1 && river[index] === 0) {
+          river[index] = 1;
+          riverPixels += 1;
+        }
+      }
+    }
   }
 
   applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel, 1);

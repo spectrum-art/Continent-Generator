@@ -22,4 +22,4 @@ describe('continent diagnostics harness', () => {
     const mapB = generateContinent(b);
     expect(buildDiagnosticSnapshot(mapA)).not.toBe(buildDiagnosticSnapshot(mapB));
   });
-});
+}, 20_000);

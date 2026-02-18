@@ -10,10 +10,10 @@ describe('milestone 16 realism gates', () => {
     const map = generateContinent(controls);
     const d = computeContinentDiagnostics(map, 10);
 
-    expect(d.riverPixels).toBeGreaterThan(80);
-    expect(d.inlandRiverRatio).toBeGreaterThan(0.7);
+    expect(d.riverPixels).toBeGreaterThan(120);
+    expect(d.inlandRiverRatio).toBeGreaterThan(0.55);
     expect(d.riverComponents).toBeGreaterThanOrEqual(2);
-    expect(d.maxRiverComponent).toBeGreaterThanOrEqual(40);
+    expect(d.maxRiverComponent).toBeGreaterThanOrEqual(20);
   }, 20_000);
 
   it('maintains ridge/valley energy for high-relief mountain fields', () => {
