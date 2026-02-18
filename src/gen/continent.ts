@@ -452,6 +452,26 @@ function normalizeSigned(values: Float32Array): void {
   }
 }
 
+function applyEdgeFalloff(
+  width: number,
+  height: number,
+  elevationSigned: Float32Array,
+  seed: number,
+): void {
+  for (let y = 0; y < height; y += 1) {
+    const ny = y / Math.max(1, height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const nx = x / Math.max(1, width - 1);
+      const index = y * width + x;
+      const edge = Math.min(nx, 1 - nx, ny, 1 - ny);
+      const warp = (fbm(seed ^ 0x41f235ab, nx * 3.2, ny * 3.2, 2, 0.56, 2.1) - 0.5) * 0.04;
+      const edgeField = smoothRange(edge + warp, 0.015, 0.21);
+      const falloff = Math.pow(1 - edgeField, 2.1);
+      elevationSigned[index] -= falloff * 0.95;
+    }
+  }
+}
+
 function histogramThresholdSigned(values: Float32Array, targetLand: number): number {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
@@ -980,6 +1000,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const rawElevation = upsampleBilinearField(rawElevationBase, baseWidth, baseHeight, width, height);
 
   normalizeSigned(rawElevation);
+  applyEdgeFalloff(width, height, rawElevation, noiseSeed);
 
   const targetLand = clamp(0.08 + (controls.landFraction - 1) / 9 * 0.66, 0.08, 0.74);
   const seaLevel = histogramThresholdSigned(rawElevation, targetLand);
