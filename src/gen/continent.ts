@@ -756,7 +756,7 @@ function bfsDistance(width: number, height: number, starts: Uint8Array): Uint16A
   return distance;
 }
 
-function computeLightAndSlope(width: number, height: number, elevation01: Float32Array): {
+export function computeLightAndSlope(width: number, height: number, elevation01: Float32Array): {
   light: Float32Array;
   slope: Float32Array;
 } {
@@ -773,15 +773,24 @@ function computeLightAndSlope(width: number, height: number, elevation01: Float3
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const left = elevation01[y * width + Math.max(0, x - 1)];
-      const right = elevation01[y * width + Math.min(width - 1, x + 1)];
-      const up = elevation01[Math.max(0, y - 1) * width + x];
-      const down = elevation01[Math.min(height - 1, y + 1) * width + x];
+      const xl = Math.max(0, x - 1);
+      const xr = Math.min(width - 1, x + 1);
+      const yu = Math.max(0, y - 1);
+      const yd = Math.min(height - 1, y + 1);
 
-      const dzdx = (right - left) * 0.5;
-      const dzdy = (down - up) * 0.5;
-      const nx = -dzdx * 4.1;
-      const ny = -dzdy * 4.1;
+      const tl = elevation01[yu * width + xl];
+      const tc = elevation01[yu * width + x];
+      const tr = elevation01[yu * width + xr];
+      const ml = elevation01[y * width + xl];
+      const mr = elevation01[y * width + xr];
+      const bl = elevation01[yd * width + xl];
+      const bc = elevation01[yd * width + x];
+      const br = elevation01[yd * width + xr];
+
+      const dzdx = ((tr + mr * 2 + br) - (tl + ml * 2 + bl)) / 8;
+      const dzdy = ((bl + bc * 2 + br) - (tl + tc * 2 + tr)) / 8;
+      const nx = -dzdx * 4.6;
+      const ny = -dzdy * 4.6;
       const nz = 1;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       const nnx = nx / nLen;
@@ -789,12 +798,24 @@ function computeLightAndSlope(width: number, height: number, elevation01: Float3
       const nnz = nz / nLen;
 
       const lambert = Math.max(0, nnx * lnx + nny * lny + nnz * lnz);
-      const ambient = 0.33;
-      const diffuse = 0.67 * lambert;
+      const ambient = 0.32;
+      const diffuse = 0.68 * lambert;
       light[y * width + x] = clamp01(ambient + diffuse);
-      slope[y * width + x] = clamp01(Math.hypot(dzdx, dzdy) * 7.6);
+      slope[y * width + x] = clamp01(Math.hypot(dzdx, dzdy) * 8.2);
     }
   }
+
+  const smoothed = light.slice();
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const neighborAverage =
+        (light[index - 1] + light[index + 1] + light[index - width] + light[index + width] + light[index]) / 5;
+      const blend = 0.16 * (1 - slope[index]);
+      smoothed[index] = lerp(light[index], neighborAverage, blend);
+    }
+  }
+  light.set(smoothed);
 
   return { light, slope };
 }
