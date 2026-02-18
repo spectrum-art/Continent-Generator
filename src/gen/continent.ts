@@ -1249,6 +1249,21 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     });
   }
 
+  const coreRng = mulberry32(noiseSeed ^ 0x1f58c9a3);
+  const coreCount = 2 + Math.round(islandNorm * 2);
+  const landCores: Array<{ x: number; y: number; weight: number }> = [];
+  for (let i = 0; i < coreCount; i += 1) {
+    const angle = (i / coreCount) * Math.PI * 2 + coreRng() * 0.9;
+    const radius = 0.14 + coreRng() * 0.26;
+    const cx = clamp01(0.5 + Math.cos(angle) * radius);
+    const cy = clamp01(0.5 + Math.sin(angle) * radius);
+    landCores.push({
+      x: cx,
+      y: cy,
+      weight: 0.6 + coreRng() * 0.7,
+    });
+  }
+
   const rawElevationBase = downsampleField(baseWidth, baseHeight, fieldScale, (fx, fy) => {
     const nx0 = fx / Math.max(1, baseWidth - 1);
     const ny0 = fy / Math.max(1, baseHeight - 1);
@@ -1310,7 +1325,16 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       -0.32 + islandNorm * 0.04,
       0.34 - fragNorm * 0.08 + islandNorm * 0.05,
     );
-    const edgeSeaBias = (1 - interior) * (1.08 + fragNorm * 0.25 + islandNorm * 0.48);
+    let coreField = 0;
+    for (let i = 0; i < landCores.length; i += 1) {
+      const core = landCores[i];
+      const dx = (nx - core.x) * aspectMetric;
+      const dy = ny - core.y;
+      const d2 = dx * dx + dy * dy;
+      coreField += Math.exp(-d2 * (10.5 + fragNorm * 3.2)) * core.weight;
+    }
+    const coreInfluence = clamp01(coreField / (0.88 + islandNorm * 0.72));
+    const edgeSeaBias = (1 - interior) * (1.08 + fragNorm * 0.25 + islandNorm * 0.48) * (1.18 - coreInfluence * 0.46);
 
     return (
       0.41 +
@@ -1318,6 +1342,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       upliftBands * (0.19 + reliefNorm * 0.18) +
       basin * (0.18 + fragNorm * 0.14) +
       ridgeGuide * (0.09 + peakNorm * 0.15) +
+      coreInfluence * (0.1 + islandNorm * 0.14) +
       macroSlope * 0.38 +
       (low - 0.5) * (0.45 + reliefNorm * 0.35) +
       (regional - 0.5) * (0.3 + fragNorm * 0.35 + islandNorm * 0.15) +
