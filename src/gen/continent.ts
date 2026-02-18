@@ -931,41 +931,39 @@ function applyRiverIncision(
   river: Uint8Array,
   flow: Float32Array,
   seaLevel: number,
+  passScale = 1,
 ): void {
   const radius = 2;
   const total = width * height;
-  for (let pass = 0; pass < 2; pass += 1) {
-    const delta = new Float32Array(total);
-    const passScale = pass === 0 ? 1 : 0.62;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const index = y * width + x;
-        if (river[index] === 0 || elevationSigned[index] <= seaLevel - 0.02) {
-          continue;
-        }
-        const trunkFactor = Math.sqrt(clamp01(flow[index]));
-        const depth = (0.0055 + trunkFactor * 0.015) * passScale;
-        for (let dy = -radius; dy <= radius; dy += 1) {
-          for (let dx = -radius; dx <= radius; dx += 1) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-              continue;
-            }
-            const distance = Math.hypot(dx, dy);
-            if (distance > radius + 0.25) {
-              continue;
-            }
-            const taper = Math.max(0, 1 - distance / (radius + 0.25));
-            const ni = ny * width + nx;
-            delta[ni] -= depth * taper * taper;
+  const delta = new Float32Array(total);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (river[index] === 0 || elevationSigned[index] <= seaLevel - 0.02) {
+        continue;
+      }
+      const trunkFactor = Math.sqrt(clamp01(flow[index]));
+      const depth = (0.0055 + trunkFactor * 0.015) * passScale;
+      for (let dy = -radius; dy <= radius; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
           }
+          const distance = Math.hypot(dx, dy);
+          if (distance > radius + 0.25) {
+            continue;
+          }
+          const taper = Math.max(0, 1 - distance / (radius + 0.25));
+          const ni = ny * width + nx;
+          delta[ni] -= depth * taper * taper;
         }
       }
     }
-    for (let i = 0; i < total; i += 1) {
-      elevationSigned[i] = Math.max(-1.2, elevationSigned[i] + delta[i]);
-    }
+  }
+  for (let i = 0; i < total; i += 1) {
+    elevationSigned[i] = Math.max(-1.2, elevationSigned[i] + delta[i]);
   }
 }
 
@@ -1207,29 +1205,33 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
 
   const river = new Uint8Array(total);
   const riverMix = controls.biomeMix.rivers;
-  const sourceThreshold = lerp(0.16, 0.035, riverMix);
-  const minLength = Math.round(lerp(52, 18, riverMix));
-  const minDrop = lerp(0.07, 0.02, riverMix);
-  const maxSources = Math.max(6, Math.round((total / 12_000) * (0.7 + riverMix * 2.6)));
-  const spacing = Math.round(lerp(42, 16, riverMix));
-  const inlandMinDistance = Math.round(lerp(4, 11, riverMix));
+  const trunkThreshold = lerp(0.11, 0.02, riverMix);
+  const tributaryThreshold = lerp(0.07, 0.012, riverMix);
+  const trunkMinLength = Math.round(lerp(55, 20, riverMix));
+  const tributaryMinLength = Math.round(lerp(34, 15, riverMix));
+  const trunkMinDrop = lerp(0.055, 0.018, riverMix);
+  const tributaryMinDrop = lerp(0.045, 0.015, riverMix);
+  const maxSources = Math.max(6, Math.round((total / 13_500) * (0.9 + riverMix * 2.2)));
+  const spacing = Math.round(lerp(52, 19, riverMix));
+  const tributarySpacing = Math.round(spacing * 0.58);
+  const inlandMinDistance = Math.round(lerp(5, 13, riverMix));
 
   const sourceCandidates: Array<{ index: number; score: number }> = [];
   const inlandCandidates: Array<{ index: number; score: number }> = [];
   for (let i = 0; i < total; i += 1) {
-    if (land[i] === 0 || elevationSigned[i] < seaLevel + 0.04) {
+    if (land[i] === 0 || elevationSigned[i] < seaLevel + 0.045) {
       continue;
     }
-    if (flow[i] < sourceThreshold) {
+    if (flow[i] < trunkThreshold) {
       continue;
     }
-    const inlandFactor = clamp01(distanceToOcean[i] / (14 + controls.fragmentation * 2));
-    const wetness = moisture[i] + inlandFactor * 0.2;
-    if (wetness < 0.16) {
+    const inlandFactor = clamp01(distanceToOcean[i] / (16 + controls.fragmentation * 2));
+    const wetness = moisture[i] + inlandFactor * 0.24;
+    if (wetness < 0.14) {
       continue;
     }
-    const elevationFactor = clamp01((elevationSigned[i] - seaLevel) * 1.7);
-    const score = flow[i] * (0.58 + inlandFactor * 0.72) + elevationFactor * 0.24 + wetness * 0.18;
+    const elevationFactor = clamp01((elevationSigned[i] - seaLevel) * 1.9);
+    const score = flow[i] * (0.52 + inlandFactor * 0.88) + elevationFactor * 0.2 + wetness * 0.18;
     const candidate = { index: i, score };
     sourceCandidates.push(candidate);
     if (distanceToOcean[i] >= inlandMinDistance) {
@@ -1240,10 +1242,10 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   inlandCandidates.sort((a, b) => b.score - a.score);
 
   const selectedSources: number[] = [];
-  const sourceFarEnough = (index: number): boolean => {
+  const sourceFarEnough = (index: number, sourceSpacing: number): boolean => {
     const x = index % width;
     const y = Math.floor(index / width);
-    const spacingSq = spacing * spacing;
+    const spacingSq = sourceSpacing * sourceSpacing;
     for (const source of selectedSources) {
       const sx = source % width;
       const sy = Math.floor(source / width);
@@ -1257,7 +1259,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   };
 
   const pushSource = (source: number): void => {
-    if (!sourceFarEnough(source)) {
+    if (!sourceFarEnough(source, spacing)) {
       return;
     }
     selectedSources.push(source);
@@ -1271,14 +1273,38 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     pushSource(sourceCandidates[i].index);
   }
 
-  for (let i = 0; i < selectedSources.length; i += 1) {
-    const source = selectedSources[i];
+  const spillNeighbor = (index: number, seen: Set<number>): number => {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    let best = -1;
+    let bestElevation = Number.POSITIVE_INFINITY;
+    for (const [dx, dy] of NEIGHBORS_8) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+        continue;
+      }
+      const ni = ny * width + nx;
+      if (seen.has(ni)) {
+        continue;
+      }
+      const e = elevationSigned[ni];
+      if (e < bestElevation) {
+        bestElevation = e;
+        best = ni;
+      }
+    }
+    return best;
+  };
+
+  const tracePath = (source: number, allowRiverJoin: boolean): { path: number[]; reachesWater: boolean; joinsRiver: boolean } => {
     const seen = new Set<number>();
     const path: number[] = [];
     let current = source;
     let reachesWater = false;
+    let joinsRiver = false;
 
-    for (let step = 0; step < width + height; step += 1) {
+    for (let step = 0; step < width + height + Math.max(width, height); step += 1) {
       if (seen.has(current)) {
         break;
       }
@@ -1291,30 +1317,96 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       }
 
       const next = downstream[current];
-      if (next < 0) {
+      const target = next >= 0 ? next : spillNeighbor(current, seen);
+      if (target < 0) {
         break;
       }
-      if (river[next] === 1) {
+      if (allowRiverJoin && river[target] === 1) {
         reachesWater = true;
-        path.push(next);
+        joinsRiver = true;
+        path.push(target);
         break;
       }
-      current = next;
+      current = target;
     }
 
-    const drop = elevationSigned[source] - elevationSigned[path[path.length - 1]];
-    if (path.length < minLength || drop < minDrop || !reachesWater) {
-      continue;
-    }
+    return { path, reachesWater, joinsRiver };
+  };
 
-    for (const index of path) {
+  const markRiverPath = (path: number[]): void => {
+    for (let i = 0; i < path.length; i += 1) {
+      const index = path[i];
       if (land[index] === 1) {
         river[index] = 1;
       }
     }
+  };
+
+  for (let i = 0; i < selectedSources.length; i += 1) {
+    const source = selectedSources[i];
+    const traced = tracePath(source, true);
+    const last = traced.path[Math.max(0, traced.path.length - 1)];
+    const drop = elevationSigned[source] - elevationSigned[last];
+    if (traced.path.length < trunkMinLength || drop < trunkMinDrop || !traced.reachesWater) {
+      continue;
+    }
+    markRiverPath(traced.path);
   }
 
-  applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel);
+  const tributaryCandidates: Array<{ index: number; score: number }> = [];
+  for (let i = 0; i < total; i += 1) {
+    if (land[i] === 0 || river[i] === 1 || flow[i] < tributaryThreshold) {
+      continue;
+    }
+    if (distanceToOcean[i] < inlandMinDistance - 1 || elevationSigned[i] < seaLevel + 0.03) {
+      continue;
+    }
+    const inlandFactor = clamp01(distanceToOcean[i] / (15 + controls.fragmentation * 2));
+    const wetness = clamp01(moisture[i] + flow[i] * 0.5);
+    const score = flow[i] * 0.62 + inlandFactor * 0.58 + wetness * 0.2;
+    tributaryCandidates.push({ index: i, score });
+  }
+  tributaryCandidates.sort((a, b) => b.score - a.score);
+
+  const tributarySources: number[] = [];
+  const maxTributaries = Math.max(8, Math.round(maxSources * 2.4));
+  for (let i = 0; i < tributaryCandidates.length && tributarySources.length < maxTributaries; i += 1) {
+    const source = tributaryCandidates[i].index;
+    if (!sourceFarEnough(source, tributarySpacing)) {
+      continue;
+    }
+    const traced = tracePath(source, true);
+    if (!traced.joinsRiver || !traced.reachesWater) {
+      continue;
+    }
+    const last = traced.path[Math.max(0, traced.path.length - 1)];
+    const drop = elevationSigned[source] - elevationSigned[last];
+    if (traced.path.length < tributaryMinLength || drop < tributaryMinDrop) {
+      continue;
+    }
+    tributarySources.push(source);
+    selectedSources.push(source);
+    markRiverPath(traced.path);
+  }
+
+  applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel, 1);
+
+  for (let i = 0; i < total; i += 1) {
+    elevation01[i] = clamp01((elevationSigned[i] + 1) * 0.5);
+    land[i] = elevationSigned[i] > seaLevel ? 1 : 0;
+    water[i] = land[i] === 1 ? 0 : 1;
+  }
+  enforceOceanEdges(width, height, land);
+  for (let i = 0; i < total; i += 1) {
+    if (land[i] === 0) {
+      water[i] = 1;
+      river[i] = 0;
+    }
+  }
+  ({ ocean, lake } = floodOcean(width, height, water));
+  ({ downstream, flow } = computeFlowField(width, height, land, elevationSigned, elevation01));
+
+  applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel, 0.62);
   applySlopeFeedbackPass(width, height, elevationSigned, seaLevel);
 
   for (let i = 0; i < total; i += 1) {

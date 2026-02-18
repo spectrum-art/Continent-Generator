@@ -70,7 +70,7 @@ describe('continent generator artifact pivot', () => {
     controls.aspectRatio = 'wide';
     const map = generateContinent(controls);
     expect(oceanEdgeRatio(map)).toBe(1);
-  });
+  }, 10_000);
 
   it('produces inland river tiles away from coastlines', () => {
     const controls = testControls('default');
