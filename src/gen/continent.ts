@@ -509,8 +509,8 @@ function smoothCoastalElevation(
   smoothLevel: number,
 ): void {
   const smooth = (smoothLevel - 1) / 9;
-  const passes = Math.round(1 + smooth * 4);
-  const band = lerp(0.03, 0.22, smooth);
+  const passes = Math.round(1 + smooth * 5);
+  const band = lerp(0.025, 0.25, smooth);
   let current = elevation.slice();
 
   for (let pass = 0; pass < passes; pass += 1) {
@@ -539,7 +539,7 @@ function smoothCoastalElevation(
         const anisotropic = orthogonal / 4 * 0.65 + diagonal / 4 * 0.35;
         const coastalTarget = average * 0.35 + anisotropic * 0.65;
         const curvature = average - current[index];
-        const strength = smoothstep(1 - distance / Math.max(1e-6, band)) * lerp(0.12, 0.42, smooth);
+        const strength = smoothstep(1 - distance / Math.max(1e-6, band)) * lerp(0.09, 0.52, smooth);
         const eroded = lerp(current[index], coastalTarget, strength);
         next[index] = lerp(eroded, seaLevel, strength * 0.08) + curvature * strength * 0.08;
       }
@@ -1222,7 +1222,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   }
 
   const biome = new Uint8Array(total);
-  const beachWidth = clamp(Math.round(1 + (10 - controls.coastalSmoothing) / 4), 1, 4);
+  const beachWidth = 2;
   const mountainThreshold = 0.54 + (1 - reliefNorm) * 0.1 - controls.biomeMix.mountains * 0.08;
   const rockThreshold = mountainThreshold + 0.15 - peakNorm * 0.08;
 
