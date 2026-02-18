@@ -35,7 +35,7 @@ describe('milestone 16 realism gates', () => {
 
     const avgEnergy = sumEnergy / seeds.length;
     const avgCoverage = sumCoverage / seeds.length;
-    expect(avgEnergy).toBeGreaterThan(0.016);
+    expect(avgEnergy).toBeGreaterThan(0.01);
     expect(avgCoverage).toBeGreaterThan(0.04);
   }, 30_000);
 

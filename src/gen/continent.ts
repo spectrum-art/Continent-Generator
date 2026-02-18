@@ -519,24 +519,13 @@ function applyRidgeValleySynthesis(
   reliefNorm: number,
   peakNorm: number,
   fragNorm: number,
+  stressField: Float32Array,
+  stressDirX: Float32Array,
+  stressDirY: Float32Array,
 ): void {
-  const total = width * height;
-  const stress = new Float32Array(total);
-  const stressSeed = seed ^ 0x564f21a5;
   const warpSeed = seed ^ 0x2bc6d1e3;
   const ridgeSeed = seed ^ 0x7193b5d7;
   const spurSeed = seed ^ 0xc2a4518d;
-
-  for (let y = 0; y < height; y += 1) {
-    const ny = y / Math.max(1, height - 1);
-    for (let x = 0; x < width; x += 1) {
-      const nx = x / Math.max(1, width - 1);
-      const index = y * width + x;
-      const sx = nx * (width / Math.max(1, height));
-      const sy = ny;
-      stress[index] = fbm(stressSeed, sx * 2.1, sy * 2.1, 3, 0.57, 2.08);
-    }
-  }
 
   const next = elevationSigned.slice();
   for (let y = 1; y < height - 1; y += 1) {
@@ -545,16 +534,18 @@ function applyRidgeValleySynthesis(
       const nx = x / Math.max(1, width - 1);
       const index = y * width + x;
       const current = elevationSigned[index];
-      const mountainMask = smoothRange(current, -0.03 + fragNorm * 0.02, 0.62);
+      const localStress = clamp01(stressField[index]);
+      const mountainMask = smoothRange(current, -0.03 + fragNorm * 0.02, 0.62) * (0.45 + localStress * 0.75);
       if (mountainMask <= 0) {
         continue;
       }
 
-      const stressDx = stress[y * width + (x + 1)] - stress[y * width + (x - 1)];
-      const stressDy = stress[(y + 1) * width + x] - stress[(y - 1) * width + x];
-      const tangent = Math.atan2(stressDy, stressDx) + Math.PI * 0.5;
-      const cosA = Math.cos(tangent);
-      const sinA = Math.sin(tangent);
+      const cosA = stressDirX[index];
+      const sinA = stressDirY[index];
+      const dirLen = Math.hypot(cosA, sinA);
+      if (dirLen < 1e-5) {
+        continue;
+      }
 
       const warpX = (fbm(warpSeed, nx * 4.8, ny * 4.8, 2, 0.55, 2.15) - 0.5) * 0.09;
       const warpY = (fbm(warpSeed ^ 0x93a7, nx * 4.2, ny * 4.2, 2, 0.55, 2.15) - 0.5) * 0.09;
@@ -563,18 +554,86 @@ function applyRidgeValleySynthesis(
 
       const rx = wx * cosA - wy * sinA;
       const ry = wx * sinA + wy * cosA;
-      const ridgePrimary = ridgedFbm(ridgeSeed, rx * 18.5, ry * 6.4, 4, 0.58, 2.05);
-      const ridgeSpur = ridgedFbm(spurSeed, rx * 31.5 + wy * 2.1, ry * 11.4, 2, 0.55, 2.2);
+      const ridgePrimary = ridgedFbm(
+        ridgeSeed,
+        rx * (14.5 + localStress * 8.8),
+        ry * (5.8 + localStress * 3.3),
+        4,
+        0.58,
+        2.05,
+      );
+      const ridgeSpur = ridgedFbm(
+        spurSeed,
+        rx * (24.5 + localStress * 8.2) + wy * 2.1,
+        ry * (9.6 + localStress * 3.8),
+        2,
+        0.55,
+        2.2,
+      );
       const ridgeMix = ridgePrimary * 0.74 + ridgeSpur * 0.26;
       const ridgeSigned = (ridgeMix - 0.5) * 2;
 
-      const amplitude = (0.028 + reliefNorm * 0.11 + peakNorm * 0.1) * mountainMask;
-      const valleyDepth = (1 - ridgeMix) * (0.012 + reliefNorm * 0.05 + peakNorm * 0.03) * mountainMask;
+      const amplitude = (0.026 + reliefNorm * 0.1 + peakNorm * 0.11) * mountainMask * (0.62 + localStress * 0.78);
+      const valleyDepth = (1 - ridgeMix) * (0.01 + reliefNorm * 0.048 + peakNorm * 0.03) * mountainMask;
       next[index] = current + ridgeSigned * amplitude - valleyDepth;
     }
   }
 
   elevationSigned.set(next);
+}
+
+function buildGlobalStressField(
+  width: number,
+  height: number,
+  plates: Plate[],
+  aspectMetric: number,
+  seed: number,
+): { stress: Float32Array; dirX: Float32Array; dirY: Float32Array } {
+  const total = width * height;
+  const stress = new Float32Array(total);
+  const dirX = new Float32Array(total);
+  const dirY = new Float32Array(total);
+
+  for (let y = 0; y < height; y += 1) {
+    const ny = y / Math.max(1, height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const nx = x / Math.max(1, width - 1);
+      const index = y * width + x;
+      const plate = sampleContinuousPlateField(plates, nx, ny, aspectMetric);
+      const angleNoise = (fbm(seed ^ 0x6ab329f1, nx * 1.8, ny * 1.8, 3, 0.58, 2.07) - 0.5) * Math.PI * 0.78;
+      const baseAngle = Math.atan2(plate.driftY, plate.driftX) + angleNoise;
+      dirX[index] = Math.cos(baseAngle);
+      dirY[index] = Math.sin(baseAngle);
+      const stressNoise = Math.abs(fbm(seed ^ 0x57d13ca7, nx * 2.3, ny * 2.3, 3, 0.56, 2.08) - 0.5) * 2;
+      stress[index] = clamp01((1 - plate.coherence) * 0.78 + stressNoise * 0.35);
+    }
+  }
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const stressNext = stress.slice();
+    const dirXNext = dirX.slice();
+    const dirYNext = dirY.slice();
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const left = index - 1;
+        const right = index + 1;
+        const up = index - width;
+        const down = index + width;
+        stressNext[index] = (stress[index] * 0.5 + stress[left] + stress[right] + stress[up] + stress[down]) / 4.5;
+        const smoothedX = (dirX[index] * 0.5 + dirX[left] + dirX[right] + dirX[up] + dirX[down]) / 4.5;
+        const smoothedY = (dirY[index] * 0.5 + dirY[left] + dirY[right] + dirY[up] + dirY[down]) / 4.5;
+        const len = Math.hypot(smoothedX, smoothedY) || 1;
+        dirXNext[index] = smoothedX / len;
+        dirYNext[index] = smoothedY / len;
+      }
+    }
+    stress.set(stressNext);
+    dirX.set(dirXNext);
+    dirY.set(dirYNext);
+  }
+
+  return { stress, dirX, dirY };
 }
 
 function histogramThresholdSigned(values: Float32Array, targetLand: number): number {
@@ -1197,10 +1256,22 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   });
 
   const rawElevation = upsampleBilinearField(rawElevationBase, baseWidth, baseHeight, width, height);
+  const globalStress = buildGlobalStressField(width, height, plates, aspectMetric, noiseSeed);
 
   normalizeSigned(rawElevation);
   applyEdgeFalloff(width, height, rawElevation, noiseSeed);
-  applyRidgeValleySynthesis(width, height, rawElevation, noiseSeed, reliefNorm, peakNorm, fragNorm);
+  applyRidgeValleySynthesis(
+    width,
+    height,
+    rawElevation,
+    noiseSeed,
+    reliefNorm,
+    peakNorm,
+    fragNorm,
+    globalStress.stress,
+    globalStress.dirX,
+    globalStress.dirY,
+  );
   normalizeSigned(rawElevation);
 
   const targetLand = clamp(0.08 + (controls.landFraction - 1) / 9 * 0.66, 0.08, 0.74);
