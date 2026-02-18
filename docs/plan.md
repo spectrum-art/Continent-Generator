@@ -1,23 +1,27 @@
 # Map Explorer Plan
 
-## Milestone 13: Atlas-Grade Geometry + Rendering Overhaul
+## Milestone 14: Terrain-First Coastlines and Realistic Relief
 
-- [x] Align implementation with `docs/continent-generator-controls.csv`.
-- [x] Align implementation with `docs/continent-generator-design-spec.md`.
-- [x] Repair metric harness foundations for identity/perf/preset feature vectors.
-- [x] Ensure aspect ratio changes regenerate geometry and update map identity (no stretch clone behavior).
-- [x] Upgrade landmask/coast pipeline for stronger silhouette control and corner/ocean constraints.
-- [x] Strengthen ridge-based mountain shaping inputs and atlas hillshade fields.
-- [x] Keep deterministic flow-based river generation with basin/lake handling and prune artifacts.
-- [x] Add coastline cleanup behavior so higher coastal smoothing produces cleaner coastlines.
-- [x] Add rendering LOD raster strategy (`low`, `base`, `high`) selected by zoom band.
-- [x] Add `Lat/Long Grid` advanced toggle and render overlay.
-- [x] Add in-app perf suite trigger (`mid`/`full`/`high` probes with avg/p95/worst/hitch metrics).
-- [x] Add in-app preset distinctness trigger against fixed seeds.
-- [x] Add/expand automated tests:
-- [x] aspect-ratio identity change
-- [x] export/import identity round-trip with aspect ratio
-- [x] coastal smoothing monotonic perimeter behavior
-- [x] preset distinctness suite pass criteria
+- [x] Remove preset dropdown, preset logic paths, and preset-specific tests.
+- [x] Remove non-user milestone buttons (`Run Perf Suite`, `Preset Distinctness`) from UI/runtime surface.
+- [x] Replace mask-first terrain with terrain-first pipeline:
+- [x] plates
+- [x] continuous elevation field
+- [x] sea level threshold from `Land Fraction`
+- [x] coastline from elevation
+- [x] climate → rivers → biomes
+- [x] Rewrite coastal smoothing to operate on elevation near sea level (not binary mask dilation/erosion).
+- [x] Keep ocean edges guaranteed for bounded-map artifact constraints.
+- [x] Strengthen NW directional shaded relief using surface normals.
+- [x] Increase effective terrain detail with multi-scale + micro relief.
+- [x] Improve biome realism from temperature + moisture + elevation + rain shadow context.
+- [x] Make aspect ratio generation-space aware (no post-generation stretch behavior).
+- [x] Keep LOD rendering strategy active for low/mid/high zoom.
+- [x] Add/retain tests for:
+- [x] determinism
+- [x] export/import identity roundtrip
+- [x] land-fraction monotonicity
+- [x] coastline perimeter response to coastal smoothing
+- [x] aspect-ratio identity differences
 - [x] Keep all tests green with `npm test`.
 - [x] Keep production build green with `npm run build`.
