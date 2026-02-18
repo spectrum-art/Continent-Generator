@@ -1,3 +1,3 @@
-import { startMapExplorer } from './render/mapExplorer';
+import { startContinentStudio } from './render/continentStudio';
 
-void startMapExplorer();
+void startContinentStudio();

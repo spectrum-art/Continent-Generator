@@ -1,89 +1,50 @@
 # Map Explorer Spec
 
-## Scope
-Static deterministic hex map explorer in TypeScript + Vite + PixiJS with infinite chunk streaming, debug overlay, minimap, and stress/performance observability.
+## Milestone 12: Continent Generator Artifact Pivot
 
-## Non-Goals
-- No backend/network APIs
-- No runtime AI features
-- No platform-specific dependencies
+## Product Scope
+- Static, deterministic continent generator artifact.
+- Finite atlas map only (no infinite world streaming).
+- Parameter-driven generation via controls in `docs/continent-generator-controls.csv`.
+- Visual output: clean atlas-style terrain with readable coasts, rivers, and biomes.
 
-## Milestone 10 Acceptance Criteria
-1. Seam and shore consistency:
-- elevation/moisture macro seam checks pass.
-- chunk-border shore classification checks pass.
-- no deterministic chunk-edge shoreline discontinuity in tests.
-2. Natural shore width targets:
-- ocean shore mean width stays in `1.9..4.0` sampled tiles.
-- lake shore mean width stays in `1.0..2.0` sampled tiles.
-3. River hierarchy and drainage:
-- deterministic river layout per seed.
-- accumulation hierarchy check: max sampled river accumulation is at least `5x` sampled average in a `1024x1024` window.
-- river coherence checks pass: largest sampled component `>= 80`, short-component ratio `<= 15%`, majority of sampled sources terminate to ocean/lake.
-4. Mountain structure and readability:
-- at least one continuous mountain/rock ridge component `>= 40` tiles in sample.
-- mountain elevations stay meaningfully above river elevations on average.
-- slope-aware land shading is enabled in renderer.
-5. Terrain-driven biomes:
-- forest placement depends on moisture/elevation/drainage weighting.
-- biome smoothing reduces speckling and tiny isolated patches (guarded in generator tests).
-6. River visual integration:
-- river color is blended toward aquatic tones and terrain bank tones (not high-contrast overlay styling).
-7. Core behavior remains unchanged:
-- deterministic seeded generator and pure `src/gen/*`.
-- existing pan/zoom/chunk streaming/minimap/stress systems stay intact.
-- `npm test` and `npm run build` are green at checkpoint gates.
+## Required Controls
+- Top-level controls: `Seed`, `Preset`, `Size`, `Aspect Ratio`.
+- Primary geography sliders: `Land Fraction`, `Relief`, `Fragmentation`, `Coastal Smoothing`.
+- Biome mix sliders: `Rivers`, `Grassland`, `Temperate Forest`, `Rainforest`, `Desert`, `Mountains`, `Tundra`.
+- Buttons: `Generate`, `Reroll`, `Randomize`, `Reset`, `Save as PNG`.
+- Advanced section: `Import`, `Export`, `Latitude Center`, `Latitude Span`, `Plate Count`, `Mountain Peakiness`, `Climate Bias`, `Island Density`.
+- `Reset Biome Mix` and `Toggle Advanced Mode` are available.
 
-## Tuned Constants (Milestone 10)
-- `SEA_LEVEL = 0.45`
-- `SHORELINE_BAND = 0.052`
-- `HYDRO_MACRO_SIZE = 256`
-- `HYDRO_MACRO_MARGIN = 128`
-- `MIN_LAKE_COMPONENT_TILES = 40`
-- `MAX_LAKE_COMPACTNESS = 220`
-- `LAKE_TENDRIL_PRUNE_PASSES = 3`
-- `RIVER_SOURCE_SPACING = 22`
-- `RIVER_SOURCE_RATE = 0.78`
-- `RIVER_SOURCE_MARGIN = 176`
-- `MAX_RIVER_STEPS = 420`
-- `MIN_RIVER_LENGTH = 12`
-- `MIN_RIVER_ELEVATION_DROP = 0.02`
-- River coverage/coherence guardrails in tests:
-- `256x256` coverage target `0.35%..4%`
-- `256x256` largest component `>= 80`
-- sampled short-fragment ratio `<= 15%`
-- sampled sink termination ratio `>= 55%`
+## Generation Pipeline (Bounded)
+1. Plate field and boundary influence generation.
+2. Base elevation synthesis from plates + multi-frequency noise.
+3. Land/ocean thresholding with ocean-enforced edge falloff.
+4. Coastal smoothing/fragmentation shaping.
+5. Climate fields (temperature/moisture from latitude/elevation/proximity).
+6. River tracing from downhill flow accumulation.
+7. Biome assignment (terrain + climate + biome mix targets).
 
-## Milestone 11 A1: Perf HUD + Profiler Usage
-1. Perf HUD availability:
-- Debug overlay includes a `Show Perf HUD` toggle.
-- Perf HUD displays rolling frame metrics (`FPS 1s`, `FPS 5s`, `avg ms`, `p95 ms`, slow-frame counts over the frame window).
-- Perf HUD displays per-bucket timing (`input`, `camera`, `visibleRange`, `rangeDiff`, `chunkGenerate`, `chunkBuild`, `renderSubmit`, `minimap`, `overlay`) as `avg` and `p95`.
-2. Counter visibility:
-- HUD exposes chunk/cache counters (chunk requests, cache hit rate, generated/rebuilt chunks per second and rolling values, processed tiles per second and rolling values).
-- HUD exposes scene complexity counters (loaded chunks, display object count, graphics object count, sprite count, render texture estimate).
-3. Export workflow:
-- `Copy perf snapshot` captures a live snapshot and appends it to an internal rolling log buffer.
-- Button copies the rolling log buffer JSON to clipboard for external analysis.
-- HUD shows copy status feedback.
-4. Determinism and behavior:
-- Instrumentation does not modify seed/world determinism.
-- Existing streaming/camera behavior remains functional while profiling is active.
+## Determinism
+- Seed normalization is case-insensitive.
+- Same seed + controls produce identical map hashes.
+- Human-readable seed generation is `AdjectiveNoun`.
 
-## Milestone 11 Acceptance Criteria
-1. Profiler and scenario tooling:
-- Perf HUD exposes frame metrics, per-bucket p95 timings, chunk/cache/display counters, and JSON export.
-- Scenario Runner executes deterministic scenarios (`idle10`, `pan10`, `zoomPan10`, `stress15`) from a known reset state.
-- Each scenario emits a structured perf report in HUD and console.
-2. Differential diagnosis and targeted fixes:
-- Diagnosis is documented in `docs/perf.md` with baseline numbers and selected bottlenecks.
-- Renderer uses queued chunk loading with explicit budgets (`CHUNK_LOADS_PER_SECOND_CAP`, `CHUNK_LOADS_PER_FRAME_CAP`).
-- Minimap updates are throttled and cached; chunk tile and minimap color caches are LRU bounded.
-- Scenario measurement window starts only after warmup plus pending-load drain.
-3. Guardrails:
-- Added architecture-oriented tests for cache reuse, chunk-load budget policy, and LOD/outline policy thresholds.
-4. Strict threshold gate:
-- Scenario 1 (`idle 10s`): avg FPS `>= 58`, frame p95 `<= 20ms`, `chunksGenerated=0`.
-- Scenario 2 (`pan 10s`, warm cache): avg FPS `>= 45`, frame p95 `<= 28ms`, `chunksGenerated<=2`, slow-frame rate `<= 10%`.
-- Scenario 3 (`zoomed-out pan 10s`): avg FPS `>= 30`, frame p95 `<= 40ms`, slow-frame rate `<= 20%`, low-zoom chunk-sprite mode active.
-- Scenario 4 (`stress autopan 15s`): avg FPS `>= 30`, frame p95 `<= 40ms`, chunk generation rate capped and UI responsive.
+## Finite-Map Constraints
+- Map dimensions are derived from `Size` + `Aspect Ratio`.
+- Outer map boundaries are guaranteed ocean.
+- No infinite panning assumptions and no chunk-streaming dependency for world growth.
+
+## Export / Import
+- Export emits a compact URL-safe string with seed + parameters.
+- Import restores controls deterministically.
+- Export format is compact encoded key/value payload (not raw JSON).
+
+## PNG Export
+- `Save as PNG` exports the current map at high resolution independent of viewport size.
+
+## Performance Acceptance
+- Rendering uses prebuilt atlas rasters and camera transform redraw (not per-tile regeneration per frame).
+- Performance probe method uses `requestAnimationFrame` over 3 seconds of auto-pan:
+- Mid zoom target: `>= 60 FPS`.
+- Full-continent zoom target: `>= 30 FPS`.

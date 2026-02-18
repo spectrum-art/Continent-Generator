@@ -8,14 +8,11 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "snapshot": "SNAPSHOT_ARTIFACTS=1 vitest run tests/snapshotArtifacts.test.ts"
+    "snapshot": "vitest run tests/continent.test.ts"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
-  },
-  "dependencies": {
-    "pixi.js": "^8.16.0"
   }
 }
