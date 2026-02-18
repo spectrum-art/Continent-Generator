@@ -653,19 +653,21 @@ function computeLightAndSlope(width: number, height: number, elevation01: Float3
       const up = elevation01[Math.max(0, y - 1) * width + x];
       const down = elevation01[Math.min(height - 1, y + 1) * width + x];
 
-      const dx = right - left;
-      const dy = down - up;
-      const nx = -dx * 3.2;
-      const ny = -dy * 3.2;
+      const dzdx = (right - left) * 0.5;
+      const dzdy = (down - up) * 0.5;
+      const nx = -dzdx * 4.1;
+      const ny = -dzdy * 4.1;
       const nz = 1;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       const nnx = nx / nLen;
       const nny = ny / nLen;
       const nnz = nz / nLen;
 
-      const dot = nnx * lnx + nny * lny + nnz * lnz;
-      light[y * width + x] = clamp01(dot * 0.5 + 0.5);
-      slope[y * width + x] = clamp01(Math.hypot(dx, dy) * 6.2);
+      const lambert = Math.max(0, nnx * lnx + nny * lny + nnz * lnz);
+      const ambient = 0.33;
+      const diffuse = 0.67 * lambert;
+      light[y * width + x] = clamp01(ambient + diffuse);
+      slope[y * width + x] = clamp01(Math.hypot(dzdx, dzdy) * 7.6);
     }
   }
 
@@ -1279,14 +1281,15 @@ export function buildAtlasRgba(
       } else if (biomeName === 'beach') {
         factor = 1.03;
       } else {
-        const lightContrast = Math.pow(light, 0.82);
-        const slopeShade = Math.pow(1 - slope, 1.5) * 0.08;
+        const reliefContrast = (light - 0.5) * (0.85 + slope * 0.8 + ridge * 0.55);
+        const lightContrast = clamp01(0.5 + reliefContrast);
+        const slopeShade = Math.pow(1 - slope, 1.4) * 0.07;
         factor =
-          0.58 +
-          lightContrast * 0.68 +
+          0.54 +
+          lightContrast * 0.72 +
           elev * 0.1 +
           slope * 0.08 +
-          ridge * 0.14 +
+          ridge * 0.16 +
           detail * 0.06 -
           slopeShade;
       }
