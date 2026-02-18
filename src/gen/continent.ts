@@ -556,25 +556,38 @@ function applyRidgeValleySynthesis(
       const ry = wx * sinA + wy * cosA;
       const ridgePrimary = ridgedFbm(
         ridgeSeed,
-        rx * (14.5 + localStress * 8.8),
-        ry * (5.8 + localStress * 3.3),
+        rx * (13.8 + localStress * 9.2),
+        ry * (5.2 + localStress * 3.4),
         4,
         0.58,
         2.05,
       );
+      const rangeSpine = ridgedFbm(
+        ridgeSeed ^ 0x73b,
+        rx * (6.2 + localStress * 2.4),
+        ry * (1.9 + localStress * 1.1),
+        3,
+        0.6,
+        2.02,
+      );
       const ridgeSpur = ridgedFbm(
         spurSeed,
-        rx * (24.5 + localStress * 8.2) + wy * 2.1,
-        ry * (9.6 + localStress * 3.8),
+        rx * (22.5 + localStress * 8.4) + wy * 2.1,
+        ry * (8.8 + localStress * 3.6),
         2,
         0.55,
         2.2,
       );
-      const ridgeMix = ridgePrimary * 0.74 + ridgeSpur * 0.26;
+      const branchSpine = Math.pow(clamp01(rangeSpine), 1.15 + peakNorm * 0.35);
+      const ridgeMix = ridgePrimary * 0.57 + ridgeSpur * 0.23 + branchSpine * 0.2;
       const ridgeSigned = (ridgeMix - 0.5) * 2;
 
-      const amplitude = (0.026 + reliefNorm * 0.1 + peakNorm * 0.11) * mountainMask * (0.62 + localStress * 0.78);
-      const valleyDepth = (1 - ridgeMix) * (0.01 + reliefNorm * 0.048 + peakNorm * 0.03) * mountainMask;
+      const amplitude =
+        (0.024 + reliefNorm * 0.11 + peakNorm * 0.12) *
+        mountainMask *
+        (0.54 + localStress * 0.88) *
+        (0.74 + branchSpine * 0.55);
+      const valleyDepth = (1 - ridgeMix) * (0.011 + reliefNorm * 0.052 + peakNorm * 0.034) * mountainMask;
       next[index] = current + ridgeSigned * amplitude - valleyDepth;
     }
   }
