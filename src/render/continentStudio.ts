@@ -382,6 +382,7 @@ export async function startContinentStudio(): Promise<void> {
   let fpsEma = 60;
   let frameMsEma = 16.7;
   let lastFrame = performance.now();
+  let cachedExportCode = '';
 
   function fitZoomForCurrentMap(): number {
     return Math.min(canvas.width / map.width, canvas.height / map.height);
@@ -487,6 +488,7 @@ export async function startContinentStudio(): Promise<void> {
     const prevHeight = map.height;
     controls = readControlsFromUi();
     map = generateContinent(controls);
+    cachedExportCode = exportContinentControls(controls).code;
     refreshAtlasCanvas();
     if (resetCamera || prevWidth !== map.width || prevHeight !== map.height) {
       cameraX = map.width / 2;
@@ -520,8 +522,7 @@ export async function startContinentStudio(): Promise<void> {
   }
 
   function exportCode(): string {
-    const payload = exportContinentControls(readControlsFromUi());
-    return payload.code;
+    return exportContinentControls(readControlsFromUi()).code;
   }
 
   function importCode(code: string): boolean {
@@ -536,7 +537,7 @@ export async function startContinentStudio(): Promise<void> {
   }
 
   function updateStatusText(): void {
-    const exportString = exportCode();
+    const exportString = cachedExportCode;
     status.textContent =
       `seed=${controls.seed}\n` +
       `map=${map.width}x${map.height} hash=${map.identityHash}\n` +
