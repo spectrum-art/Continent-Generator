@@ -119,8 +119,8 @@ const NOUNS = [
 ] as const;
 
 const SIZE_CONFIG: Record<SizeOption, { shortEdge: number; basePlates: number; fieldScale: number }> = {
-  isle: { shortEdge: 240, basePlates: 6, fieldScale: 3 },
-  region: { shortEdge: 360, basePlates: 9, fieldScale: 2 },
+  isle: { shortEdge: 240, basePlates: 6, fieldScale: 4 },
+  region: { shortEdge: 360, basePlates: 9, fieldScale: 3 },
   subcontinent: { shortEdge: 560, basePlates: 13, fieldScale: 2 },
   supercontinent: { shortEdge: 760, basePlates: 18, fieldScale: 1 },
 };
@@ -745,8 +745,12 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   }
 
   const rawElevation = downsampleField(width, height, fieldScale, (fx, fy) => {
-    const nx = fx / Math.max(1, width - 1);
-    const ny = fy / Math.max(1, height - 1);
+    const nx0 = fx / Math.max(1, width - 1);
+    const ny0 = fy / Math.max(1, height - 1);
+    const warpX = (fbm(noiseSeed ^ 0xa17ec421, nx0 * 3.1, ny0 * 3.1, 2, 0.55, 2.1) - 0.5) * 0.06;
+    const warpY = (fbm(noiseSeed ^ 0x7e5f08cb, nx0 * 2.7, ny0 * 2.7, 2, 0.55, 2.1) - 0.5) * 0.06;
+    const nx = clamp01(nx0 + warpX);
+    const ny = clamp01(ny0 + warpY);
 
     let nearest = Number.POSITIVE_INFINITY;
     let second = Number.POSITIVE_INFINITY;
@@ -797,6 +801,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     const low = fbm(noiseSeed, nx * 2.2, ny * 2.2, 5, 0.58, 2);
     const regional = fbm(noiseSeed ^ 0x51d7348b, nx * 6.4, ny * 6.4, 4, 0.55, 2.1);
     const rugged = fbm(noiseSeed ^ 0x2f43ac91, nx * 18.5, ny * 18.5, 3, 0.5, 2.3);
+    const micro = fbm(noiseSeed ^ 0xf18bd7cf, nx * 44, ny * 44, 2, 0.45, 2.4);
     const ridgeLine = Math.pow(
       1 - Math.abs(fbm(noiseSeed ^ 0x6bbd3d3d, nx * 10 + ny * 4.5, ny * 8.5, 2, 0.54, 2.1) - 0.5) * 2,
       1.3 + peakNorm * 1.8,
@@ -816,7 +821,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       ridgeLine * boundary * (0.12 + peakNorm * 0.2) +
       (low - 0.5) * (0.45 + reliefNorm * 0.35) +
       (regional - 0.5) * (0.3 + fragNorm * 0.35 + islandNorm * 0.15) +
-      (rugged - 0.5) * (0.08 + reliefNorm * 0.22) -
+      (rugged - 0.5) * (0.08 + reliefNorm * 0.22) +
+      (micro - 0.5) * (0.04 + reliefNorm * 0.1) -
       edgeSeaBias
     );
   });
