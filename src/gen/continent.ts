@@ -798,19 +798,21 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
         (0.18 + reliefNorm * 0.2) * divergent +
         (0.08 + reliefNorm * 0.06) * transform);
 
-    const low = fbm(noiseSeed, nx * 2.2, ny * 2.2, 5, 0.58, 2);
-    const regional = fbm(noiseSeed ^ 0x51d7348b, nx * 6.4, ny * 6.4, 4, 0.55, 2.1);
-    const rugged = fbm(noiseSeed ^ 0x2f43ac91, nx * 18.5, ny * 18.5, 3, 0.5, 2.3);
-    const micro = fbm(noiseSeed ^ 0xf18bd7cf, nx * 44, ny * 44, 2, 0.45, 2.4);
+    const noiseX = nx * aspectMetric;
+    const noiseY = ny;
+    const low = fbm(noiseSeed, noiseX * 2.2, noiseY * 2.2, 5, 0.58, 2);
+    const regional = fbm(noiseSeed ^ 0x51d7348b, noiseX * 6.4, noiseY * 6.4, 4, 0.55, 2.1);
+    const rugged = fbm(noiseSeed ^ 0x2f43ac91, noiseX * 18.5, noiseY * 18.5, 3, 0.5, 2.3);
+    const micro = fbm(noiseSeed ^ 0xf18bd7cf, noiseX * 44, noiseY * 44, 2, 0.45, 2.4);
     const ridgeLine = Math.pow(
-      1 - Math.abs(fbm(noiseSeed ^ 0x6bbd3d3d, nx * 10 + ny * 4.5, ny * 8.5, 2, 0.54, 2.1) - 0.5) * 2,
+      1 - Math.abs(fbm(noiseSeed ^ 0x6bbd3d3d, noiseX * 10 + noiseY * 4.5, noiseY * 8.5, 2, 0.54, 2.1) - 0.5) * 2,
       1.3 + peakNorm * 1.8,
     );
 
     const plateBody = plateA.uplift * (0.16 + reliefNorm * 0.2);
 
     const edgeDistance = Math.min(nx, 1 - nx, ny, 1 - ny);
-    const edgeWarp = (fbm(noiseSeed ^ 0x143290e3, nx * 4.2, ny * 4.2, 2, 0.56, 2.1) - 0.5) * 0.08;
+    const edgeWarp = (fbm(noiseSeed ^ 0x143290e3, noiseX * 4.2, noiseY * 4.2, 2, 0.56, 2.1) - 0.5) * 0.08;
     const interior = smoothRange(edgeDistance + edgeWarp, 0.02, 0.34 - fragNorm * 0.06 + islandNorm * 0.03);
     const edgeSeaBias = (1 - interior) * (1.3 + fragNorm * 0.2 + islandNorm * 0.35);
 

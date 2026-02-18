@@ -72,6 +72,28 @@ describe('continent generator artifact pivot', () => {
     expect(landRatio(highMap)).toBeGreaterThan(landRatio(lowMap));
   });
 
+  it('changes coastline perimeter with Coastal Smoothing', () => {
+    const rough = testControls('SmoothingProbe');
+    rough.coastalSmoothing = 2;
+    const smooth = testControls('SmoothingProbe');
+    smooth.coastalSmoothing = 9;
+
+    const roughMap = generateContinent(rough);
+    const smoothMap = generateContinent(smooth);
+    expect(smoothMap.coastPerimeter).toBeLessThanOrEqual(roughMap.coastPerimeter);
+  });
+
+  it('changes identity hash when Aspect Ratio changes', () => {
+    const wide = testControls('AspectProbe');
+    wide.aspectRatio = 'wide';
+    const portrait = testControls('AspectProbe');
+    portrait.aspectRatio = 'portrait';
+
+    const wideMap = generateContinent(wide);
+    const portraitMap = generateContinent(portrait);
+    expect(wideMap.identityHash).not.toBe(portraitMap.identityHash);
+  });
+
   it('supports compact export/import strings that round-trip map identity', () => {
     const controls = testControls('AmberDelta');
     controls.fragmentation = 7;
