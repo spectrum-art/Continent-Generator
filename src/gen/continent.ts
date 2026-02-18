@@ -455,7 +455,7 @@ function smoothCoastalElevation(
 ): void {
   const smooth = (smoothLevel - 1) / 9;
   const passes = Math.round(1 + smooth * 4);
-  const band = lerp(0.035, 0.18, smooth);
+  const band = lerp(0.03, 0.22, smooth);
   let current = elevation.slice();
 
   for (let pass = 0; pass < passes; pass += 1) {
@@ -469,13 +469,24 @@ function smoothCoastalElevation(
         }
 
         let sum = 0;
+        let orthogonal = 0;
+        let diagonal = 0;
         for (const [dx, dy] of NEIGHBORS_8) {
-          sum += current[(y + dy) * width + (x + dx)];
+          const sample = current[(y + dy) * width + (x + dx)];
+          sum += sample;
+          if (dx === 0 || dy === 0) {
+            orthogonal += sample;
+          } else {
+            diagonal += sample;
+          }
         }
         const average = sum / 8;
+        const anisotropic = orthogonal / 4 * 0.65 + diagonal / 4 * 0.35;
+        const coastalTarget = average * 0.35 + anisotropic * 0.65;
+        const curvature = average - current[index];
         const strength = smoothstep(1 - distance / Math.max(1e-6, band)) * lerp(0.12, 0.42, smooth);
-        const eroded = lerp(current[index], average, strength);
-        next[index] = lerp(eroded, seaLevel, strength * 0.08);
+        const eroded = lerp(current[index], coastalTarget, strength);
+        next[index] = lerp(eroded, seaLevel, strength * 0.08) + curvature * strength * 0.08;
       }
     }
     current = next;
