@@ -1221,7 +1221,16 @@ export function buildAtlasRgba(
       } else if (biomeName === 'beach') {
         factor = 1.03;
       } else {
-        factor = 0.64 + light * 0.6 + elev * 0.12 + slope * 0.1 + ridge * 0.12 + detail * 0.08;
+        const lightContrast = Math.pow(light, 0.82);
+        const slopeShade = Math.pow(1 - slope, 1.5) * 0.08;
+        factor =
+          0.58 +
+          lightContrast * 0.68 +
+          elev * 0.1 +
+          slope * 0.08 +
+          ridge * 0.14 +
+          detail * 0.06 -
+          slopeShade;
       }
 
       if (biomeName === 'mountain' || biomeName === 'rock') {
