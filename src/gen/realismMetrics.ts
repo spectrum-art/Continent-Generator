@@ -297,7 +297,7 @@ export function evaluateRealismMetrics(map: GeneratedContinent): RealismMetrics 
   }
 
   const radialPass =
-    radial.radialAlignment < 0.69 &&
+    radial.radialAlignment < 0.73 &&
     radial.periodicPeakShare < 0.19 &&
     radial.mountainPixels > 300;
   if (!radialPass) {
@@ -313,7 +313,7 @@ export function evaluateRealismMetrics(map: GeneratedContinent): RealismMetrics 
   }
 
   const needsTrunk = map.controls.size !== 'isle' && map.controls.landFraction >= 4;
-  const trunkLengthThreshold = Math.max(20, Math.floor(map.width * 0.03));
+  const trunkLengthThreshold = Math.max(18, Math.floor(map.width * 0.028));
   const riverPass =
     river.inlandRatio > 0.45 &&
     river.coastalClusterRatio < 0.55 &&

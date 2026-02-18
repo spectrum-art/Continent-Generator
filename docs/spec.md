@@ -1,53 +1,85 @@
 # Map Explorer Spec
 
-## Milestone 16: Ridges + Inland Drainage
+## Milestone 17: Continuous-Field Terrain + Self-Evaluating Realism Gates
 
 ## Scope
-- Deterministic, bounded continent generator (terrain-first pipeline).
-- No preset system, no new user-facing diagnostics controls.
-- NW directional lighting remains the only hillshade light direction.
-- Realism priorities: ridge/valley mountain structure, inland river networks, non-rectangular high-land silhouettes.
+- Deterministic bounded continent generator (seed + controls, case-insensitive seed normalization).
+- Terrain refactor uses continuous global fields, not stitched regional/sector plate partitions.
+- No new user-facing controls added.
+- NW directional lighting remains fixed.
+- Realism is enforced by automated gates from generated snapshots and image-derived metrics.
 
-## Generation Pipeline (MS16)
-1. Plate-driven base elevation synthesis.
-2. Edge and macro-frame sea bias (warped superellipse, not edge-aligned rectangle shaping).
-3. Ridge/valley synthesis pass on elevation:
-- orientation-aware ridged multifractal uplift in mountain candidates
-- inter-ridge valley carving
-4. Sea-level threshold from `Land Fraction`.
-5. Coastal smoothing near sea level.
-6. Climate fields (temperature/moisture) from latitude, ocean distance, elevation, and rain shadow.
-7. Basin-driven hydrology:
-- downhill flow + accumulation
-- inland-biased trunk source selection
-- tributary source pass that joins trunk network
-8. River incision in two passes with flow recomputation between passes.
+## Continuous-Field Pipeline (MS17)
+1. Build plate set and sample a continuous plate influence field (weighted kernels).
+2. Synthesize macro elevation from:
+- continuous uplift
+- macro basin/slope field
+- continuous warped continental frame + seeded land cores
+3. Build a global stress/orientation vector field (continuous, smoothed).
+4. Run anisotropic ridge synthesis aligned to stress direction.
+5. Apply lightweight flow-feedback valley carving (1 pass + recompute).
+6. Hydrology:
+- basin/inland-biased sources
+- trunk + tributary routing
+- fallback source pass
+- trunk enforcement for Region+ where land supports it
+7. River incision in two passes with flow recompute between passes.
+8. Global hillshade:
+- full-field smoothing
+- central-difference gradients
+- NW Lambert + ambient lighting
 9. Biome classification from climate + elevation + hydrology.
-10. NW hillshade from full-field gradients (artifact-resistant, no sector-based shading).
+
+## Snapshot Harness V2
+- Command: `npm run snapshot`
+- Output directory: `artifacts/ms17/<run-id>/`
+- Files:
+- `case_<name>.png` (triptych: full map + mountain crop + interior river/plains crop)
+- `montage.png` (matrix of all case triptychs)
+- `metrics.json` (per-case structural metrics + gate outcomes)
+- `critique.txt` (run summary + failing gate reasons)
+
+## Structural Metrics + Gates
+- Wedge detector:
+- dominant orientation share
+- low-frequency orientation share
+- radial/tangential convergence
+- ring jump p95
+- Radial ridge detector:
+- mountain high-pass orientation radial alignment
+- periodic peak share
+- Rectangular silhouette detector:
+- coastline axis-aligned normal score
+- bbox fill ratio
+- coastline cardinal bias
+- River hierarchy detector:
+- inland ratio
+- coastal clustering ratio
+- max connected river component
+- inland source count
+
+Gate status is aggregated as:
+- `wedgesPass`
+- `radialPass`
+- `rectanglePass`
+- `riverPass`
+- `pass` (all above true)
+
+## Current MS17 Snapshot Result
+- Latest run matrix: `12` cases
+- Result: `pass=12`, `fail=0`
 
 ## Determinism
-- Seed normalization is case-insensitive.
-- Same seed + controls => same map identity hash and field outputs.
-- Export/import compact code round-trips map identity exactly.
-- Aspect ratio changes generation-space geometry and identity hash.
+- Deterministic across:
+- terrain generation
+- realism metrics
+- snapshot case matrix + outputs for same code/inputs
+- Export/import controls still preserve map identity hash.
 
-## Realism Verification Gates
-- Inland drainage:
-- `riverPixels > 80` on region default probe.
-- inland river ratio (`distanceToOcean >= 10`) > `0.7`.
-- at least 2 components and one component length >= 40.
-- Ridge/valley structure:
-- high-relief average ridge-energy metric across fixed seeds > `0.016`.
-- mountain coverage in that probe > `0.04`.
-- Rectangle mitigation (high land fraction, square aspect):
-- `bboxFillRatio < 0.9`.
-- coastline perimeter > `2200`.
+## Performance Sanity (Local Probe)
+- Single generation pass timings (`vite-node`):
+- `isle/square/lf4`: ~`1295ms`
+- `region/landscape/lf5`: ~`2824ms`
+- `supercontinent/landscape/lf7`: ~`6171ms`
 
-## Performance Guardrail
-- No major regression versus MS15 runtime envelope.
-- LOD rendering remains active.
-- Expensive realism work remains in generation passes, not per-frame render loops.
-- MS16 local sanity timings (single generation pass, `vite-node`):
-- `isle/square/lf4`: ~`1089ms`
-- `region/landscape/lf5`: ~`2471ms`
-- `supercontinent/landscape/lf7`: ~`5025ms`
+MS17 prioritizes realism correctness and artifact elimination while keeping generation performance in a stable range.

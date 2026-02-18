@@ -1,20 +1,26 @@
 # Map Explorer Plan
 
-## Milestone 16: Ridges + Inland Drainage
+## Milestone 17: Continuous-Field Terrain Refactor + Self-Evaluating Realism Gates
 
-- [x] `ms16: diagnostics + baseline snapshot harness (non-UI)`
-- [x] `ms16: ridge/valley synthesis pass (mountain morphology)`
-- [x] `ms16: basin-driven river sources + routing (inland rivers)`
-- [x] `ms16: rectangle mitigation for high land fraction (shape realism)`
-- [x] `ms16: hillshade verification + artifact elimination (no sector wedges)`
-- [x] `ms16: tests + docs + perf sanity`
+- [x] `ms17: snapshot harness v2 + structural metrics (baseline)`
+- [x] `ms17: continuous macro elevation refactor`
+- [x] `ms17: global stress/orientation field`
+- [x] `ms17: anisotropic ridge synthesis`
+- [x] `ms17: valley/erosion feedback (lightweight)`
+- [x] `ms17: basin-driven hydrology + trunk rivers`
+- [x] `ms17: global hillshade rewrite (no wedges)`
+- [x] `ms17: rectangle mitigation via continuous warps`
+- [x] `ms17: tests + docs + perf sanity`
 
-- [x] Add deterministic diagnostics helpers for inland rivers, ridge-energy, and silhouette metrics.
-- [x] Refactor elevation synthesis to produce oriented ridges and carved inter-ridge valleys.
-- [x] Upgrade river generation to trunk + tributary routing with inland source bias.
-- [x] Run two-step river incision with flow recompute between passes.
-- [x] Replace edge-aligned rectangle bias with warped macro-frame falloff.
-- [x] Upgrade hillshade math to full-field directional gradients and add wedge-regression test.
-- [x] Add Milestone 16 realism tests (inland drainage, ridge energy, rectangle mitigation).
-- [x] Keep determinism/export-import/aspect identity guarantees green.
-- [x] Keep `npm test` and `npm run build` green.
+## Completed Work
+- [x] Added deterministic snapshot case matrix and PNG montage output.
+- [x] Added image-derived artifact detectors for wedges, radial ridge patterns, silhouette boxiness, and river hierarchy.
+- [x] Refactored macro elevation away from nearest/second plate partitioning to continuous weighted fields.
+- [x] Introduced smoothed global stress/orientation vector field for ridge direction control.
+- [x] Upgraded ridge synthesis to anisotropic branch/spine structure.
+- [x] Added lightweight flow-feedback valley pass prior to final hydrology routing.
+- [x] Enforced Region+ trunk river guarantees with inland basin targeting.
+- [x] Rewrote hillshade to full-field smoothed gradients with NW lighting.
+- [x] Added seeded core warps to reduce high-land rectangular silhouettes.
+- [x] Kept deterministic behavior, tests green, and build green.
+- [x] Snapshot realism gate matrix currently passes all configured cases (`12/12`).
