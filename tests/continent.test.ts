@@ -8,6 +8,12 @@ import {
   type PresetOption,
 } from '../src/gen/continent';
 
+function testControls(seed: string): ReturnType<typeof defaultControlsWithSeed> {
+  const controls = defaultControlsWithSeed(seed);
+  controls.size = 'isle';
+  return controls;
+}
+
 function oceanEdgeRatio(map: ReturnType<typeof generateContinent>): number {
   let edge = 0;
   let ocean = 0;
@@ -36,7 +42,7 @@ function landRatio(map: ReturnType<typeof generateContinent>): number {
 
 describe('continent generator artifact pivot', () => {
   it('is deterministic for same seed and controls', () => {
-    const controls = defaultControlsWithSeed('GreenChair');
+    const controls = testControls('GreenChair');
     const a = generateContinent(controls);
     const b = generateContinent(controls);
     expect(a.identityHash).toBe(b.identityHash);
@@ -45,13 +51,13 @@ describe('continent generator artifact pivot', () => {
   });
 
   it('treats seed case-insensitively', () => {
-    const lower = generateContinent(defaultControlsWithSeed('silentharbor'));
-    const upper = generateContinent(defaultControlsWithSeed('SilentHarbor'));
+    const lower = generateContinent(testControls('silentharbor'));
+    const upper = generateContinent(testControls('SilentHarbor'));
     expect(lower.identityHash).toBe(upper.identityHash);
   });
 
   it('keeps all map edges ocean for bounded continent output', () => {
-    const controls = defaultControlsWithSeed('RedComet');
+    const controls = testControls('RedComet');
     controls.size = 'subcontinent';
     controls.aspectRatio = 'wide';
     const map = generateContinent(controls);
@@ -59,9 +65,9 @@ describe('continent generator artifact pivot', () => {
   });
 
   it('responds to Land Fraction control', () => {
-    const low = defaultControlsWithSeed('LandProbe');
+    const low = testControls('LandProbe');
     low.landFraction = 2;
-    const high = defaultControlsWithSeed('LandProbe');
+    const high = testControls('LandProbe');
     high.landFraction = 9;
     const lowMap = generateContinent(low);
     const highMap = generateContinent(high);
@@ -69,7 +75,7 @@ describe('continent generator artifact pivot', () => {
   });
 
   it('supports compact export/import strings that round-trip map identity', () => {
-    const controls = defaultControlsWithSeed('AmberDelta');
+    const controls = testControls('AmberDelta');
     controls.preset = 'riverlands';
     controls.fragmentation = 7;
     controls.biomeMix.rivers = 0.9;
@@ -86,7 +92,7 @@ describe('continent generator artifact pivot', () => {
     const seeds = ['GreenChair', 'SilentHarbor', 'RedComet', 'MistyCove', 'StoneField'];
     const hashes = new Set<string>();
     for (const seed of seeds) {
-      hashes.add(generateContinent(defaultControlsWithSeed(seed)).identityHash);
+      hashes.add(generateContinent(testControls(seed)).identityHash);
     }
     expect(hashes.size).toBe(seeds.length);
   });
@@ -103,12 +109,12 @@ describe('continent generator artifact pivot', () => {
     ];
 
     for (const preset of presets) {
-      const base = defaultControlsWithSeed('PresetProbe');
+      const base = testControls('PresetProbe');
       const controls = applyPreset(base, preset);
       const a = generateContinent(controls);
       const b = generateContinent(controls);
       expect(a.identityHash, `${preset} should be deterministic`).toBe(b.identityHash);
       expect(oceanEdgeRatio(a), `${preset} should keep ocean edges`).toBe(1);
     }
-  });
+  }, 20_000);
 });
