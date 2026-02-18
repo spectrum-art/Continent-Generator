@@ -1115,23 +1115,37 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
 
   const river = new Uint8Array(total);
   const riverMix = controls.biomeMix.rivers;
-  const sourceThreshold = lerp(0.18, 0.045, riverMix);
-  const minLength = Math.round(lerp(42, 14, riverMix));
+  const sourceThreshold = lerp(0.16, 0.035, riverMix);
+  const minLength = Math.round(lerp(52, 18, riverMix));
   const minDrop = lerp(0.07, 0.02, riverMix);
   const maxSources = Math.max(6, Math.round((total / 12_000) * (0.7 + riverMix * 2.6)));
   const spacing = Math.round(lerp(42, 16, riverMix));
+  const inlandMinDistance = Math.round(lerp(4, 11, riverMix));
 
-  const sourceCandidates: number[] = [];
+  const sourceCandidates: Array<{ index: number; score: number }> = [];
+  const inlandCandidates: Array<{ index: number; score: number }> = [];
   for (let i = 0; i < total; i += 1) {
-    if (land[i] === 0 || moisture[i] < 0.18) {
+    if (land[i] === 0 || elevationSigned[i] < seaLevel + 0.04) {
       continue;
     }
-    if (flow[i] < sourceThreshold || elevationSigned[i] < seaLevel + 0.06) {
+    if (flow[i] < sourceThreshold) {
       continue;
     }
-    sourceCandidates.push(i);
+    const inlandFactor = clamp01(distanceToOcean[i] / (14 + controls.fragmentation * 2));
+    const wetness = moisture[i] + inlandFactor * 0.2;
+    if (wetness < 0.16) {
+      continue;
+    }
+    const elevationFactor = clamp01((elevationSigned[i] - seaLevel) * 1.7);
+    const score = flow[i] * (0.58 + inlandFactor * 0.72) + elevationFactor * 0.24 + wetness * 0.18;
+    const candidate = { index: i, score };
+    sourceCandidates.push(candidate);
+    if (distanceToOcean[i] >= inlandMinDistance) {
+      inlandCandidates.push(candidate);
+    }
   }
-  sourceCandidates.sort((a, b) => flow[b] - flow[a]);
+  sourceCandidates.sort((a, b) => b.score - a.score);
+  inlandCandidates.sort((a, b) => b.score - a.score);
 
   const selectedSources: number[] = [];
   const sourceFarEnough = (index: number): boolean => {
@@ -1150,13 +1164,23 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     return true;
   };
 
-  for (let i = 0; i < sourceCandidates.length && selectedSources.length < maxSources; i += 1) {
-    const source = sourceCandidates[i];
+  const pushSource = (source: number): void => {
     if (!sourceFarEnough(source)) {
-      continue;
+      return;
     }
     selectedSources.push(source);
+  };
 
+  const inlandTarget = Math.min(inlandCandidates.length, Math.round(maxSources * 0.6));
+  for (let i = 0; i < inlandCandidates.length && selectedSources.length < inlandTarget; i += 1) {
+    pushSource(inlandCandidates[i].index);
+  }
+  for (let i = 0; i < sourceCandidates.length && selectedSources.length < maxSources; i += 1) {
+    pushSource(sourceCandidates[i].index);
+  }
+
+  for (let i = 0; i < selectedSources.length; i += 1) {
+    const source = selectedSources[i];
     const seen = new Set<number>();
     const path: number[] = [];
     let current = source;
