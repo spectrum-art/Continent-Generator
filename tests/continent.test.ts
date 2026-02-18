@@ -114,5 +114,5 @@ describe('continent generator artifact pivot', () => {
       hashes.add(generateContinent(testControls(seed)).identityHash);
     }
     expect(hashes.size).toBe(seeds.length);
-  });
+  }, 20_000);
 });

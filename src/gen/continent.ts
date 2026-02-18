@@ -125,6 +125,8 @@ const SIZE_CONFIG: Record<SizeOption, { shortEdge: number; basePlates: number; f
   supercontinent: { shortEdge: 760, basePlates: 18, fieldScale: 1 },
 };
 
+const OUTPUT_SCALE = 2;
+
 const ASPECT_CONFIG: Record<AspectRatioOption, number> = {
   wide: 2,
   landscape: 1.5,
@@ -372,6 +374,8 @@ export function mapDimensions(size: SizeOption, aspectRatio: AspectRatioOption):
   }
   width = Math.max(96, width);
   height = Math.max(96, height);
+  width *= OUTPUT_SCALE;
+  height *= OUTPUT_SCALE;
   return {
     width,
     height,
@@ -402,6 +406,37 @@ function downsampleField(
     }
   }
   return result;
+}
+
+function upsampleBilinearField(
+  source: Float32Array,
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): Float32Array {
+  const target = new Float32Array(targetWidth * targetHeight);
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sy = (y / Math.max(1, targetHeight - 1)) * Math.max(1, sourceHeight - 1);
+    const y0 = Math.floor(sy);
+    const y1 = Math.min(sourceHeight - 1, y0 + 1);
+    const ty = sy - y0;
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sx = (x / Math.max(1, targetWidth - 1)) * Math.max(1, sourceWidth - 1);
+      const x0 = Math.floor(sx);
+      const x1 = Math.min(sourceWidth - 1, x0 + 1);
+      const tx = sx - x0;
+
+      const v00 = source[y0 * sourceWidth + x0];
+      const v10 = source[y0 * sourceWidth + x1];
+      const v01 = source[y1 * sourceWidth + x0];
+      const v11 = source[y1 * sourceWidth + x1];
+      const vx0 = lerp(v00, v10, tx);
+      const vx1 = lerp(v01, v11, tx);
+      target[y * targetWidth + x] = lerp(vx0, vx1, ty);
+    }
+  }
+  return target;
 }
 
 function normalizeSigned(values: Float32Array): void {
@@ -718,6 +753,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const normalizedSeed = normalizeSeed(controls.seed);
   const { width, height, basePlates, fieldScale } = mapDimensions(controls.size, controls.aspectRatio);
   const total = width * height;
+  const baseWidth = Math.max(96, Math.round(width / OUTPUT_SCALE));
+  const baseHeight = Math.max(96, Math.round(height / OUTPUT_SCALE));
 
   const seedHash = hashString(normalizedSeed);
   const plateSeed = hashString(`${normalizedSeed}|plates|${width}|${height}|${controls.aspectRatio}`);
@@ -744,9 +781,9 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     });
   }
 
-  const rawElevation = downsampleField(width, height, fieldScale, (fx, fy) => {
-    const nx0 = fx / Math.max(1, width - 1);
-    const ny0 = fy / Math.max(1, height - 1);
+  const rawElevationBase = downsampleField(baseWidth, baseHeight, fieldScale, (fx, fy) => {
+    const nx0 = fx / Math.max(1, baseWidth - 1);
+    const ny0 = fy / Math.max(1, baseHeight - 1);
     const warpX = (fbm(noiseSeed ^ 0xa17ec421, nx0 * 3.1, ny0 * 3.1, 2, 0.55, 2.1) - 0.5) * 0.06;
     const warpY = (fbm(noiseSeed ^ 0x7e5f08cb, nx0 * 2.7, ny0 * 2.7, 2, 0.55, 2.1) - 0.5) * 0.06;
     const nx = clamp01(nx0 + warpX);
@@ -828,6 +865,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       edgeSeaBias
     );
   });
+
+  const rawElevation = upsampleBilinearField(rawElevationBase, baseWidth, baseHeight, width, height);
 
   normalizeSigned(rawElevation);
 
