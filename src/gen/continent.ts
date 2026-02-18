@@ -885,13 +885,20 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       temp = clamp01(temp);
 
       const oceanProximity = clamp01(1 - distanceToOcean[index] / (20 + controls.fragmentation * 2));
-      const rainShadow = x > 0 ? clamp01((elevationSigned[index - 1] - elevationSigned[index]) * 3.2) * ridge[index - 1] * 0.18 : 0;
+      const coastalHumidity = clamp01(1 - distanceToOcean[index] / (12 + controls.fragmentation));
+      const prevailingWest = latitude >= 0 || Math.abs(latitude) > 24;
+      const upwindIndex = prevailingWest
+        ? (x > 0 ? index - 1 : index)
+        : (x < width - 1 ? index + 1 : index);
+      const rainShadow =
+        clamp01((elevationSigned[upwindIndex] - elevationSigned[index]) * 3.5) * ridge[upwindIndex] * 0.22;
       let wet =
-        0.22 +
-        oceanProximity * 0.58 +
+        0.2 +
+        oceanProximity * 0.52 +
+        coastalHumidity * 0.18 +
         (moistureNoise - 0.5) * 0.28 +
         controls.climateBias * 0.052 -
-        elevAboveSea * 0.16 -
+        elevAboveSea * 0.18 -
         rainShadow;
 
       if (land[index] === 0) {
@@ -1083,13 +1090,17 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
 
     const temp = temperature[i];
     const wet = moisture[i];
+    const riverMoisture = clamp01(flow[i] * 1.8);
+    const effectiveWet = clamp01(wet + riverMoisture * 0.22);
 
     const grassScore =
-      (1 - Math.abs(temp - 0.56)) * (1 - Math.abs(wet - 0.44)) * (0.45 + controls.biomeMix.grassland * 0.75);
+      (1 - Math.abs(temp - 0.56)) *
+      (1 - Math.abs(effectiveWet - 0.44)) *
+      (0.45 + controls.biomeMix.grassland * 0.75);
     const forestScore =
-      (1 - Math.abs(temp - 0.52)) * wet * (0.4 + controls.biomeMix.temperateForest * 0.95);
-    const rainforestScore = temp * wet * (0.24 + controls.biomeMix.rainforest * 1.22);
-    const desertScore = temp * (1 - wet) * (0.32 + controls.biomeMix.desert * 1.2);
+      (1 - Math.abs(temp - 0.5)) * effectiveWet * (0.42 + controls.biomeMix.temperateForest * 0.95);
+    const rainforestScore = temp * effectiveWet * (0.24 + controls.biomeMix.rainforest * 1.22);
+    const desertScore = temp * (1 - effectiveWet) * (0.32 + controls.biomeMix.desert * 1.2);
     const tundraScore = (1 - temp + elevAboveSea * 0.3) * (0.3 + controls.biomeMix.tundra * 1.2);
 
     let bestBiome: ContinentBiome = 'grassland';
