@@ -482,16 +482,31 @@ function applyEdgeFalloff(
   elevationSigned: Float32Array,
   seed: number,
 ): void {
+  const aspect = width / Math.max(1, height);
   for (let y = 0; y < height; y += 1) {
     const ny = y / Math.max(1, height - 1);
     for (let x = 0; x < width; x += 1) {
       const nx = x / Math.max(1, width - 1);
       const index = y * width + x;
       const edge = Math.min(nx, 1 - nx, ny, 1 - ny);
-      const warp = (fbm(seed ^ 0x41f235ab, nx * 3.2, ny * 3.2, 2, 0.56, 2.1) - 0.5) * 0.04;
-      const edgeField = smoothRange(edge + warp, 0.015, 0.21);
-      const falloff = Math.pow(1 - edgeField, 2.1);
-      elevationSigned[index] -= falloff * 0.95;
+      const edgeWarp = (fbm(seed ^ 0x41f235ab, nx * 3.2, ny * 3.2, 2, 0.56, 2.1) - 0.5) * 0.04;
+      const edgeField = smoothRange(edge + edgeWarp, 0.02, 0.215);
+      const edgeFalloff = Math.pow(1 - edgeField, 2.1);
+
+      const cx = (nx - 0.5) * 2 * aspect;
+      const cy = (ny - 0.5) * 2;
+      const warpX = (fbm(seed ^ 0x11e934b9, nx * 2.4, ny * 2.4, 2, 0.57, 2.1) - 0.5) * 0.34;
+      const warpY = (fbm(seed ^ 0x7e20ad5d, nx * 2.8, ny * 2.8, 2, 0.57, 2.1) - 0.5) * 0.34;
+      const wx = cx + warpX;
+      const wy = cy + warpY;
+      const power = 2.25 + fbm(seed ^ 0xa3d83b11, nx * 1.6, ny * 1.6, 2, 0.55, 2.1) * 1.35;
+      const radial = Math.pow(Math.pow(Math.abs(wx), power) + Math.pow(Math.abs(wy), power), 1 / power);
+      const boundary = 0.98 + (fbm(seed ^ 0x4d7b128f, nx * 3.6, ny * 3.6, 2, 0.56, 2.1) - 0.5) * 0.3;
+      const interior = smoothRange(boundary - radial, -0.35, 0.36);
+      const frameFalloff = Math.pow(1 - interior, 1.85);
+
+      const falloff = Math.max(edgeFalloff, frameFalloff * 0.88);
+      elevationSigned[index] -= falloff * 0.98;
     }
   }
 }
@@ -1094,10 +1109,21 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
 
     const plateBody = plateA.uplift * (0.16 + reliefNorm * 0.2);
 
-    const edgeDistance = Math.min(nx, 1 - nx, ny, 1 - ny);
-    const edgeWarp = (fbm(noiseSeed ^ 0x143290e3, noiseX * 4.2, noiseY * 4.2, 2, 0.56, 2.1) - 0.5) * 0.08;
-    const interior = smoothRange(edgeDistance + edgeWarp, 0.02, 0.34 - fragNorm * 0.06 + islandNorm * 0.03);
-    const edgeSeaBias = (1 - interior) * (1.3 + fragNorm * 0.2 + islandNorm * 0.35);
+    const centerX = (nx - 0.5) * 2 * aspectMetric;
+    const centerY = (ny - 0.5) * 2;
+    const continentalWarpX = (fbm(noiseSeed ^ 0x143290e3, noiseX * 3.1, noiseY * 3.1, 2, 0.56, 2.1) - 0.5) * 0.4;
+    const continentalWarpY = (fbm(noiseSeed ^ 0x657411a1, noiseX * 3.4, noiseY * 3.4, 2, 0.56, 2.1) - 0.5) * 0.4;
+    const wx = centerX + continentalWarpX;
+    const wy = centerY + continentalWarpY;
+    const shapePower = 2.2 + fbm(noiseSeed ^ 0x95a21f77, noiseX * 1.8, noiseY * 1.8, 2, 0.55, 2.1) * 1.2;
+    const shapeRadius = Math.pow(Math.pow(Math.abs(wx), shapePower) + Math.pow(Math.abs(wy), shapePower), 1 / shapePower);
+    const contour = 0.96 + (fbm(noiseSeed ^ 0x71cc38d3, noiseX * 2.6, noiseY * 2.6, 2, 0.56, 2.1) - 0.5) * 0.35;
+    const interior = smoothRange(
+      contour - shapeRadius,
+      -0.32 + islandNorm * 0.04,
+      0.34 - fragNorm * 0.08 + islandNorm * 0.05,
+    );
+    const edgeSeaBias = (1 - interior) * (1.08 + fragNorm * 0.25 + islandNorm * 0.48);
 
     return (
       0.45 +
