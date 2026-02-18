@@ -8,7 +8,7 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "snapshot": "vitest run tests/continent.test.ts"
+    "snapshot": "npx vite-node scripts/ms17-snapshot.ts"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
