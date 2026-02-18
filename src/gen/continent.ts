@@ -1,13 +1,5 @@
 export type SizeOption = 'isle' | 'region' | 'subcontinent' | 'supercontinent';
 export type AspectRatioOption = 'wide' | 'landscape' | 'square' | 'portrait' | 'narrow';
-export type PresetOption =
-  | 'earth-like'
-  | 'archipelago'
-  | 'mountain-kingdoms'
-  | 'riverlands'
-  | 'dune-world'
-  | 'rain-world'
-  | 'broken-coast';
 
 export type BiomeMix = {
   rivers: number;
@@ -21,7 +13,6 @@ export type BiomeMix = {
 
 export type ContinentControls = {
   seed: string;
-  preset: PresetOption;
   size: SizeOption;
   aspectRatio: AspectRatioOption;
   landFraction: number;
@@ -85,76 +76,12 @@ export type ExportPayload = {
   controls: ContinentControls;
 };
 
-export type ContinentFeatureVector = {
-  landRatio: number;
-  coastlineComplexity: number;
-  islandCount: number;
-  offshoreIslandRatio: number;
-  ridgeCoherence: number;
-  riverComponents: number;
-  majorRiverComponents: number;
-  bboxFillRatio: number;
-  cornerRetention: number;
-};
-
-export type DistinctnessPair = 'archipelago-vs-earth-like' | 'broken-coast-vs-earth-like' | 'archipelago-vs-broken-coast';
-
-export type DistinctnessPairResult = {
-  pair: DistinctnessPair;
-  separatingMetrics: string[];
-  pass: boolean;
-};
-
-export type DistinctnessSeedResult = {
-  seed: string;
-  pairResults: DistinctnessPairResult[];
-  pass: boolean;
-};
-
-export type PresetDistinctnessSuite = {
-  seeds: string[];
-  seedResults: DistinctnessSeedResult[];
-  pass: boolean;
-};
-
-export type PerfProbeResult = {
-  durationMs: number;
-  frames: number;
-  avgFps: number;
-  avgFrameMs: number;
-  p95FrameMs: number;
-  worstFrameMs: number;
-  hitchCount: number;
-  zoom: number;
-};
-
-type PresetSignature = {
-  landBias: number;
-  seaEdgeBias: number;
-  attractorScale: number;
-  attractorWeightBias: number;
-  coastFractureBias: number;
-  islandBias: number;
-  ridgeBias: number;
-  riverBias: number;
-  climateWetnessBias: number;
-};
-
 type Plate = {
   x: number;
   y: number;
   uplift: number;
   driftX: number;
   driftY: number;
-};
-
-type LandComponent = {
-  area: number;
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-  touchesEdge: boolean;
 };
 
 const NEIGHBORS_4 = [
@@ -177,24 +104,22 @@ const NEIGHBORS_8 = [
 
 const ADJECTIVES = [
   'Amber', 'Ancient', 'Azure', 'Bold', 'Brisk', 'Calm', 'Crimson', 'Dawn', 'Dusky', 'Emerald',
-  'Faint', 'Feral', 'Golden', 'Grand', 'Green', 'Hidden', 'Iron', 'Ivory', 'Jagged', 'Lone',
-  'Lucky', 'Misty', 'Mossy', 'Noble', 'Northern', 'Obsidian', 'Old', 'Pale', 'Quiet', 'Red',
-  'Rugged', 'Rusty', 'Sacred', 'Sandy', 'Shaded', 'Silent', 'Silver', 'Slate', 'Solar', 'Southern',
-  'Spring', 'Steady', 'Stone', 'Stormy', 'Summer', 'Swift', 'Tall', 'Umber', 'Verdant', 'Vivid',
-  'Warm', 'Western', 'Wild', 'Winter', 'Wise', 'Young',
+  'Feral', 'Golden', 'Grand', 'Green', 'Hidden', 'Iron', 'Ivory', 'Jagged', 'Lone', 'Misty',
+  'Noble', 'Northern', 'Obsidian', 'Pale', 'Quiet', 'Red', 'Rugged', 'Rusty', 'Sacred', 'Sandy',
+  'Silent', 'Silver', 'Slate', 'Solar', 'Southern', 'Stone', 'Stormy', 'Summer', 'Swift', 'Tall',
+  'Umber', 'Verdant', 'Vivid', 'Warm', 'Western', 'Wild', 'Winter', 'Wise',
 ] as const;
 
 const NOUNS = [
-  'Anchor', 'Arch', 'Bay', 'Beacon', 'Bluff', 'Cairn', 'Cape', 'Cedar', 'Chair', 'Cinder',
-  'Cliff', 'Coast', 'Comet', 'Cove', 'Crown', 'Delta', 'Dune', 'Field', 'Fjord', 'Forest',
-  'Garden', 'Gate', 'Grove', 'Harbor', 'Haven', 'Heights', 'Hollow', 'Island', 'Key', 'Lagoon',
-  'Lake', 'March', 'Meadow', 'Mesa', 'Moon', 'Pass', 'Peak', 'Pillar', 'Plain', 'Ridge',
-  'River', 'Run', 'Saddle', 'Sea', 'Shore', 'Sound', 'Spire', 'Stone', 'Summit', 'Trail',
-  'Vale', 'Watch', 'Wave', 'Woods',
+  'Anchor', 'Arch', 'Bay', 'Beacon', 'Bluff', 'Cape', 'Chair', 'Cinder', 'Cliff', 'Coast',
+  'Comet', 'Cove', 'Crown', 'Delta', 'Dune', 'Field', 'Fjord', 'Forest', 'Grove', 'Harbor',
+  'Haven', 'Heights', 'Hollow', 'Island', 'Lagoon', 'Lake', 'March', 'Meadow', 'Mesa', 'Pass',
+  'Peak', 'Pillar', 'Plain', 'Ridge', 'River', 'Saddle', 'Sea', 'Shore', 'Sound', 'Spire',
+  'Summit', 'Trail', 'Vale', 'Watch', 'Wave', 'Woods',
 ] as const;
 
 const SIZE_CONFIG: Record<SizeOption, { shortEdge: number; basePlates: number; fieldScale: number }> = {
-  isle: { shortEdge: 240, basePlates: 6, fieldScale: 2 },
+  isle: { shortEdge: 240, basePlates: 6, fieldScale: 3 },
   region: { shortEdge: 360, basePlates: 9, fieldScale: 2 },
   subcontinent: { shortEdge: 560, basePlates: 13, fieldScale: 2 },
   supercontinent: { shortEdge: 760, basePlates: 18, fieldScale: 1 },
@@ -206,86 +131,6 @@ const ASPECT_CONFIG: Record<AspectRatioOption, number> = {
   square: 1,
   portrait: 2 / 3,
   narrow: 0.5,
-};
-
-const PRESET_SIGNATURES: Record<PresetOption, PresetSignature> = {
-  'earth-like': {
-    landBias: 0,
-    seaEdgeBias: 0.05,
-    attractorScale: 1,
-    attractorWeightBias: 1,
-    coastFractureBias: 0.9,
-    islandBias: 0.4,
-    ridgeBias: 1,
-    riverBias: 1,
-    climateWetnessBias: 0,
-  },
-  'archipelago': {
-    landBias: -0.16,
-    seaEdgeBias: 0.16,
-    attractorScale: 0.68,
-    attractorWeightBias: 0.72,
-    coastFractureBias: 1.45,
-    islandBias: 1.8,
-    ridgeBias: 0.7,
-    riverBias: 0.8,
-    climateWetnessBias: 0.1,
-  },
-  'mountain-kingdoms': {
-    landBias: 0.08,
-    seaEdgeBias: 0.04,
-    attractorScale: 1.05,
-    attractorWeightBias: 1.18,
-    coastFractureBias: 0.85,
-    islandBias: 0.2,
-    ridgeBias: 1.55,
-    riverBias: 1,
-    climateWetnessBias: -0.05,
-  },
-  riverlands: {
-    landBias: 0.03,
-    seaEdgeBias: 0.03,
-    attractorScale: 1,
-    attractorWeightBias: 1,
-    coastFractureBias: 0.82,
-    islandBias: 0.28,
-    ridgeBias: 0.78,
-    riverBias: 1.6,
-    climateWetnessBias: 0.3,
-  },
-  'dune-world': {
-    landBias: 0.12,
-    seaEdgeBias: 0.02,
-    attractorScale: 1.1,
-    attractorWeightBias: 1.06,
-    coastFractureBias: 0.66,
-    islandBias: 0.05,
-    ridgeBias: 1.05,
-    riverBias: 0.22,
-    climateWetnessBias: -0.62,
-  },
-  'rain-world': {
-    landBias: -0.02,
-    seaEdgeBias: 0.06,
-    attractorScale: 0.96,
-    attractorWeightBias: 0.9,
-    coastFractureBias: 1.18,
-    islandBias: 0.95,
-    ridgeBias: 0.92,
-    riverBias: 1.75,
-    climateWetnessBias: 0.72,
-  },
-  'broken-coast': {
-    landBias: 0.02,
-    seaEdgeBias: 0.08,
-    attractorScale: 1.2,
-    attractorWeightBias: 1.26,
-    coastFractureBias: 1.8,
-    islandBias: 1.24,
-    ridgeBias: 1.15,
-    riverBias: 0.95,
-    climateWetnessBias: 0,
-  },
 };
 
 const BIOME_INDEX: Record<ContinentBiome, number> = BIOME_TYPES.reduce((acc, biome, index) => {
@@ -419,7 +264,6 @@ export function randomHumanSeed(): string {
 
 export const DEFAULT_CONTROLS: ContinentControls = {
   seed: randomHumanSeed(),
-  preset: 'earth-like',
   size: 'region',
   aspectRatio: 'landscape',
   landFraction: 5,
@@ -443,142 +287,6 @@ export const DEFAULT_CONTROLS: ContinentControls = {
   },
 };
 
-const PRESET_PATCHES: Record<PresetOption, Partial<ContinentControls>> = {
-  'earth-like': {
-    landFraction: 5,
-    relief: 6,
-    fragmentation: 4,
-    coastalSmoothing: 6,
-    plateCount: 0,
-    mountainPeakiness: 5,
-    climateBias: 0,
-    islandDensity: 4,
-    biomeMix: {
-      rivers: 0.6,
-      grassland: 1,
-      temperateForest: 1,
-      rainforest: 0.5,
-      desert: 0.6,
-      mountains: 0.7,
-      tundra: 0.3,
-    },
-  },
-  'archipelago': {
-    landFraction: 3,
-    relief: 5,
-    fragmentation: 9,
-    coastalSmoothing: 3,
-    plateCount: 1,
-    mountainPeakiness: 4,
-    climateBias: 1,
-    islandDensity: 10,
-    biomeMix: {
-      rivers: 0.45,
-      grassland: 0.8,
-      temperateForest: 0.9,
-      rainforest: 0.75,
-      desert: 0.35,
-      mountains: 0.45,
-      tundra: 0.2,
-    },
-  },
-  'mountain-kingdoms': {
-    landFraction: 6,
-    relief: 9,
-    fragmentation: 4,
-    coastalSmoothing: 4,
-    plateCount: 1,
-    mountainPeakiness: 10,
-    climateBias: -1,
-    islandDensity: 1,
-    biomeMix: {
-      rivers: 0.6,
-      grassland: 0.55,
-      temperateForest: 0.85,
-      rainforest: 0.25,
-      desert: 0.4,
-      mountains: 1,
-      tundra: 0.6,
-    },
-  },
-  riverlands: {
-    landFraction: 5,
-    relief: 5,
-    fragmentation: 4,
-    coastalSmoothing: 7,
-    plateCount: 0,
-    mountainPeakiness: 4,
-    climateBias: 2,
-    islandDensity: 3,
-    biomeMix: {
-      rivers: 1,
-      grassland: 1,
-      temperateForest: 0.95,
-      rainforest: 0.6,
-      desert: 0.25,
-      mountains: 0.45,
-      tundra: 0.2,
-    },
-  },
-  'dune-world': {
-    landFraction: 6,
-    relief: 6,
-    fragmentation: 3,
-    coastalSmoothing: 8,
-    plateCount: -1,
-    mountainPeakiness: 6,
-    climateBias: -5,
-    islandDensity: 1,
-    biomeMix: {
-      rivers: 0.15,
-      grassland: 0.4,
-      temperateForest: 0.2,
-      rainforest: 0.05,
-      desert: 1,
-      mountains: 0.65,
-      tundra: 0.1,
-    },
-  },
-  'rain-world': {
-    landFraction: 5,
-    relief: 6,
-    fragmentation: 7,
-    coastalSmoothing: 5,
-    plateCount: 0,
-    mountainPeakiness: 5,
-    climateBias: 5,
-    islandDensity: 6,
-    biomeMix: {
-      rivers: 1,
-      grassland: 0.7,
-      temperateForest: 1,
-      rainforest: 1,
-      desert: 0.1,
-      mountains: 0.55,
-      tundra: 0.15,
-    },
-  },
-  'broken-coast': {
-    landFraction: 5,
-    relief: 6,
-    fragmentation: 9,
-    coastalSmoothing: 2,
-    plateCount: 0,
-    mountainPeakiness: 6,
-    climateBias: 0,
-    islandDensity: 8,
-    biomeMix: {
-      rivers: 0.6,
-      grassland: 0.85,
-      temperateForest: 0.82,
-      rainforest: 0.4,
-      desert: 0.5,
-      mountains: 0.75,
-      tundra: 0.35,
-    },
-  },
-};
-
 function cloneControls(controls: ContinentControls): ContinentControls {
   return {
     ...controls,
@@ -599,6 +307,7 @@ function clampControls(input: ContinentControls): ContinentControls {
   output.mountainPeakiness = Math.round(clamp(output.mountainPeakiness, 1, 10));
   output.climateBias = Math.round(clamp(output.climateBias, -5, 5));
   output.islandDensity = Math.round(clamp(output.islandDensity, 0, 10));
+
   output.biomeMix.rivers = clamp(output.biomeMix.rivers, 0, 1);
   output.biomeMix.grassland = clamp(output.biomeMix.grassland, 0, 1);
   output.biomeMix.temperateForest = clamp(output.biomeMix.temperateForest, 0, 1);
@@ -607,20 +316,6 @@ function clampControls(input: ContinentControls): ContinentControls {
   output.biomeMix.mountains = clamp(output.biomeMix.mountains, 0, 1);
   output.biomeMix.tundra = clamp(output.biomeMix.tundra, 0, 1);
   return output;
-}
-
-export function applyPreset(base: ContinentControls, preset: PresetOption): ContinentControls {
-  const patch = PRESET_PATCHES[preset];
-  const merged: ContinentControls = {
-    ...cloneControls(base),
-    ...patch,
-    preset,
-    biomeMix: {
-      ...base.biomeMix,
-      ...(patch.biomeMix ?? {}),
-    },
-  };
-  return clampControls(merged);
 }
 
 export function randomizeControls(base: ContinentControls): ContinentControls {
@@ -685,19 +380,53 @@ export function mapDimensions(size: SizeOption, aspectRatio: AspectRatioOption):
   };
 }
 
-function histogramThreshold(values: Float32Array, targetLand: number): { threshold: number; min: number; max: number } {
+function downsampleField(
+  outWidth: number,
+  outHeight: number,
+  sampleScale: number,
+  sampler: (sx: number, sy: number) => number,
+): Float32Array {
+  const result = new Float32Array(outWidth * outHeight);
+  const sampleCount = sampleScale * sampleScale;
+  for (let y = 0; y < outHeight; y += 1) {
+    for (let x = 0; x < outWidth; x += 1) {
+      let sum = 0;
+      for (let sy = 0; sy < sampleScale; sy += 1) {
+        for (let sx = 0; sx < sampleScale; sx += 1) {
+          const fx = x + (sx + 0.5) / sampleScale;
+          const fy = y + (sy + 0.5) / sampleScale;
+          sum += sampler(fx, fy);
+        }
+      }
+      result[y * outWidth + x] = sum / sampleCount;
+    }
+  }
+  return result;
+}
+
+function normalizeSigned(values: Float32Array): void {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < values.length; i += 1) {
     min = Math.min(min, values[i]);
     max = Math.max(max, values[i]);
   }
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
-    return { threshold: 0, min: 0, max: 1 };
+  const span = Math.max(1e-6, max - min);
+  for (let i = 0; i < values.length; i += 1) {
+    values[i] = clamp(((values[i] - min) / span) * 2 - 1, -1, 1);
+  }
+}
+
+function histogramThresholdSigned(values: Float32Array, targetLand: number): number {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < values.length; i += 1) {
+    min = Math.min(min, values[i]);
+    max = Math.max(max, values[i]);
   }
   const bins = 2048;
   const histogram = new Uint32Array(bins);
-  const span = max - min;
+  const span = Math.max(1e-6, max - min);
   for (let i = 0; i < values.length; i += 1) {
     const normalized = clamp01((values[i] - min) / span);
     const bin = clamp(Math.floor(normalized * (bins - 1)), 0, bins - 1);
@@ -714,189 +443,55 @@ function histogramThreshold(values: Float32Array, targetLand: number): { thresho
       break;
     }
   }
-  const threshold = min + (thresholdBin / Math.max(1, bins - 1)) * span;
-  return { threshold, min, max };
+  return min + (thresholdBin / Math.max(1, bins - 1)) * span;
 }
 
-function clampMapBoundaries(width: number, height: number, land: Uint8Array): void {
-  for (let x = 0; x < width; x += 1) {
-    land[x] = 0;
-    land[width + x] = 0;
-    land[(height - 1) * width + x] = 0;
-    land[(height - 2) * width + x] = 0;
-  }
-  for (let y = 0; y < height; y += 1) {
-    land[y * width] = 0;
-    land[y * width + 1] = 0;
-    land[y * width + width - 1] = 0;
-    land[y * width + width - 2] = 0;
-  }
-}
-
-function carveCoastAndIslands(
+function smoothCoastalElevation(
   width: number,
   height: number,
-  land: Uint8Array,
-  seed: number,
-  fragmentation: number,
-  islandDensity: number,
-  signature: PresetSignature,
+  elevation: Float32Array,
+  seaLevel: number,
+  smoothLevel: number,
 ): void {
-  const frag = (fragmentation - 1) / 9;
-  const island = islandDensity / 10;
-  const working = land.slice();
-
-  for (let y = 2; y < height - 2; y += 1) {
-    const ny = y / Math.max(1, height - 1);
-    for (let x = 2; x < width - 2; x += 1) {
-      const nx = x / Math.max(1, width - 1);
-      const index = y * width + x;
-      let neighborLand = 0;
-      for (const [dx, dy] of NEIGHBORS_8) {
-        neighborLand += working[(y + dy) * width + (x + dx)];
-      }
-      const edge = Math.min(nx, 1 - nx, ny, 1 - ny);
-      const nearCoast = neighborLand >= 2 && neighborLand <= 6;
-      const coastNoise = fbm(seed, nx * 18, ny * 18, 3, 0.55, 2.1);
-      const fjordNoise = fbm(seed ^ 0x6c8e9cf5, nx * 34, ny * 34, 2, 0.5, 2.3);
-
-      if (working[index] === 1 && nearCoast) {
-        const carveThreshold =
-          0.76 - frag * 0.34 * signature.coastFractureBias - (1 - edge) * 0.08 * signature.coastFractureBias;
-        if (coastNoise > carveThreshold || fjordNoise > carveThreshold + 0.03) {
-          land[index] = 0;
-        }
-      } else if (working[index] === 0 && neighborLand >= 5) {
-        const islandThreshold = 0.93 - island * 0.25 * signature.islandBias - frag * 0.12;
-        if (coastNoise > islandThreshold && edge > 0.06 && edge < 0.3) {
-          land[index] = 1;
-        }
-      }
-    }
-  }
-
-  clampMapBoundaries(width, height, land);
-}
-
-function applyCoastalSmoothing(
-  width: number,
-  height: number,
-  land: Uint8Array,
-  smoothingLevel: number,
-): Uint8Array {
-  const smooth = (smoothingLevel - 1) / 9;
-  const passes = Math.round(1 + smooth * 5);
-  let current = land.slice();
+  const smooth = (smoothLevel - 1) / 9;
+  const passes = Math.round(1 + smooth * 4);
+  const band = lerp(0.035, 0.18, smooth);
+  let current = elevation.slice();
 
   for (let pass = 0; pass < passes; pass += 1) {
     const next = current.slice();
-    const landKeep = Math.round(2 + smooth * 5);
-    const waterFill = Math.round(7 - smooth * 1.1);
-
     for (let y = 1; y < height - 1; y += 1) {
       for (let x = 1; x < width - 1; x += 1) {
         const index = y * width + x;
-        let neighbors = 0;
-        for (const [dx, dy] of NEIGHBORS_8) {
-          neighbors += current[(y + dy) * width + (x + dx)];
+        const distance = Math.abs(current[index] - seaLevel);
+        if (distance > band) {
+          continue;
         }
 
-        if (current[index] === 1) {
-          next[index] = neighbors >= landKeep ? 1 : 0;
-        } else {
-          next[index] = neighbors >= waterFill ? 1 : 0;
+        let sum = 0;
+        for (const [dx, dy] of NEIGHBORS_8) {
+          sum += current[(y + dy) * width + (x + dx)];
         }
+        const average = sum / 8;
+        const strength = smoothstep(1 - distance / Math.max(1e-6, band)) * lerp(0.12, 0.42, smooth);
+        const eroded = lerp(current[index], average, strength);
+        next[index] = lerp(eroded, seaLevel, strength * 0.08);
       }
     }
-
-    clampMapBoundaries(width, height, next);
     current = next;
   }
 
-  if (smooth > 0.55) {
-    const finishingPasses = Math.round(1 + smooth * 3);
-    for (let pass = 0; pass < finishingPasses; pass += 1) {
-      const next = current.slice();
-      for (let y = 1; y < height - 1; y += 1) {
-        for (let x = 1; x < width - 1; x += 1) {
-          const index = y * width + x;
-          let neighbors = 0;
-          for (const [dx, dy] of NEIGHBORS_8) {
-            neighbors += current[(y + dy) * width + (x + dx)];
-          }
-          if (current[index] === 1) {
-            next[index] = neighbors >= 5 ? 1 : 0;
-          } else {
-            next[index] = neighbors >= 6 ? 1 : 0;
-          }
-        }
-      }
-      clampMapBoundaries(width, height, next);
-      current = next;
-    }
-  }
-
-  if (smooth > 0.25) {
-    const minLandComponentArea = Math.round(8 + smooth * 140);
-    const minWaterPocketArea = Math.round(8 + smooth * 110);
-    pruneSmallComponents(width, height, current, 1, minLandComponentArea, 0);
-    pruneSmallComponents(width, height, current, 0, minWaterPocketArea, 1);
-    clampMapBoundaries(width, height, current);
-  }
-
-  return current;
+  elevation.set(current);
 }
 
-function pruneSmallComponents(
-  width: number,
-  height: number,
-  mask: Uint8Array,
-  targetValue: 0 | 1,
-  minArea: number,
-  replacement: 0 | 1,
-): void {
-  const visited = new Uint8Array(width * height);
-  for (let index = 0; index < mask.length; index += 1) {
-    if (visited[index] === 1 || mask[index] !== targetValue) {
-      continue;
-    }
-
-    const queue: number[] = [index];
-    visited[index] = 1;
-    const component: number[] = [];
-    let touchesBoundary = false;
-
-    while (queue.length > 0) {
-      const current = queue.pop() as number;
-      component.push(current);
-      const x = current % width;
-      const y = Math.floor(current / width);
-      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
-        touchesBoundary = true;
-      }
-
-      for (const [dx, dy] of NEIGHBORS_4) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const nextIndex = ny * width + nx;
-        if (visited[nextIndex] === 1 || mask[nextIndex] !== targetValue) {
-          continue;
-        }
-        visited[nextIndex] = 1;
-        queue.push(nextIndex);
-      }
-    }
-
-    if (touchesBoundary || component.length >= minArea) {
-      continue;
-    }
-
-    for (const cell of component) {
-      mask[cell] = replacement;
-    }
+function enforceOceanEdges(width: number, height: number, land: Uint8Array): void {
+  for (let x = 0; x < width; x += 1) {
+    land[x] = 0;
+    land[(height - 1) * width + x] = 0;
+  }
+  for (let y = 0; y < height; y += 1) {
+    land[y * width] = 0;
+    land[y * width + width - 1] = 0;
   }
 }
 
@@ -990,16 +585,16 @@ function bfsDistance(width: number, height: number, starts: Uint8Array): Uint16A
   return distance;
 }
 
-function computeLightAndSlope(width: number, height: number, elevation: Float32Array): {
+function computeLightAndSlope(width: number, height: number, elevation01: Float32Array): {
   light: Float32Array;
   slope: Float32Array;
 } {
   const light = new Float32Array(width * height);
   const slope = new Float32Array(width * height);
 
-  const lx = -0.62;
-  const ly = -0.4;
-  const lz = 0.68;
+  const lx = -1;
+  const ly = -1;
+  const lz = 1;
   const lLen = Math.hypot(lx, ly, lz) || 1;
   const lnx = lx / lLen;
   const lny = ly / lLen;
@@ -1007,23 +602,24 @@ function computeLightAndSlope(width: number, height: number, elevation: Float32A
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const left = elevation[y * width + Math.max(0, x - 1)];
-      const right = elevation[y * width + Math.min(width - 1, x + 1)];
-      const up = elevation[Math.max(0, y - 1) * width + x];
-      const down = elevation[Math.min(height - 1, y + 1) * width + x];
+      const left = elevation01[y * width + Math.max(0, x - 1)];
+      const right = elevation01[y * width + Math.min(width - 1, x + 1)];
+      const up = elevation01[Math.max(0, y - 1) * width + x];
+      const down = elevation01[Math.min(height - 1, y + 1) * width + x];
 
       const dx = right - left;
       const dy = down - up;
-      const nx = -dx * 2.8;
-      const ny = -dy * 2.8;
+      const nx = -dx * 3.2;
+      const ny = -dy * 3.2;
       const nz = 1;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       const nnx = nx / nLen;
       const nny = ny / nLen;
       const nnz = nz / nLen;
+
       const dot = nnx * lnx + nny * lny + nnz * lnz;
       light[y * width + x] = clamp01(dot * 0.5 + 0.5);
-      slope[y * width + x] = clamp01(Math.hypot(dx, dy) * 5.2);
+      slope[y * width + x] = clamp01(Math.hypot(dx, dy) * 6.2);
     }
   }
 
@@ -1033,8 +629,7 @@ function computeLightAndSlope(width: number, height: number, elevation: Float32A
 function checksumFloatArray(values: Float32Array): number {
   let hash = 2166136261;
   for (let i = 0; i < values.length; i += 37) {
-    const quantized = Math.round(values[i] * 10_000);
-    hash ^= quantized;
+    hash ^= Math.round(values[i] * 10_000);
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
@@ -1059,7 +654,6 @@ function computeIdentityHash(
   width: number,
   height: number,
   elevation: Float32Array,
-  ridge: Float32Array,
   land: Uint8Array,
   river: Uint8Array,
   biome: Uint8Array,
@@ -1067,7 +661,6 @@ function computeIdentityHash(
   let hash = hashString(`${normalizedSeed}|${width}|${height}|${controlsHash}`);
   const checks = [
     checksumFloatArray(elevation),
-    checksumFloatArray(ridge),
     checksumByteArray(land),
     checksumByteArray(river),
     checksumByteArray(biome),
@@ -1077,61 +670,6 @@ function computeIdentityHash(
     hash = Math.imul(hash, 16777619);
   }
   return compactHashHex(hash);
-}
-
-function landComponents(width: number, height: number, land: Uint8Array): LandComponent[] {
-  const total = width * height;
-  const visited = new Uint8Array(total);
-  const components: LandComponent[] = [];
-
-  for (let i = 0; i < total; i += 1) {
-    if (land[i] === 0 || visited[i] === 1) {
-      continue;
-    }
-
-    let area = 0;
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    let touchesEdge = false;
-
-    const queue: number[] = [i];
-    visited[i] = 1;
-
-    while (queue.length > 0) {
-      const current = queue.pop() as number;
-      area += 1;
-      const x = current % width;
-      const y = Math.floor(current / width);
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
-        touchesEdge = true;
-      }
-
-      for (const [dx, dy] of NEIGHBORS_8) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const ni = ny * width + nx;
-        if (land[ni] === 0 || visited[ni] === 1) {
-          continue;
-        }
-        visited[ni] = 1;
-        queue.push(ni);
-      }
-    }
-
-    components.push({ area, minX, maxX, minY, maxY, touchesEdge });
-  }
-
-  components.sort((a, b) => b.area - a.area);
-  return components;
 }
 
 function computeLandAndCoast(width: number, height: number, land: Uint8Array): {
@@ -1164,338 +702,156 @@ function computeLandAndCoast(width: number, height: number, land: Uint8Array): {
   return { landArea, coastPerimeter };
 }
 
-export function measureContinentFeatures(map: GeneratedContinent): ContinentFeatureVector {
-  const { width, height, land, river, ridge, coastPerimeter, landArea } = map;
-  const components = landComponents(width, height, land);
-  const islandCount = Math.max(0, components.length - 1);
-
-  let offshoreIslands = 0;
-  if (components.length > 1) {
-    for (let i = 1; i < components.length; i += 1) {
-      const component = components[i];
-      if (component.touchesEdge) {
-        continue;
-      }
-      const edgeDistance = Math.min(
-        component.minX,
-        component.minY,
-        width - 1 - component.maxX,
-        height - 1 - component.maxY,
-      );
-      if (edgeDistance > Math.min(width, height) * 0.08) {
-        offshoreIslands += 1;
-      }
-    }
-  }
-
-  const largest = components[0];
-  let bboxFillRatio = 0;
-  let cornerRetention = 0;
-  if (largest) {
-    const bboxArea = (largest.maxX - largest.minX + 1) * (largest.maxY - largest.minY + 1);
-    bboxFillRatio = largest.area / Math.max(1, bboxArea);
-
-    const cornerWindow = Math.max(4, Math.round(Math.min(width, height) * 0.08));
-    let cornerLand = 0;
-    let cornerCells = 0;
-    const cornerChecks = [
-      { x0: 0, y0: 0 },
-      { x0: width - cornerWindow, y0: 0 },
-      { x0: 0, y0: height - cornerWindow },
-      { x0: width - cornerWindow, y0: height - cornerWindow },
-    ];
-    for (const corner of cornerChecks) {
-      for (let y = corner.y0; y < corner.y0 + cornerWindow; y += 1) {
-        for (let x = corner.x0; x < corner.x0 + cornerWindow; x += 1) {
-          const index = y * width + x;
-          cornerCells += 1;
-          cornerLand += land[index];
-        }
-      }
-    }
-    cornerRetention = cornerLand / Math.max(1, cornerCells);
-  }
-
-  let mountainTiles = 0;
-  let ridgeSignal = 0;
-  let ridgeStrong = 0;
-  for (let i = 0; i < map.biome.length; i += 1) {
-    const biome = BIOME_TYPES[map.biome[i]];
-    if (biome === 'mountain' || biome === 'rock') {
-      mountainTiles += 1;
-      ridgeSignal += ridge[i];
-      if (ridge[i] > 0.5) {
-        ridgeStrong += 1;
-      }
-    }
-  }
-  const ridgeCoherence = mountainTiles > 0
-    ? clamp01((ridgeSignal / mountainTiles) * 0.6 + ridgeStrong / mountainTiles * 0.8)
-    : 0;
-
-  const riverVisited = new Uint8Array(river.length);
-  let riverComponents = 0;
-  let majorRiverComponents = 0;
-  for (let i = 0; i < river.length; i += 1) {
-    if (river[i] === 0 || riverVisited[i] === 1) {
-      continue;
-    }
-    riverComponents += 1;
-    let componentSize = 0;
-    const queue: number[] = [i];
-    riverVisited[i] = 1;
-    while (queue.length > 0) {
-      const current = queue.pop() as number;
-      componentSize += 1;
-      const x = current % width;
-      const y = Math.floor(current / width);
-      for (const [dx, dy] of NEIGHBORS_8) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const ni = ny * width + nx;
-        if (river[ni] === 0 || riverVisited[ni] === 1) {
-          continue;
-        }
-        riverVisited[ni] = 1;
-        queue.push(ni);
-      }
-    }
-    if (componentSize >= 28) {
-      majorRiverComponents += 1;
-    }
-  }
-
-  const landRatio = landArea / Math.max(1, width * height);
-  const coastlineComplexity = coastPerimeter * coastPerimeter / Math.max(1, landArea);
-
-  return {
-    landRatio,
-    coastlineComplexity,
-    islandCount,
-    offshoreIslandRatio: islandCount > 0 ? offshoreIslands / islandCount : 0,
-    ridgeCoherence,
-    riverComponents,
-    majorRiverComponents,
-    bboxFillRatio,
-    cornerRetention,
-  };
-}
-
-function downsampleField(
-  outWidth: number,
-  outHeight: number,
-  sampleScale: number,
-  sampler: (sx: number, sy: number) => number,
-): Float32Array {
-  const result = new Float32Array(outWidth * outHeight);
-  const sampleCount = sampleScale * sampleScale;
-  for (let y = 0; y < outHeight; y += 1) {
-    for (let x = 0; x < outWidth; x += 1) {
-      let sum = 0;
-      for (let sy = 0; sy < sampleScale; sy += 1) {
-        for (let sx = 0; sx < sampleScale; sx += 1) {
-          const fx = x + (sx + 0.5) / sampleScale;
-          const fy = y + (sy + 0.5) / sampleScale;
-          sum += sampler(fx, fy);
-        }
-      }
-      result[y * outWidth + x] = sum / sampleCount;
-    }
-  }
-  return result;
-}
-
 export function generateContinent(input: ContinentControls): GeneratedContinent {
   const controls = clampControls(input);
   const normalizedSeed = normalizeSeed(controls.seed);
-  const dimensions = mapDimensions(controls.size, controls.aspectRatio);
-  const { width, height, basePlates, fieldScale } = dimensions;
+  const { width, height, basePlates, fieldScale } = mapDimensions(controls.size, controls.aspectRatio);
   const total = width * height;
 
-  const signature = PRESET_SIGNATURES[controls.preset];
+  const seedHash = hashString(normalizedSeed);
+  const plateSeed = hashString(`${normalizedSeed}|plates|${width}|${height}|${controls.aspectRatio}`);
+  const noiseSeed = hashString(`${normalizedSeed}|elevation`);
+  const climateSeed = hashString(`${normalizedSeed}|climate`);
+
+  const aspectMetric = width / Math.max(1, height);
   const reliefNorm = (controls.relief - 1) / 9;
   const fragNorm = (controls.fragmentation - 1) / 9;
-  const smoothingNorm = (controls.coastalSmoothing - 1) / 9;
   const peakNorm = (controls.mountainPeakiness - 1) / 9;
   const islandNorm = controls.islandDensity / 10;
 
-  const seedHash = hashString(normalizedSeed);
-  const plateSeed = hashString(`${normalizedSeed}|plates|${width}|${height}|${controls.preset}`);
-  const elevSeed = hashString(`${normalizedSeed}|elev|${controls.size}|${controls.aspectRatio}`);
-  const climateSeed = hashString(`${normalizedSeed}|climate|${controls.latitudeCenter}|${controls.latitudeSpan}`);
-
-  const plateCount = clamp(Math.round(basePlates + controls.plateCount * 4), 4, 34);
+  const plateCount = clamp(Math.round(basePlates + controls.plateCount * 4), 4, 36);
   const plateRng = mulberry32(plateSeed);
   const plates: Plate[] = [];
   for (let i = 0; i < plateCount; i += 1) {
-    const driftAngle = plateRng() * Math.PI * 2;
+    const angle = plateRng() * Math.PI * 2;
     plates.push({
       x: plateRng(),
       y: plateRng(),
       uplift: lerp(-1, 1, plateRng()),
-      driftX: Math.cos(driftAngle),
-      driftY: Math.sin(driftAngle),
+      driftX: Math.cos(angle),
+      driftY: Math.sin(angle),
     });
-  }
-
-  const landFractionNorm = (controls.landFraction - 1) / 9;
-  let attractorCount = clamp(Math.round(1 + (1 - fragNorm) * 2 + landFractionNorm * 2), 1, 8);
-  if (controls.preset === 'archipelago') {
-    attractorCount = clamp(attractorCount + 3, 4, 12);
-  }
-  if (controls.preset === 'broken-coast') {
-    attractorCount = clamp(attractorCount - 1, 1, 5);
-  }
-
-  const attractorRng = mulberry32(hashString(`${normalizedSeed}|attractors|${controls.preset}|${attractorCount}`));
-  const attractors: Array<{ x: number; y: number; rx: number; ry: number; weight: number }> = [];
-  let attractorWeight = 0;
-  for (let i = 0; i < attractorCount; i += 1) {
-    const rx = lerp(0.14, 0.48, attractorRng()) * signature.attractorScale;
-    const ry = lerp(0.14, 0.48, attractorRng()) * signature.attractorScale;
-    const weight = lerp(0.45, 1.55, attractorRng()) * signature.attractorWeightBias;
-    let x = lerp(0.13, 0.87, attractorRng());
-    let y = lerp(0.13, 0.87, attractorRng());
-
-    if (controls.preset === 'archipelago') {
-      const arc = i / Math.max(1, attractorCount - 1);
-      x = 0.16 + arc * 0.68 + (attractorRng() - 0.5) * 0.09;
-      y = 0.45 + Math.sin(arc * Math.PI * 2.2 + attractorRng() * 0.4) * 0.2;
-    } else if (controls.preset === 'broken-coast' && i > 0) {
-      x = lerp(0.08, 0.92, attractorRng());
-      y = lerp(0.06, 0.94, attractorRng());
-    }
-
-    attractors.push({ x, y, rx, ry, weight });
-    attractorWeight += weight;
   }
 
   const rawElevation = downsampleField(width, height, fieldScale, (fx, fy) => {
     const nx = fx / Math.max(1, width - 1);
     const ny = fy / Math.max(1, height - 1);
 
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    let secondDistance = Number.POSITIVE_INFINITY;
+    let nearest = Number.POSITIVE_INFINITY;
+    let second = Number.POSITIVE_INFINITY;
     let nearestPlate = 0;
     let secondPlate = 0;
 
     for (let i = 0; i < plates.length; i += 1) {
       const plate = plates[i];
-      const dx = nx - plate.x;
+      const dx = (nx - plate.x) * aspectMetric;
       const dy = ny - plate.y;
-      const distance = dx * dx + dy * dy;
-      if (distance < nearestDistance) {
-        secondDistance = nearestDistance;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < nearest) {
+        second = nearest;
         secondPlate = nearestPlate;
-        nearestDistance = distance;
+        nearest = d2;
         nearestPlate = i;
-      } else if (distance < secondDistance) {
-        secondDistance = distance;
+      } else if (d2 < second) {
+        second = d2;
         secondPlate = i;
       }
     }
 
     const plateA = plates[nearestPlate];
     const plateB = plates[secondPlate];
-    const boundaryGap = Math.sqrt(secondDistance) - Math.sqrt(nearestDistance);
-    const boundaryStrength = clamp01(1 - boundaryGap * 8.2);
+    const gap = Math.sqrt(Math.max(0, second)) - Math.sqrt(Math.max(0, nearest));
+    const boundary = clamp01(1 - gap * 8.8);
 
-    const orderedA = Math.min(nearestPlate, secondPlate);
-    const orderedB = Math.max(nearestPlate, secondPlate);
-    const boundaryHash = hashInts(seedHash, orderedA + 17, orderedB + 41, 911);
-    const boundaryType = boundaryHash % 3;
+    const vx = plateB.x - plateA.x;
+    const vy = plateB.y - plateA.y;
+    const len = Math.hypot(vx, vy) || 1;
+    const nxBoundary = vx / len;
+    const nyBoundary = vy / len;
+    const relX = plateA.driftX - plateB.driftX;
+    const relY = plateA.driftY - plateB.driftY;
+    const along = relX * nxBoundary + relY * nyBoundary;
+    const cross = relX * nyBoundary - relY * nxBoundary;
 
-    const relativeDrift = Math.abs(plateA.driftX - plateB.driftX) + Math.abs(plateA.driftY - plateB.driftY);
-    let boundaryUplift = 0;
-    if (boundaryType === 0) {
-      boundaryUplift = boundaryStrength * (0.16 + reliefNorm * 0.22 + peakNorm * 0.26) * signature.ridgeBias;
-    } else if (boundaryType === 1) {
-      boundaryUplift = -boundaryStrength * (0.08 + reliefNorm * 0.12);
-    } else {
-      boundaryUplift = boundaryStrength * (0.04 + reliefNorm * 0.06 + relativeDrift * 0.02);
-    }
+    const convergent = Math.max(0, -along);
+    const divergent = Math.max(0, along);
+    const transform = Math.abs(cross);
 
-    let attractorField = 0;
-    for (const attractor of attractors) {
-      const dx = (nx - attractor.x) / attractor.rx;
-      const dy = (ny - attractor.y) / attractor.ry;
-      const d2 = dx * dx + dy * dy;
-      attractorField += Math.exp(-d2 * 1.7) * attractor.weight;
-    }
-    attractorField /= Math.max(1e-6, attractorWeight);
+    const boundaryUplift =
+      boundary *
+      ((0.35 + reliefNorm * 0.35 + peakNorm * 0.25) * convergent -
+        (0.18 + reliefNorm * 0.2) * divergent +
+        (0.08 + reliefNorm * 0.06) * transform);
 
-    const low = fbm(elevSeed, nx * 2.2, ny * 2.2, 4, 0.56, 2);
-    const mid = fbm(elevSeed ^ 0x68bc21eb, nx * 7.3, ny * 7.3, 3, 0.52, 2.06);
-    const high = fbm(elevSeed ^ 0x1f123bb5, nx * 18.8, ny * 18.8, 2, 0.5, 2.3);
+    const low = fbm(noiseSeed, nx * 2.2, ny * 2.2, 5, 0.58, 2);
+    const regional = fbm(noiseSeed ^ 0x51d7348b, nx * 6.4, ny * 6.4, 4, 0.55, 2.1);
+    const rugged = fbm(noiseSeed ^ 0x2f43ac91, nx * 18.5, ny * 18.5, 3, 0.5, 2.3);
+    const ridgeLine = Math.pow(
+      1 - Math.abs(fbm(noiseSeed ^ 0x6bbd3d3d, nx * 10 + ny * 4.5, ny * 8.5, 2, 0.54, 2.1) - 0.5) * 2,
+      1.3 + peakNorm * 1.8,
+    );
 
-    const ridgeLine = Math.pow(1 - Math.abs(fbm(elevSeed ^ 0xd73ac1bb, nx * 11.5, ny * 11.5, 2, 0.54, 2.1) - 0.5) * 2, 1.4 + peakNorm * 2);
-    const ridgeDirectional = Math.pow(1 - Math.abs(fbm(elevSeed ^ 0x7a2fd905, nx * 2.7 + ny * 8.2, ny * 2.3, 2, 0.55, 2.1) - 0.5) * 2, 1.1 + peakNorm * 1.4);
-    const ridgeField = boundaryStrength * ridgeLine * ridgeDirectional;
+    const plateBody = plateA.uplift * (0.16 + reliefNorm * 0.2);
 
     const edgeDistance = Math.min(nx, 1 - nx, ny, 1 - ny);
-    const edgeWarp = (fbm(elevSeed ^ 0x43d8b19f, nx * 3.4, ny * 3.4, 2, 0.57, 2.1) - 0.5) * 0.06;
-    const edgeInterior = smoothRange(edgeDistance + edgeWarp, 0.04, 0.32 - fragNorm * 0.06);
-    const edgeSeaBias = (1 - edgeInterior) * (1.1 + signature.seaEdgeBias + fragNorm * 0.3);
+    const edgeWarp = (fbm(noiseSeed ^ 0x143290e3, nx * 4.2, ny * 4.2, 2, 0.56, 2.1) - 0.5) * 0.08;
+    const interior = smoothRange(edgeDistance + edgeWarp, 0.02, 0.34 - fragNorm * 0.06 + islandNorm * 0.03);
+    const edgeSeaBias = (1 - interior) * (1.3 + fragNorm * 0.2 + islandNorm * 0.35);
 
-    const raw =
-      0.42 +
-      attractorField * (0.48 + landFractionNorm * 0.26) +
-      plateA.uplift * 0.14 +
+    return (
+      0.45 +
+      plateBody +
       boundaryUplift +
-      ridgeField * (0.16 + peakNorm * 0.2) * signature.ridgeBias +
-      (low - 0.5) * (0.22 + reliefNorm * 0.25) +
-      (mid - 0.5) * (0.12 + fragNorm * 0.2) +
-      (high - 0.5) * (0.04 + peakNorm * 0.08 + islandNorm * 0.05) -
-      edgeSeaBias;
-
-    return raw;
+      ridgeLine * boundary * (0.12 + peakNorm * 0.2) +
+      (low - 0.5) * (0.45 + reliefNorm * 0.35) +
+      (regional - 0.5) * (0.3 + fragNorm * 0.35 + islandNorm * 0.15) +
+      (rugged - 0.5) * (0.08 + reliefNorm * 0.22) -
+      edgeSeaBias
+    );
   });
 
-  const targetLand = clamp(0.08 + landFractionNorm * 0.64 + signature.landBias, 0.08, 0.72);
-  const { threshold, min: elevMin, max: elevMax } = histogramThreshold(rawElevation, targetLand);
-  const elevSpan = Math.max(1e-6, elevMax - elevMin);
+  normalizeSigned(rawElevation);
 
-  const elevation = new Float32Array(total);
-  const ridge = new Float32Array(total);
+  const targetLand = clamp(0.08 + (controls.landFraction - 1) / 9 * 0.66, 0.08, 0.74);
+  const seaLevel = histogramThresholdSigned(rawElevation, targetLand);
+
+  smoothCoastalElevation(width, height, rawElevation, seaLevel, controls.coastalSmoothing);
+
+  const elevation01 = new Float32Array(total);
+  const elevationSigned = rawElevation;
   const land = new Uint8Array(total);
+  const ridge = new Float32Array(total);
+  const ridgeSeed = noiseSeed ^ 0x0f6344f3;
 
-  const ridgeSeed = elevSeed ^ 0x38fd0ac1;
   for (let y = 0; y < height; y += 1) {
-    const ny = y / Math.max(1, height - 1);
     for (let x = 0; x < width; x += 1) {
-      const nx = x / Math.max(1, width - 1);
       const index = y * width + x;
-      elevation[index] = clamp01((rawElevation[index] - elevMin) / elevSpan);
-      land[index] = rawElevation[index] >= threshold ? 1 : 0;
-      ridge[index] = clamp01(
-        Math.pow(1 - Math.abs(fbm(ridgeSeed, nx * 7.2, ny * 7.2, 2, 0.55, 2.1) - 0.5) * 2, 1.2 + peakNorm * 1.6) *
-          clamp01((elevation[index] - 0.45) * 2),
+      elevation01[index] = clamp01((elevationSigned[index] + 1) * 0.5);
+      land[index] = elevationSigned[index] > seaLevel ? 1 : 0;
+
+      const nx = x / Math.max(1, width - 1);
+      const ny = y / Math.max(1, height - 1);
+      const ridgeNoise = Math.pow(
+        1 - Math.abs(fbm(ridgeSeed, nx * 8.2 + ny * 1.9, ny * 8.2, 2, 0.56, 2.1) - 0.5) * 2,
+        1.2 + peakNorm * 1.7,
       );
+      ridge[index] = clamp01(ridgeNoise * clamp01((elevationSigned[index] - seaLevel) * 1.8 + 0.3));
     }
   }
 
-  clampMapBoundaries(width, height, land);
-  carveCoastAndIslands(width, height, land, hashString(`${normalizedSeed}|coast-carve`), controls.fragmentation, controls.islandDensity, signature);
-  const smoothedLand = applyCoastalSmoothing(width, height, land, controls.coastalSmoothing);
-  clampMapBoundaries(width, height, smoothedLand);
+  enforceOceanEdges(width, height, land);
 
   const water = new Uint8Array(total);
   for (let i = 0; i < total; i += 1) {
-    water[i] = smoothedLand[i] === 1 ? 0 : 1;
+    water[i] = land[i] === 1 ? 0 : 1;
   }
 
   let { ocean, lake } = floodOcean(width, height, water);
   const distanceToOcean = bfsDistance(width, height, ocean);
-  const distanceToLand = bfsDistance(width, height, smoothedLand);
-
-  const seaLevel = clamp01((threshold - elevMin) / elevSpan);
+  const distanceToLand = bfsDistance(width, height, land);
 
   const temperature = new Float32Array(total);
   const moisture = new Float32Array(total);
-
   for (let y = 0; y < height; y += 1) {
     const ny = y / Math.max(1, height - 1);
     const latitude = controls.latitudeCenter + (0.5 - ny) * controls.latitudeSpan;
@@ -1504,30 +860,26 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     for (let x = 0; x < width; x += 1) {
       const nx = x / Math.max(1, width - 1);
       const index = y * width + x;
-      const elev = elevation[index];
-      const localNoise = fbm(climateSeed, nx * 3.5, ny * 3.5, 3, 0.58, 2.05);
-      const localNoise2 = fbm(climateSeed ^ 0x59d2ca8f, nx * 5.4, ny * 5.4, 2, 0.55, 2.2);
+      const elevAboveSea = Math.max(0, elevationSigned[index] - seaLevel);
+      const climateNoise = fbm(climateSeed, nx * 3.2, ny * 3.2, 3, 0.57, 2.1);
+      const moistureNoise = fbm(climateSeed ^ 0x5d82317d, nx * 4.8, ny * 4.8, 2, 0.55, 2.2);
 
-      const elevPenalty = Math.max(0, elev - seaLevel) * 0.58;
-      let temp = latTemp - elevPenalty + (localNoise - 0.5) * 0.11;
+      let temp = latTemp - elevAboveSea * 0.5 + (climateNoise - 0.5) * 0.12;
       temp = clamp01(temp);
 
-      const oceanProximity = clamp01(1 - distanceToOcean[index] / (26 + controls.fragmentation * 3));
-      const rainShadow = x > 0
-        ? clamp01(ridge[index - 1] * (elevation[index - 1] - elev + 0.2)) * 0.12
-        : 0;
+      const oceanProximity = clamp01(1 - distanceToOcean[index] / (20 + controls.fragmentation * 2));
+      const rainShadow = x > 0 ? clamp01((elevationSigned[index - 1] - elevationSigned[index]) * 3.2) * ridge[index - 1] * 0.18 : 0;
       let wet =
-        0.2 +
+        0.22 +
         oceanProximity * 0.58 +
-        (localNoise2 - 0.5) * 0.32 +
-        controls.climateBias * 0.055 +
-        signature.climateWetnessBias * 0.16 -
-        elevPenalty * 0.17 -
+        (moistureNoise - 0.5) * 0.28 +
+        controls.climateBias * 0.052 -
+        elevAboveSea * 0.16 -
         rainShadow;
 
-      if (smoothedLand[index] === 0) {
-        temp = clamp01(temp + 0.05);
-        wet = clamp01(wet + 0.1);
+      if (land[index] === 0) {
+        temp = clamp01(temp + 0.04);
+        wet = clamp01(wet + 0.08);
       }
 
       temperature[index] = temp;
@@ -1543,12 +895,12 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
-      if (smoothedLand[index] === 0) {
+      if (land[index] === 0) {
         continue;
       }
 
       flow[index] = 1;
-      let bestElevation = elevation[index];
+      let bestElevation = elevationSigned[index];
       let bestNeighbor = -1;
       for (const [dx, dy] of NEIGHBORS_8) {
         const nx = x + dx;
@@ -1557,14 +909,14 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
           continue;
         }
         const ni = ny * width + nx;
-        if (elevation[ni] < bestElevation - 1e-4) {
-          bestElevation = elevation[ni];
+        if (elevationSigned[ni] < bestElevation - 1e-4) {
+          bestElevation = elevationSigned[ni];
           bestNeighbor = ni;
         }
       }
       downstream[index] = bestNeighbor;
 
-      const bin = clamp(Math.floor(elevation[index] * 255), 0, 255);
+      const bin = clamp(Math.floor(elevation01[index] * 255), 0, 255);
       bins[bin].push(index);
     }
   }
@@ -1585,26 +937,23 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     maxFlow = Math.max(maxFlow, flow[i]);
   }
   for (let i = 0; i < flow.length; i += 1) {
-    flow[i] = flow[i] / maxFlow;
+    flow[i] /= maxFlow;
   }
 
   const river = new Uint8Array(total);
-  const riverMix = controls.biomeMix.rivers * signature.riverBias;
-  const sourceThreshold = lerp(0.09, 0.012, clamp01(riverMix));
-  const minRiverLength = Math.round(lerp(40, 10, clamp01(riverMix)));
-  const minDrop = lerp(0.07, 0.02, clamp01(riverMix));
-  const maxSources = Math.max(6, Math.round((total / 9_000) * (0.55 + clamp01(riverMix) * 2.4)));
-  const spacing = Math.round(lerp(42, 14, clamp01(riverMix)));
+  const riverMix = controls.biomeMix.rivers;
+  const sourceThreshold = lerp(0.18, 0.045, riverMix);
+  const minLength = Math.round(lerp(42, 14, riverMix));
+  const minDrop = lerp(0.07, 0.02, riverMix);
+  const maxSources = Math.max(6, Math.round((total / 12_000) * (0.7 + riverMix * 2.6)));
+  const spacing = Math.round(lerp(42, 16, riverMix));
 
   const sourceCandidates: number[] = [];
   for (let i = 0; i < total; i += 1) {
-    if (smoothedLand[i] === 0) {
+    if (land[i] === 0 || moisture[i] < 0.18) {
       continue;
     }
-    if (flow[i] < sourceThreshold || moisture[i] < 0.2) {
-      continue;
-    }
-    if (elevation[i] < seaLevel + 0.08) {
+    if (flow[i] < sourceThreshold || elevationSigned[i] < seaLevel + 0.06) {
       continue;
     }
     sourceCandidates.push(i);
@@ -1612,15 +961,13 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   sourceCandidates.sort((a, b) => flow[b] - flow[a]);
 
   const selectedSources: number[] = [];
-  const sinkCandidates: number[] = [];
-
-  const isFarEnough = (index: number): boolean => {
+  const sourceFarEnough = (index: number): boolean => {
     const x = index % width;
     const y = Math.floor(index / width);
     const spacingSq = spacing * spacing;
-    for (const selected of selectedSources) {
-      const sx = selected % width;
-      const sy = Math.floor(selected / width);
+    for (const source of selectedSources) {
+      const sx = source % width;
+      const sy = Math.floor(source / width);
       const dx = sx - x;
       const dy = sy - y;
       if (dx * dx + dy * dy < spacingSq) {
@@ -1630,9 +977,9 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     return true;
   };
 
-  for (let s = 0; s < sourceCandidates.length && selectedSources.length < maxSources; s += 1) {
-    const source = sourceCandidates[s];
-    if (!isFarEnough(source)) {
+  for (let i = 0; i < sourceCandidates.length && selectedSources.length < maxSources; i += 1) {
+    const source = sourceCandidates[i];
+    if (!sourceFarEnough(source)) {
       continue;
     }
     selectedSources.push(source);
@@ -1640,8 +987,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     const seen = new Set<number>();
     const path: number[] = [];
     let current = source;
-    const startElevation = elevation[source];
-    let terminalWater = false;
+    let reachesWater = false;
 
     for (let step = 0; step < width + height; step += 1) {
       if (seen.has(current)) {
@@ -1651,122 +997,38 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       path.push(current);
 
       if (ocean[current] === 1 || lake[current] === 1) {
-        terminalWater = true;
-        break;
-      }
-
-      if (river[current] === 1 && current !== source) {
-        terminalWater = true;
+        reachesWater = true;
         break;
       }
 
       const next = downstream[current];
       if (next < 0) {
-        sinkCandidates.push(current);
+        break;
+      }
+      if (river[next] === 1) {
+        reachesWater = true;
+        path.push(next);
         break;
       }
       current = next;
     }
 
-    const endElevation = elevation[path[path.length - 1]];
-    const drop = startElevation - endElevation;
-    if (path.length < minRiverLength || drop < minDrop) {
-      continue;
-    }
-    if (!terminalWater && path.length < minRiverLength + 10) {
+    const drop = elevationSigned[source] - elevationSigned[path[path.length - 1]];
+    if (path.length < minLength || drop < minDrop || !reachesWater) {
       continue;
     }
 
-    for (let i = 0; i < path.length; i += 1) {
-      const index = path[i];
-      if (smoothedLand[index] === 1) {
+    for (const index of path) {
+      if (land[index] === 1) {
         river[index] = 1;
       }
     }
   }
 
-  for (let i = 0; i < total; i += 1) {
-    if (river[i] === 1 && flow[i] > 0.45) {
-      const x = i % width;
-      const y = Math.floor(i / width);
-      for (const [dx, dy] of NEIGHBORS_4) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const ni = ny * width + nx;
-        if (smoothedLand[ni] === 1 && elevation[ni] <= elevation[i] + 0.035 && flow[ni] > 0.2) {
-          river[ni] = 1;
-        }
-      }
-    }
-  }
-
-  if (sinkCandidates.length > 0) {
-    let lakeCreated = 0;
-    for (const sink of sinkCandidates) {
-      if (lakeCreated >= 64) {
-        break;
-      }
-      if (smoothedLand[sink] === 0 || river[sink] === 1) {
-        continue;
-      }
-      const x = sink % width;
-      const y = Math.floor(sink / width);
-      if (x < 3 || y < 3 || x >= width - 3 || y >= height - 3) {
-        continue;
-      }
-      const basinLevel = elevation[sink] + 0.022 + (hashInts(seedHash, x, y, 67) % 9) * 0.001;
-      const basin: number[] = [];
-      const queue: number[] = [sink];
-      const visited = new Set<number>([sink]);
-      while (queue.length > 0 && basin.length < 40) {
-        const current = queue.pop() as number;
-        if (smoothedLand[current] === 0 || river[current] === 1) {
-          continue;
-        }
-        if (elevation[current] <= basinLevel) {
-          basin.push(current);
-          const cx = current % width;
-          const cy = Math.floor(current / width);
-          for (const [dx, dy] of NEIGHBORS_8) {
-            const nx = cx + dx;
-            const ny = cy + dy;
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-              continue;
-            }
-            const ni = ny * width + nx;
-            if (visited.has(ni)) {
-              continue;
-            }
-            visited.add(ni);
-            queue.push(ni);
-          }
-        }
-      }
-
-      if (basin.length >= 3) {
-        for (const index of basin) {
-          smoothedLand[index] = 0;
-        }
-        lakeCreated += 1;
-      }
-    }
-  }
-
-  const waterFinal = new Uint8Array(total);
-  for (let i = 0; i < total; i += 1) {
-    waterFinal[i] = smoothedLand[i] === 1 ? 0 : 1;
-  }
-  ({ ocean, lake } = floodOcean(width, height, waterFinal));
-  const distanceToOceanFinal = bfsDistance(width, height, ocean);
-  const distanceToLandFinal = bfsDistance(width, height, smoothedLand);
-
   const biome = new Uint8Array(total);
-  const beachWidth = clamp(Math.round(1 + (10 - controls.coastalSmoothing) / 3), 1, 4);
-  const mountainThreshold = 0.53 + (1 - reliefNorm) * 0.12 - controls.biomeMix.mountains * 0.08;
-  const rockThreshold = mountainThreshold + 0.16 - peakNorm * 0.08;
+  const beachWidth = clamp(Math.round(1 + (10 - controls.coastalSmoothing) / 4), 1, 4);
+  const mountainThreshold = 0.54 + (1 - reliefNorm) * 0.1 - controls.biomeMix.mountains * 0.08;
+  const rockThreshold = mountainThreshold + 0.15 - peakNorm * 0.08;
 
   for (let i = 0; i < total; i += 1) {
     if (ocean[i] === 1) {
@@ -1781,19 +1043,18 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       biome[i] = BIOME_INDEX.river;
       continue;
     }
-    if (smoothedLand[i] === 0) {
+    if (land[i] === 0) {
       biome[i] = BIOME_INDEX.ocean;
       continue;
     }
 
-    if (distanceToOceanFinal[i] <= beachWidth) {
+    if (distanceToOcean[i] <= beachWidth) {
       biome[i] = BIOME_INDEX.beach;
       continue;
     }
 
-    const elevAboveSea = clamp01((elevation[i] - seaLevel) / Math.max(1e-6, 1 - seaLevel));
-    const ridgeBoost = ridge[i] * 0.12;
-
+    const elevAboveSea = clamp01((elevationSigned[i] - seaLevel) / Math.max(1e-6, 1 - seaLevel));
+    const ridgeBoost = ridge[i] * 0.14;
     if (elevAboveSea + ridgeBoost >= rockThreshold) {
       biome[i] = BIOME_INDEX.rock;
       continue;
@@ -1807,16 +1068,15 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     const wet = moisture[i];
 
     const grassScore =
-      (1 - Math.abs(temp - 0.56)) * (1 - Math.abs(wet - 0.45)) * (0.5 + controls.biomeMix.grassland * 0.75);
+      (1 - Math.abs(temp - 0.56)) * (1 - Math.abs(wet - 0.44)) * (0.45 + controls.biomeMix.grassland * 0.75);
     const forestScore =
-      (1 - Math.abs(temp - 0.52)) * wet * (0.45 + controls.biomeMix.temperateForest * 0.95);
-    const rainforestScore = temp * wet * (0.28 + controls.biomeMix.rainforest * 1.2);
-    const desertScore = temp * (1 - wet) * (0.35 + controls.biomeMix.desert * 1.2);
-    const tundraScore = (1 - temp + elevAboveSea * 0.25) * (0.35 + controls.biomeMix.tundra * 1.15);
+      (1 - Math.abs(temp - 0.52)) * wet * (0.4 + controls.biomeMix.temperateForest * 0.95);
+    const rainforestScore = temp * wet * (0.24 + controls.biomeMix.rainforest * 1.22);
+    const desertScore = temp * (1 - wet) * (0.32 + controls.biomeMix.desert * 1.2);
+    const tundraScore = (1 - temp + elevAboveSea * 0.3) * (0.3 + controls.biomeMix.tundra * 1.2);
 
     let bestBiome: ContinentBiome = 'grassland';
     let bestScore = grassScore;
-
     if (forestScore > bestScore) {
       bestScore = forestScore;
       bestBiome = 'temperate-forest';
@@ -1836,45 +1096,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     biome[i] = BIOME_INDEX[bestBiome];
   }
 
-  const smoothable = new Set<number>([
-    BIOME_INDEX.grassland,
-    BIOME_INDEX['temperate-forest'],
-    BIOME_INDEX.rainforest,
-    BIOME_INDEX.desert,
-    BIOME_INDEX.tundra,
-  ]);
-  const biomeSmoothed = biome.slice();
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const index = y * width + x;
-      if (!smoothable.has(biome[index])) {
-        continue;
-      }
-      const counts = new Map<number, number>();
-      for (const [dx, dy] of NEIGHBORS_8) {
-        const ni = (y + dy) * width + (x + dx);
-        const key = biome[ni];
-        if (!smoothable.has(key)) {
-          continue;
-        }
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-      let best = biome[index];
-      let bestCount = 0;
-      for (const [key, count] of counts.entries()) {
-        if (count > bestCount) {
-          bestCount = count;
-          best = key;
-        }
-      }
-      if (bestCount >= 5) {
-        biomeSmoothed[index] = best;
-      }
-    }
-  }
-
-  const { light, slope } = computeLightAndSlope(width, height, elevation);
-  const { landArea, coastPerimeter } = computeLandAndCoast(width, height, smoothedLand);
+  const { light, slope } = computeLightAndSlope(width, height, elevation01);
+  const { landArea, coastPerimeter } = computeLandAndCoast(width, height, land);
 
   const controlsHash = compactHashHex(
     hashString(
@@ -1889,11 +1112,10 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     normalizedSeed,
     width,
     height,
-    elevation,
-    ridge,
-    smoothedLand,
+    elevation01,
+    land,
     river,
-    biomeSmoothed,
+    biome,
   );
 
   return {
@@ -1903,20 +1125,20 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     height,
     fieldScale,
     seaLevel,
-    elevation,
+    elevation: elevation01,
     ridge,
     slope,
     temperature,
     moisture,
     light,
     flow,
-    biome: biomeSmoothed,
-    land: smoothedLand,
+    biome,
+    land,
     ocean,
     lake,
     river,
-    distanceToOcean: distanceToOceanFinal,
-    distanceToLand: distanceToLandFinal,
+    distanceToOcean,
+    distanceToLand,
     landArea,
     coastPerimeter,
     identityHash,
@@ -1938,17 +1160,17 @@ function shadeRgb(rgb: [number, number, number], factor: number): [number, numbe
 }
 
 export const ATLAS_PALETTE: Record<ContinentBiome, string> = {
-  ocean: '#2f5f89',
-  lake: '#4d82a8',
-  beach: '#d6c08a',
-  river: '#4ca0c6',
-  grassland: '#89a86c',
-  'temperate-forest': '#5a8552',
-  rainforest: '#3e7151',
-  desert: '#c8b179',
-  tundra: '#b8c0b2',
-  mountain: '#8a8678',
-  rock: '#6f6b63',
+  ocean: '#2d5a84',
+  lake: '#4a7ea7',
+  beach: '#d5c08d',
+  river: '#4e99c2',
+  grassland: '#88a66a',
+  'temperate-forest': '#587f50',
+  rainforest: '#3c6f4b',
+  desert: '#c6af7a',
+  tundra: '#b6bfb3',
+  mountain: '#8b8577',
+  rock: '#6f695f',
 };
 
 export function buildAtlasRgba(
@@ -1967,6 +1189,7 @@ export function buildAtlasRgba(
       const srcIndex = sy * srcWidth + sx;
       const biomeName = BIOME_TYPES[map.biome[srcIndex]];
       const base = colorToRgb(ATLAS_PALETTE[biomeName]);
+
       const elev = map.elevation[srcIndex];
       const light = map.light[srcIndex];
       const slope = map.slope[srcIndex];
@@ -1975,25 +1198,19 @@ export function buildAtlasRgba(
 
       const nx = x / Math.max(1, outputWidth - 1);
       const ny = y / Math.max(1, outputHeight - 1);
-      const detail = fbm(hashString(`${map.normalizedSeed}|render`), nx * 42, ny * 42, 2, 0.55, 2.2) - 0.5;
+      const detail = fbm(hashString(`${map.normalizedSeed}|render-detail`), nx * 40, ny * 40, 2, 0.55, 2.2) - 0.5;
 
       let factor = 1;
       if (biomeName === 'ocean') {
-        factor = 0.82 + clamp(distLand, 0, 48) / 48 * 0.3;
+        factor = 0.8 + clamp(distLand, 0, 48) / 48 * 0.32;
       } else if (biomeName === 'lake') {
-        factor = 0.9 + clamp(distLand, 0, 14) / 14 * 0.15;
+        factor = 0.9 + clamp(distLand, 0, 16) / 16 * 0.15;
       } else if (biomeName === 'river') {
         factor = 0.9;
       } else if (biomeName === 'beach') {
-        factor = 1.04;
+        factor = 1.03;
       } else {
-        factor =
-          0.67 +
-          light * 0.58 +
-          elev * 0.12 +
-          slope * 0.1 +
-          ridge * 0.12 +
-          detail * 0.08;
+        factor = 0.64 + light * 0.6 + elev * 0.12 + slope * 0.1 + ridge * 0.12 + detail * 0.08;
       }
 
       if (biomeName === 'mountain' || biomeName === 'rock') {
@@ -2048,9 +1265,8 @@ function decodeBase64Url(value: string): Uint8Array | null {
 function encodeControlsToCompactString(controls: ContinentControls): string {
   const c = clampControls(controls);
   const fields = [
-    'v=1',
+    'v=2',
     `s=${encodeURIComponent(c.seed)}`,
-    `p=${c.preset}`,
     `z=${c.size}`,
     `a=${c.aspectRatio}`,
     `lf=${c.landFraction}`,
@@ -2083,20 +1299,20 @@ function parseCompactString(input: string): ContinentControls | null {
     }
     kv.set(part.slice(0, equals), part.slice(equals + 1));
   }
-  if (kv.get('v') !== '1') {
+
+  const version = kv.get('v');
+  if (version !== '1' && version !== '2') {
     return null;
   }
 
-  const preset = kv.get('p') as PresetOption | undefined;
   const size = kv.get('z') as SizeOption | undefined;
   const aspectRatio = kv.get('a') as AspectRatioOption | undefined;
-  if (!preset || !size || !aspectRatio) {
+  if (!size || !aspectRatio) {
     return null;
   }
 
   const parsed: ContinentControls = {
     seed: kv.get('s') ? decodeURIComponent(kv.get('s') as string) : 'DefaultSeed',
-    preset,
     size,
     aspectRatio,
     landFraction: Number(kv.get('lf')),
@@ -2145,103 +1361,7 @@ export function controlsIdentity(controls: ContinentControls): string {
   return exportContinentControls(controls).code;
 }
 
-export function controlsFromPreset(preset: PresetOption, seed?: string): ContinentControls {
-  const base = defaultControlsWithSeed(seed);
-  return applyPreset(base, preset);
-}
-
 export function biomeNameForIndex(index: number): ContinentBiome {
   const safe = clamp(Math.round(index), 0, BIOME_TYPES.length - 1);
   return BIOME_TYPES[safe];
-}
-
-export function presetDistinctnessVectors(seed: string): Record<PresetOption, ContinentFeatureVector> {
-  const vectors = {} as Record<PresetOption, ContinentFeatureVector>;
-  const presets: PresetOption[] = [
-    'earth-like',
-    'archipelago',
-    'mountain-kingdoms',
-    'riverlands',
-    'dune-world',
-    'rain-world',
-    'broken-coast',
-  ];
-  for (const preset of presets) {
-    const controls = applyPreset(defaultControlsWithSeed(seed), preset);
-    vectors[preset] = measureContinentFeatures(generateContinent(controls));
-  }
-  return vectors;
-}
-
-function distinctnessMetricKeys(
-  left: ContinentFeatureVector,
-  right: ContinentFeatureVector,
-): string[] {
-  const keys: string[] = [];
-
-  if (Math.abs(left.landRatio - right.landRatio) >= 0.01) {
-    keys.push('landRatio');
-  }
-  if (Math.abs(left.coastlineComplexity - right.coastlineComplexity) >= 4) {
-    keys.push('coastlineComplexity');
-  }
-  if (Math.abs(left.islandCount - right.islandCount) >= 1) {
-    keys.push('islandCount');
-  }
-  if (Math.abs(left.offshoreIslandRatio - right.offshoreIslandRatio) >= 0.06) {
-    keys.push('offshoreIslandRatio');
-  }
-  if (Math.abs(left.ridgeCoherence - right.ridgeCoherence) >= 0.04) {
-    keys.push('ridgeCoherence');
-  }
-  if (Math.abs(left.majorRiverComponents - right.majorRiverComponents) >= 1) {
-    keys.push('majorRiverComponents');
-  }
-  if (Math.abs(left.bboxFillRatio - right.bboxFillRatio) >= 0.025) {
-    keys.push('bboxFillRatio');
-  }
-  if (Math.abs(left.cornerRetention - right.cornerRetention) >= 0.005) {
-    keys.push('cornerRetention');
-  }
-
-  return keys;
-}
-
-export function runPresetDistinctnessSuite(seeds: string[]): PresetDistinctnessSuite {
-  const normalizedSeeds = seeds.map((seed) => normalizeSeed(seed));
-  const seedResults: DistinctnessSeedResult[] = [];
-
-  for (const seed of normalizedSeeds) {
-    const vectors = presetDistinctnessVectors(seed);
-    const pairComparisons: Array<{
-      pair: DistinctnessPair;
-      left: PresetOption;
-      right: PresetOption;
-    }> = [
-      { pair: 'archipelago-vs-earth-like', left: 'archipelago', right: 'earth-like' },
-      { pair: 'broken-coast-vs-earth-like', left: 'broken-coast', right: 'earth-like' },
-      { pair: 'archipelago-vs-broken-coast', left: 'archipelago', right: 'broken-coast' },
-    ];
-
-    const pairResults: DistinctnessPairResult[] = pairComparisons.map((entry) => {
-      const separatingMetrics = distinctnessMetricKeys(vectors[entry.left], vectors[entry.right]);
-      return {
-        pair: entry.pair,
-        separatingMetrics,
-        pass: separatingMetrics.length >= 3,
-      };
-    });
-
-    seedResults.push({
-      seed,
-      pairResults,
-      pass: pairResults.every((pairResult) => pairResult.pass),
-    });
-  }
-
-  return {
-    seeds: normalizedSeeds,
-    seedResults,
-    pass: seedResults.every((entry) => entry.pass),
-  };
 }

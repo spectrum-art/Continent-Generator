@@ -431,7 +431,6 @@ export async function startContinentStudio(): Promise<void> {
   function readControlsFromUi(): ContinentControls {
     const next: ContinentControls = {
       seed: seedInput.value.trim().length > 0 ? seedInput.value.trim() : randomHumanSeed(),
-      preset: 'earth-like',
       size: sizeSelect.getValue(),
       aspectRatio: aspectSelect.getValue(),
       landFraction: Number(landSlider.input.value),
