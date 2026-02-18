@@ -229,6 +229,30 @@ function fbm(seed: number, x: number, y: number, octaves: number, persistence: n
   return total / Math.max(1e-6, weight);
 }
 
+function ridgedFbm(
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+): number {
+  let amplitude = 1;
+  let frequency = 1;
+  let total = 0;
+  let weight = 0;
+  for (let octave = 0; octave < octaves; octave += 1) {
+    const octaveSeed = (seed + Math.imul(octave + 1, 0x9e3779b9)) >>> 0;
+    const v = valueNoise(octaveSeed, x * frequency, y * frequency) * 2 - 1;
+    const ridge = 1 - Math.abs(v);
+    total += ridge * ridge * amplitude;
+    weight += amplitude;
+    amplitude *= persistence;
+    frequency *= lacunarity;
+  }
+  return total / Math.max(1e-6, weight);
+}
+
 function normalizeSeed(seed: string): string {
   const trimmed = seed.trim();
   if (trimmed.length === 0) {
@@ -470,6 +494,72 @@ function applyEdgeFalloff(
       elevationSigned[index] -= falloff * 0.95;
     }
   }
+}
+
+function applyRidgeValleySynthesis(
+  width: number,
+  height: number,
+  elevationSigned: Float32Array,
+  seed: number,
+  reliefNorm: number,
+  peakNorm: number,
+  fragNorm: number,
+): void {
+  const total = width * height;
+  const stress = new Float32Array(total);
+  const stressSeed = seed ^ 0x564f21a5;
+  const warpSeed = seed ^ 0x2bc6d1e3;
+  const ridgeSeed = seed ^ 0x7193b5d7;
+  const spurSeed = seed ^ 0xc2a4518d;
+
+  for (let y = 0; y < height; y += 1) {
+    const ny = y / Math.max(1, height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const nx = x / Math.max(1, width - 1);
+      const index = y * width + x;
+      const sx = nx * (width / Math.max(1, height));
+      const sy = ny;
+      stress[index] = fbm(stressSeed, sx * 2.1, sy * 2.1, 3, 0.57, 2.08);
+    }
+  }
+
+  const next = elevationSigned.slice();
+  for (let y = 1; y < height - 1; y += 1) {
+    const ny = y / Math.max(1, height - 1);
+    for (let x = 1; x < width - 1; x += 1) {
+      const nx = x / Math.max(1, width - 1);
+      const index = y * width + x;
+      const current = elevationSigned[index];
+      const mountainMask = smoothRange(current, -0.03 + fragNorm * 0.02, 0.62);
+      if (mountainMask <= 0) {
+        continue;
+      }
+
+      const stressDx = stress[y * width + (x + 1)] - stress[y * width + (x - 1)];
+      const stressDy = stress[(y + 1) * width + x] - stress[(y - 1) * width + x];
+      const tangent = Math.atan2(stressDy, stressDx) + Math.PI * 0.5;
+      const cosA = Math.cos(tangent);
+      const sinA = Math.sin(tangent);
+
+      const warpX = (fbm(warpSeed, nx * 4.8, ny * 4.8, 2, 0.55, 2.15) - 0.5) * 0.09;
+      const warpY = (fbm(warpSeed ^ 0x93a7, nx * 4.2, ny * 4.2, 2, 0.55, 2.15) - 0.5) * 0.09;
+      const wx = nx + warpX;
+      const wy = ny + warpY;
+
+      const rx = wx * cosA - wy * sinA;
+      const ry = wx * sinA + wy * cosA;
+      const ridgePrimary = ridgedFbm(ridgeSeed, rx * 18.5, ry * 6.4, 4, 0.58, 2.05);
+      const ridgeSpur = ridgedFbm(spurSeed, rx * 31.5 + wy * 2.1, ry * 11.4, 2, 0.55, 2.2);
+      const ridgeMix = ridgePrimary * 0.74 + ridgeSpur * 0.26;
+      const ridgeSigned = (ridgeMix - 0.5) * 2;
+
+      const amplitude = (0.028 + reliefNorm * 0.11 + peakNorm * 0.1) * mountainMask;
+      const valleyDepth = (1 - ridgeMix) * (0.012 + reliefNorm * 0.05 + peakNorm * 0.03) * mountainMask;
+      next[index] = current + ridgeSigned * amplitude - valleyDepth;
+    }
+  }
+
+  elevationSigned.set(next);
 }
 
 function histogramThresholdSigned(values: Float32Array, targetLand: number): number {
@@ -1028,6 +1118,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
 
   normalizeSigned(rawElevation);
   applyEdgeFalloff(width, height, rawElevation, noiseSeed);
+  applyRidgeValleySynthesis(width, height, rawElevation, noiseSeed, reliefNorm, peakNorm, fragNorm);
+  normalizeSigned(rawElevation);
 
   const targetLand = clamp(0.08 + (controls.landFraction - 1) / 9 * 0.66, 0.08, 0.74);
   const seaLevel = histogramThresholdSigned(rawElevation, targetLand);
