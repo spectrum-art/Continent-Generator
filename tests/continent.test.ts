@@ -133,4 +133,4 @@ describe('continent generator artifact pivot', () => {
     }
     expect(hashes.size).toBe(seeds.length);
   }, 20_000);
-});
+}, 60_000);

@@ -1,44 +1,53 @@
 # Map Explorer Spec
 
-## Milestone 15: Erosion, Shading, Resolution, and Coastal Realism
+## Milestone 16: Ridges + Inland Drainage
 
-## Product Scope
-- Finite, deterministic continent generator artifact.
-- Terrain-first pipeline only (`plates -> elevation -> sea level -> climate -> rivers -> biomes`).
-- No preset system and no user-facing perf tooling buttons.
-- Parameter surface remains the controls defined in `docs/continent-generator-controls.csv`.
+## Scope
+- Deterministic, bounded continent generator (terrain-first pipeline).
+- No preset system, no new user-facing diagnostics controls.
+- NW directional lighting remains the only hillshade light direction.
+- Realism priorities: ridge/valley mountain structure, inland river networks, non-rectangular high-land silhouettes.
 
-## Milestone 15 Pipeline
-1. Generate base tectonic elevation in aspect-aware generation space.
-2. Upsample elevation to output resolution (`2x` per axis) for higher effective detail.
-3. Apply edge falloff so borders trend to ocean before sea-level classification.
-4. Compute sea level from `Land Fraction`, classify land/water, and flood ocean connectivity.
-5. Build climate fields from latitude, ocean distance, elevation, rain shadow, and local variation.
-6. Compute flow field and select inland-aware river sources.
-7. Trace rivers downhill, then run two river-incision passes into elevation.
-8. Recompute land/water/ocean/lake + flow after incision.
-9. Apply coastal moisture variation (distance, slope, drainage, relief, noise).
-10. Classify biomes with stable beach width and ocean-aware shoreline logic.
-11. Run feedback smoothing passes to reduce tectonic hard edges and biome seams.
+## Generation Pipeline (MS16)
+1. Plate-driven base elevation synthesis.
+2. Edge and macro-frame sea bias (warped superellipse, not edge-aligned rectangle shaping).
+3. Ridge/valley synthesis pass on elevation:
+- orientation-aware ridged multifractal uplift in mountain candidates
+- inter-ridge valley carving
+4. Sea-level threshold from `Land Fraction`.
+5. Coastal smoothing near sea level.
+6. Climate fields (temperature/moisture) from latitude, ocean distance, elevation, and rain shadow.
+7. Basin-driven hydrology:
+- downhill flow + accumulation
+- inland-biased trunk source selection
+- tributary source pass that joins trunk network
+8. River incision in two passes with flow recomputation between passes.
+9. Biome classification from climate + elevation + hydrology.
+10. NW hillshade from full-field gradients (artifact-resistant, no sector-based shading).
 
-## Visual + Behavior Acceptance
-- Directional hillshade uses NW lighting and is driven by elevation gradients.
-- Mountains show visible furrowing/valley cues from incision + relief shading.
-- Coastlines are less pixelated due to upsampled output fields.
-- Coastal smoothing changes coastline geometry instead of primarily widening beaches.
-- Map edges remain ocean (no clipped land silhouettes).
-- Rivers include inland systems, not only near-coast traces.
-- Coastal biome belts are varied rather than uniform wet halos.
-
-## Determinism + Identity
+## Determinism
 - Seed normalization is case-insensitive.
-- Same seed + controls => same identity hash and map fields.
-- Aspect ratio affects generation-space geometry and identity hash (no stretch clones).
-- Export/import round-trips controls and reproduces identity exactly.
+- Same seed + controls => same map identity hash and field outputs.
+- Export/import compact code round-trips map identity exactly.
+- Aspect ratio changes generation-space geometry and identity hash.
 
-## Rendering + Performance Guardrails
-- Existing LOD rendering remains active for low/mid/high zoom bands.
-- Performance targets remain:
-- Mid zoom `>= 60 FPS`.
-- Full-continent zoom `>= 30 FPS`.
-- Milestone 15 changes must not regress deterministic generation or build/test stability.
+## Realism Verification Gates
+- Inland drainage:
+- `riverPixels > 80` on region default probe.
+- inland river ratio (`distanceToOcean >= 10`) > `0.7`.
+- at least 2 components and one component length >= 40.
+- Ridge/valley structure:
+- high-relief average ridge-energy metric across fixed seeds > `0.016`.
+- mountain coverage in that probe > `0.04`.
+- Rectangle mitigation (high land fraction, square aspect):
+- `bboxFillRatio < 0.9`.
+- coastline perimeter > `2200`.
+
+## Performance Guardrail
+- No major regression versus MS15 runtime envelope.
+- LOD rendering remains active.
+- Expensive realism work remains in generation passes, not per-frame render loops.
+- MS16 local sanity timings (single generation pass, `vite-node`):
+- `isle/square/lf4`: ~`1089ms`
+- `region/landscape/lf5`: ~`2471ms`
+- `supercontinent/landscape/lf7`: ~`5025ms`

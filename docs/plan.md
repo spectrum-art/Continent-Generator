@@ -1,17 +1,20 @@
 # Map Explorer Plan
 
-## Milestone 15: Erosion, Shading, Resolution, and Coastal Realism
+## Milestone 16: Ridges + Inland Drainage
 
-- [x] `ms15_resolution_upgrade`: raise effective map resolution with upsampled output fields.
-- [x] `ms15_directional_hillshade`: strengthen NW directional relief shading from elevation gradients.
-- [x] `ms15_river_incision`: carve river valleys with two incision passes and post-carve flow recompute.
-- [x] `ms15_coastal_variation`: add slope/drainage/relief/noise variation to coastal moisture.
-- [x] `ms15_edge_falloff`: enforce stronger edge-to-ocean transition to avoid clipped borders.
-- [x] `ms15_coastal_smoothing_rewrite`: make smoothing modify coastline contour while beach width stays stable.
-- [x] `ms15_erosion_feedback_pass`: add post-carve smoothing and post-biome blending feedback passes.
-- [x] `ms15_river_distribution_fix`: bias source selection inland and keep longer coherent rivers.
-- [x] `ms15_docs_and_tests`: update docs and add inland-river coverage assertion.
-- [x] Validate determinism + identity behaviors remain intact.
-- [x] Keep bounded-map ocean-edge guarantee passing.
-- [x] Keep `npm test` green.
-- [x] Keep `npm run build` green.
+- [x] `ms16: diagnostics + baseline snapshot harness (non-UI)`
+- [x] `ms16: ridge/valley synthesis pass (mountain morphology)`
+- [x] `ms16: basin-driven river sources + routing (inland rivers)`
+- [x] `ms16: rectangle mitigation for high land fraction (shape realism)`
+- [x] `ms16: hillshade verification + artifact elimination (no sector wedges)`
+- [x] `ms16: tests + docs + perf sanity`
+
+- [x] Add deterministic diagnostics helpers for inland rivers, ridge-energy, and silhouette metrics.
+- [x] Refactor elevation synthesis to produce oriented ridges and carved inter-ridge valleys.
+- [x] Upgrade river generation to trunk + tributary routing with inland source bias.
+- [x] Run two-step river incision with flow recompute between passes.
+- [x] Replace edge-aligned rectangle bias with warped macro-frame falloff.
+- [x] Upgrade hillshade math to full-field directional gradients and add wedge-regression test.
+- [x] Add Milestone 16 realism tests (inland drainage, ridge energy, rectangle mitigation).
+- [x] Keep determinism/export-import/aspect identity guarantees green.
+- [x] Keep `npm test` and `npm run build` green.
