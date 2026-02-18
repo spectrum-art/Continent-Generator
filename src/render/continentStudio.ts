@@ -6,7 +6,7 @@ import {
   exportContinentControls,
   generateContinent,
   importContinentControls,
-  mapDimensions,
+  runPresetDistinctnessSuite,
   randomHumanSeed,
   randomizeControls,
   resetBiomeMix,
@@ -35,7 +35,11 @@ type PerfProbeResult = {
   frames: number;
   avgFps: number;
   avgFrameMs: number;
+  p95FrameMs: number;
+  worstFrameMs: number;
+  hitchCount: number;
   zoom: number;
+  mode: 'mid' | 'full' | 'high';
 };
 
 const PRESET_OPTIONS: Array<{ value: PresetOption; label: string }> = [
@@ -75,6 +79,15 @@ function createButton(label: string): HTMLButtonElement {
   button.style.font = '12px/1.2 monospace';
   button.style.padding = '5px 8px';
   return button;
+}
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = clamp(Math.floor((sorted.length - 1) * p), 0, sorted.length - 1);
+  return sorted[idx];
 }
 
 function createRow(label: string): HTMLDivElement {
@@ -165,6 +178,15 @@ function createLabelBlock(title: string): HTMLDivElement {
   return block;
 }
 
+function createCheckbox(label: string, checked: boolean): { root: HTMLDivElement; input: HTMLInputElement } {
+  const row = createRow(label);
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = checked;
+  row.appendChild(input);
+  return { root: row, input };
+}
+
 function updateSlider(binding: SliderBinding, value: number, digits = 0): void {
   binding.input.value = String(value);
   binding.value.textContent = digits > 0 ? value.toFixed(digits) : String(Math.round(value));
@@ -196,8 +218,13 @@ function createOffscreenCanvas(width: number, height: number): HTMLCanvasElement
 declare global {
   interface Window {
     __continentTool?: {
-      runPerfProbe: (zoomMode: 'mid' | 'full') => Promise<PerfProbeResult>;
-      runValidationPerfSuite: () => Promise<{ mid: PerfProbeResult; full: PerfProbeResult }>;
+      runPerfProbe: (zoomMode: 'mid' | 'full' | 'high') => Promise<PerfProbeResult>;
+      runValidationPerfSuite: () => Promise<{
+        mid: PerfProbeResult;
+        full: PerfProbeResult;
+        high: PerfProbeResult;
+        pass: boolean;
+      }>;
       getMapHash: () => string;
       getExportCode: () => string;
       importCode: (code: string) => boolean;
@@ -206,6 +233,7 @@ declare global {
       getControls: () => ContinentControls;
       setPreset: (preset: PresetOption) => void;
       getPalette: () => Record<string, string>;
+      runDistinctnessSuite: (seeds: string[]) => ReturnType<typeof runPresetDistinctnessSuite>;
     };
   }
 }
@@ -307,6 +335,7 @@ export async function startContinentStudio(): Promise<void> {
   const peakSlider = createSlider('Mountain Peakiness', 1, 10, 1, 5);
   const climateBiasSlider = createSlider('Climate Bias', -5, 5, 1, 0);
   const islandSlider = createSlider('Island Density', 0, 10, 1, 4);
+  const latLongGridToggle = createCheckbox('Lat/Long Grid', false);
   advancedSection.append(
     latitudeCenterSlider.root,
     latitudeSpanSlider.root,
@@ -314,6 +343,7 @@ export async function startContinentStudio(): Promise<void> {
     peakSlider.root,
     climateBiasSlider.root,
     islandSlider.root,
+    latLongGridToggle.root,
   );
 
   const importExportRow = document.createElement('div');
@@ -343,6 +373,15 @@ export async function startContinentStudio(): Promise<void> {
   status.style.whiteSpace = 'pre-wrap';
   status.style.font = '11px/1.35 monospace';
   panel.appendChild(status);
+
+  const metricsRow = document.createElement('div');
+  metricsRow.style.display = 'flex';
+  metricsRow.style.gap = '6px';
+  metricsRow.style.marginTop = '8px';
+  const runPerfButton = createButton('Run Perf Suite');
+  const runDistinctnessButton = createButton('Preset Distinctness');
+  metricsRow.append(runPerfButton, runDistinctnessButton);
+  panel.appendChild(metricsRow);
 
   const legend = document.createElement('div');
   legend.style.marginTop = '8px';
@@ -377,9 +416,13 @@ export async function startContinentStudio(): Promise<void> {
   let map = generateContinent(controls);
 
   const atlasCanvas = createOffscreenCanvas(map.width, map.height);
+  const atlasHiCanvas = createOffscreenCanvas(map.width * 2, map.height * 2);
+  const atlasLoCanvas = createOffscreenCanvas(Math.max(64, Math.round(map.width * 0.6)), Math.max(64, Math.round(map.height * 0.6)));
   const atlasCtx = atlasCanvas.getContext('2d');
-  if (!atlasCtx) {
-    throw new Error('Unable to create atlas canvas context.');
+  const atlasHiCtx = atlasHiCanvas.getContext('2d');
+  const atlasLoCtx = atlasLoCanvas.getContext('2d');
+  if (!atlasCtx || !atlasHiCtx || !atlasLoCtx) {
+    throw new Error('Unable to create atlas canvas contexts.');
   }
 
   let cameraX = map.width / 2;
@@ -387,11 +430,19 @@ export async function startContinentStudio(): Promise<void> {
   let zoom = 1;
   let fullZoom = 1;
   let midZoom = 1;
+  let highZoom = 1;
   let isDragging = false;
   let dragLastX = 0;
   let dragLastY = 0;
+  let showLatLongGrid = latLongGridToggle.input.checked;
   let fpsEma = 60;
   let frameMsEma = 16.7;
+  let p95FrameMs = 16.7;
+  let worstFrameMs = 16.7;
+  let hitchCount = 0;
+  const frameWindow: number[] = [];
+  let perfReport = 'perf=not-run';
+  let distinctnessReport = 'distinctness=not-run';
   let lastFrame = performance.now();
 
   function fitZoomForCurrentMap(): number {
@@ -415,7 +466,8 @@ export async function startContinentStudio(): Promise<void> {
 
   function updateZoomTargets(): void {
     fullZoom = fitZoomForCurrentMap();
-    midZoom = clamp(fullZoom * 1.35, fullZoom * 0.85, Math.max(fullZoom * 2.1, 1.4));
+    midZoom = clamp(fullZoom * 1.45, fullZoom * 0.9, Math.max(fullZoom * 2.2, 1.5));
+    highZoom = clamp(fullZoom * 2.7, midZoom, 8);
     zoom = clamp(zoom, fullZoom * 0.6, 8);
     clampCamera();
   }
@@ -423,9 +475,19 @@ export async function startContinentStudio(): Promise<void> {
   function refreshAtlasCanvas(): void {
     atlasCanvas.width = map.width;
     atlasCanvas.height = map.height;
-    const rgba = buildAtlasRgba(map);
-    const image = new ImageData(rgba, map.width, map.height);
-    atlasCtx.putImageData(image, 0, 0);
+    atlasHiCanvas.width = map.width * 2;
+    atlasHiCanvas.height = map.height * 2;
+    atlasLoCanvas.width = Math.max(96, Math.round(map.width * 0.6));
+    atlasLoCanvas.height = Math.max(96, Math.round(map.height * 0.6));
+
+    const baseRgba = buildAtlasRgba(map, atlasCanvas.width, atlasCanvas.height);
+    atlasCtx.putImageData(new ImageData(baseRgba, atlasCanvas.width, atlasCanvas.height), 0, 0);
+
+    const hiRgba = buildAtlasRgba(map, atlasHiCanvas.width, atlasHiCanvas.height);
+    atlasHiCtx.putImageData(new ImageData(hiRgba, atlasHiCanvas.width, atlasHiCanvas.height), 0, 0);
+
+    const lowRgba = buildAtlasRgba(map, atlasLoCanvas.width, atlasLoCanvas.height);
+    atlasLoCtx.putImageData(new ImageData(lowRgba, atlasLoCanvas.width, atlasLoCanvas.height), 0, 0);
   }
 
   function readControlsFromUi(): ContinentControls {
@@ -485,15 +547,15 @@ export async function startContinentStudio(): Promise<void> {
   }
 
   function regenerate(resetCamera: boolean): void {
+    const prevWidth = map.width;
+    const prevHeight = map.height;
     controls = readControlsFromUi();
     map = generateContinent(controls);
     refreshAtlasCanvas();
-    const dimensions = mapDimensions(controls.size, controls.aspectRatio);
-    void dimensions;
-    if (resetCamera) {
+    if (resetCamera || prevWidth !== map.width || prevHeight !== map.height) {
       cameraX = map.width / 2;
       cameraY = map.height / 2;
-      zoom = fitZoomForCurrentMap() * 1.05;
+      zoom = fitZoomForCurrentMap() * 1.02;
     }
     updateZoomTargets();
   }
@@ -537,10 +599,10 @@ export async function startContinentStudio(): Promise<void> {
     return true;
   }
 
-  async function runPerfProbe(zoomMode: 'mid' | 'full'): Promise<PerfProbeResult> {
+  async function runPerfProbe(zoomMode: 'mid' | 'full' | 'high'): Promise<PerfProbeResult> {
     const startX = map.width / 2;
     const startY = map.height / 2;
-    const targetZoom = zoomMode === 'full' ? fullZoom : midZoom;
+    const targetZoom = zoomMode === 'full' ? fullZoom : zoomMode === 'high' ? highZoom : midZoom;
     zoom = targetZoom;
     cameraX = startX;
     cameraY = startY;
@@ -553,6 +615,8 @@ export async function startContinentStudio(): Promise<void> {
     let frames = 0;
     let previous = start;
     let frameTimeTotal = 0;
+    const frameTimes: number[] = [];
+    let probeHitches = 0;
 
     return new Promise<PerfProbeResult>((resolve) => {
       const tick = (now: number): void => {
@@ -560,6 +624,8 @@ export async function startContinentStudio(): Promise<void> {
         if (elapsed >= durationMs) {
           const avgFrameMs = frameTimeTotal / Math.max(1, frames);
           const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
+          const p95FrameMsLocal = percentile(frameTimes, 0.95);
+          const worstFrameMsLocal = frameTimes.length > 0 ? Math.max(...frameTimes) : 0;
           cameraX = startX;
           cameraY = startY;
           clampCamera();
@@ -568,7 +634,11 @@ export async function startContinentStudio(): Promise<void> {
             frames,
             avgFrameMs,
             avgFps,
+            p95FrameMs: p95FrameMsLocal,
+            worstFrameMs: worstFrameMsLocal,
+            hitchCount: probeHitches,
             zoom: targetZoom,
+            mode: zoomMode,
           });
           return;
         }
@@ -576,6 +646,10 @@ export async function startContinentStudio(): Promise<void> {
         const dt = now - previous;
         previous = now;
         frameTimeTotal += dt;
+        frameTimes.push(dt);
+        if (dt > 80) {
+          probeHitches += 1;
+        }
         frames += 1;
 
         const t = elapsed / 1000;
@@ -592,12 +666,49 @@ export async function startContinentStudio(): Promise<void> {
 
   function updateStatusText(): void {
     const exportString = exportCode();
+    p95FrameMs = percentile(frameWindow, 0.95);
+    worstFrameMs = frameWindow.length > 0 ? Math.max(...frameWindow) : frameMsEma;
+    hitchCount = frameWindow.reduce((count, value) => count + (value > 80 ? 1 : 0), 0);
     status.textContent =
       `seed=${controls.seed}\n` +
       `map=${map.width}x${map.height} hash=${map.identityHash}\n` +
-      `zoom=${zoom.toFixed(3)} full=${fullZoom.toFixed(3)} mid=${midZoom.toFixed(3)}\n` +
-      `fps~${fpsEma.toFixed(1)} frame~${frameMsEma.toFixed(2)}ms\n` +
-      `exportLen=${exportString.length}`;
+      `zoom=${zoom.toFixed(3)} full=${fullZoom.toFixed(3)} mid=${midZoom.toFixed(3)} high=${highZoom.toFixed(3)}\n` +
+      `fps~${fpsEma.toFixed(1)} frame~${frameMsEma.toFixed(2)}ms p95=${p95FrameMs.toFixed(2)} worst=${worstFrameMs.toFixed(2)} hitch(>80ms)=${hitchCount}\n` +
+      `exportLen=${exportString.length}\n` +
+      `${perfReport}\n` +
+      `${distinctnessReport}`;
+  }
+
+  async function runValidationPerfSuite(): Promise<{
+    mid: PerfProbeResult;
+    full: PerfProbeResult;
+    high: PerfProbeResult;
+    pass: boolean;
+  }> {
+    const mid = await runPerfProbe('mid');
+    const full = await runPerfProbe('full');
+    const high = await runPerfProbe('high');
+    const pass =
+      mid.avgFps >= 55 &&
+      mid.p95FrameMs <= 22 &&
+      full.avgFps >= 45 &&
+      full.p95FrameMs <= 28 &&
+      high.avgFps >= 55 &&
+      high.p95FrameMs <= 22 &&
+      mid.hitchCount <= 1 &&
+      full.hitchCount <= 1 &&
+      high.hitchCount <= 1;
+
+    const toLine = (result: PerfProbeResult): string =>
+      `${result.mode}:fps=${result.avgFps.toFixed(1)} p95=${result.p95FrameMs.toFixed(1)}ms worst=${result.worstFrameMs.toFixed(1)}ms hitch=${result.hitchCount}`;
+    perfReport = `${pass ? 'perf=pass' : 'perf=fail'} ${toLine(mid)} | ${toLine(full)} | ${toLine(high)}`;
+    console.table([
+      { mode: mid.mode, avgFps: mid.avgFps, p95: mid.p95FrameMs, worst: mid.worstFrameMs, hitches: mid.hitchCount },
+      { mode: full.mode, avgFps: full.avgFps, p95: full.p95FrameMs, worst: full.worstFrameMs, hitches: full.hitchCount },
+      { mode: high.mode, avgFps: high.avgFps, p95: high.p95FrameMs, worst: high.worstFrameMs, hitches: high.hitchCount },
+    ]);
+    updateStatusText();
+    return { mid, full, high, pass };
   }
 
   function applyPresetFromUi(): void {
@@ -643,6 +754,14 @@ export async function startContinentStudio(): Promise<void> {
     applyPresetFromUi();
   });
 
+  sizeSelect.select.addEventListener('change', () => {
+    regenerate(true);
+  });
+
+  aspectSelect.select.addEventListener('change', () => {
+    regenerate(true);
+  });
+
   resetMixButton.addEventListener('click', () => {
     const next = resetBiomeMix(readControlsFromUi());
     writeControlsToUi(next);
@@ -670,6 +789,26 @@ export async function startContinentStudio(): Promise<void> {
     if (!importCode(value)) {
       window.alert('Invalid import string.');
     }
+  });
+
+  latLongGridToggle.input.addEventListener('change', () => {
+    showLatLongGrid = latLongGridToggle.input.checked;
+  });
+
+  runPerfButton.addEventListener('click', () => {
+    perfReport = 'perf=running...';
+    updateStatusText();
+    void runValidationPerfSuite();
+  });
+
+  runDistinctnessButton.addEventListener('click', () => {
+    const seeds = ['GreenChair', 'SilentHarbor', 'RedComet'];
+    const suite = runPresetDistinctnessSuite(seeds);
+    const failing = suite.seedResults.filter((entry) => !entry.pass).map((entry) => entry.seed);
+    distinctnessReport = suite.pass
+      ? `distinctness=pass seeds=${suite.seeds.join(',')}`
+      : `distinctness=fail seeds=${failing.join(',') || 'unknown'}`;
+    updateStatusText();
   });
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -725,9 +864,39 @@ export async function startContinentStudio(): Promise<void> {
     ctx.fillStyle = '#234c74';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const atlasSource = zoom <= fullZoom * 1.05
+      ? atlasLoCanvas
+      : zoom >= highZoom * 0.88
+        ? atlasHiCanvas
+        : atlasCanvas;
     ctx.imageSmoothingEnabled = true;
     ctx.setTransform(zoom, 0, 0, zoom, canvas.width / 2 - cameraX * zoom, canvas.height / 2 - cameraY * zoom);
-    ctx.drawImage(atlasCanvas, 0, 0);
+    ctx.drawImage(atlasSource, 0, 0, map.width, map.height);
+
+    if (showLatLongGrid) {
+      const latSpan = controls.latitudeSpan;
+      const latTop = controls.latitudeCenter + latSpan * 0.5;
+      const latBottom = controls.latitudeCenter - latSpan * 0.5;
+      const lonStep = zoom > highZoom * 0.85 ? 15 : 30;
+      const latStep = zoom > highZoom * 0.85 ? 10 : 20;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 0.9 / Math.max(zoom, 0.001);
+      ctx.beginPath();
+      for (let lon = -180; lon <= 180; lon += lonStep) {
+        const x = ((lon + 180) / 360) * map.width;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, map.height);
+      }
+      if (latSpan > 0) {
+        const minLat = Math.ceil(latBottom / latStep) * latStep;
+        for (let lat = minLat; lat <= latTop; lat += latStep) {
+          const y = ((latTop - lat) / latSpan) * map.height;
+          ctx.moveTo(0, y);
+          ctx.lineTo(map.width, y);
+        }
+      }
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.lineWidth = 1 / Math.max(zoom, 0.001);
@@ -739,6 +908,10 @@ export async function startContinentStudio(): Promise<void> {
   function loop(now: number): void {
     const dt = now - lastFrame;
     lastFrame = now;
+    frameWindow.push(dt);
+    if (frameWindow.length > 300) {
+      frameWindow.shift();
+    }
     frameMsEma = frameMsEma * 0.92 + dt * 0.08;
     const fpsInstant = dt > 0 ? 1000 / dt : 0;
     fpsEma = fpsEma * 0.92 + fpsInstant * 0.08;
@@ -755,11 +928,7 @@ export async function startContinentStudio(): Promise<void> {
 
   window.__continentTool = {
     runPerfProbe,
-    runValidationPerfSuite: async () => {
-      const mid = await runPerfProbe('mid');
-      const full = await runPerfProbe('full');
-      return { mid, full };
-    },
+    runValidationPerfSuite,
     getMapHash: () => map.identityHash,
     getExportCode: () => exportCode(),
     importCode,
@@ -775,6 +944,6 @@ export async function startContinentStudio(): Promise<void> {
       applyPresetFromUi();
     },
     getPalette: () => ({ ...ATLAS_PALETTE }),
+    runDistinctnessSuite: (seeds: string[]) => runPresetDistinctnessSuite(seeds),
   };
 }
-
