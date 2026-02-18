@@ -879,6 +879,33 @@ function applyRiverIncision(
   }
 }
 
+function applySlopeFeedbackPass(
+  width: number,
+  height: number,
+  elevationSigned: Float32Array,
+  seaLevel: number,
+): void {
+  const next = elevationSigned.slice();
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const current = elevationSigned[index];
+      if (current <= seaLevel - 0.15) {
+        continue;
+      }
+      const left = elevationSigned[y * width + (x - 1)];
+      const right = elevationSigned[y * width + (x + 1)];
+      const up = elevationSigned[(y - 1) * width + x];
+      const down = elevationSigned[(y + 1) * width + x];
+      const slope = Math.hypot((right - left) * 0.5, (down - up) * 0.5);
+      const average = (left + right + up + down + current) / 5;
+      const strength = clamp01((slope - 0.012) * 18) * 0.13;
+      next[index] = lerp(current, average, strength);
+    }
+  }
+  elevationSigned.set(next);
+}
+
 export function generateContinent(input: ContinentControls): GeneratedContinent {
   const controls = clampControls(input);
   const normalizedSeed = normalizeSeed(controls.seed);
@@ -1172,6 +1199,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   }
 
   applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel);
+  applySlopeFeedbackPass(width, height, elevationSigned, seaLevel);
 
   for (let i = 0; i < total; i += 1) {
     elevation01[i] = clamp01((elevationSigned[i] + 1) * 0.5);
@@ -1226,75 +1254,109 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const mountainThreshold = 0.54 + (1 - reliefNorm) * 0.1 - controls.biomeMix.mountains * 0.08;
   const rockThreshold = mountainThreshold + 0.15 - peakNorm * 0.08;
 
-  for (let i = 0; i < total; i += 1) {
-    if (ocean[i] === 1) {
-      biome[i] = BIOME_INDEX.ocean;
-      continue;
-    }
-    if (lake[i] === 1) {
-      biome[i] = BIOME_INDEX.lake;
-      continue;
-    }
-    if (river[i] === 1) {
-      biome[i] = BIOME_INDEX.river;
-      continue;
-    }
-    if (land[i] === 0) {
-      biome[i] = BIOME_INDEX.ocean;
-      continue;
-    }
+  const classifyBiomes = (): void => {
+    for (let i = 0; i < total; i += 1) {
+      if (ocean[i] === 1) {
+        biome[i] = BIOME_INDEX.ocean;
+        continue;
+      }
+      if (lake[i] === 1) {
+        biome[i] = BIOME_INDEX.lake;
+        continue;
+      }
+      if (river[i] === 1) {
+        biome[i] = BIOME_INDEX.river;
+        continue;
+      }
+      if (land[i] === 0) {
+        biome[i] = BIOME_INDEX.ocean;
+        continue;
+      }
 
-    if (distanceToOceanPostIncision[i] <= beachWidth) {
-      biome[i] = BIOME_INDEX.beach;
-      continue;
-    }
+      if (distanceToOceanPostIncision[i] <= beachWidth) {
+        biome[i] = BIOME_INDEX.beach;
+        continue;
+      }
 
-    const elevAboveSea = clamp01((elevationSigned[i] - seaLevel) / Math.max(1e-6, 1 - seaLevel));
-    const ridgeBoost = ridge[i] * 0.14;
-    if (elevAboveSea + ridgeBoost >= rockThreshold) {
-      biome[i] = BIOME_INDEX.rock;
-      continue;
-    }
-    if (elevAboveSea + ridgeBoost >= mountainThreshold) {
-      biome[i] = BIOME_INDEX.mountain;
-      continue;
-    }
+      const elevAboveSea = clamp01((elevationSigned[i] - seaLevel) / Math.max(1e-6, 1 - seaLevel));
+      const ridgeBoost = ridge[i] * 0.14;
+      if (elevAboveSea + ridgeBoost >= rockThreshold) {
+        biome[i] = BIOME_INDEX.rock;
+        continue;
+      }
+      if (elevAboveSea + ridgeBoost >= mountainThreshold) {
+        biome[i] = BIOME_INDEX.mountain;
+        continue;
+      }
 
-    const temp = temperature[i];
-    const wet = moisture[i];
-    const riverMoisture = clamp01(flow[i] * 1.8);
-    const effectiveWet = clamp01(wet + riverMoisture * 0.22);
+      const temp = temperature[i];
+      const wet = moisture[i];
+      const riverMoisture = clamp01(flow[i] * 1.8);
+      const effectiveWet = clamp01(wet + riverMoisture * 0.22);
 
-    const grassScore =
-      (1 - Math.abs(temp - 0.56)) *
-      (1 - Math.abs(effectiveWet - 0.44)) *
-      (0.45 + controls.biomeMix.grassland * 0.75);
-    const forestScore =
-      (1 - Math.abs(temp - 0.5)) * effectiveWet * (0.42 + controls.biomeMix.temperateForest * 0.95);
-    const rainforestScore = temp * effectiveWet * (0.24 + controls.biomeMix.rainforest * 1.22);
-    const desertScore = temp * (1 - effectiveWet) * (0.32 + controls.biomeMix.desert * 1.2);
-    const tundraScore = (1 - temp + elevAboveSea * 0.3) * (0.3 + controls.biomeMix.tundra * 1.2);
+      const grassScore =
+        (1 - Math.abs(temp - 0.56)) *
+        (1 - Math.abs(effectiveWet - 0.44)) *
+        (0.45 + controls.biomeMix.grassland * 0.75);
+      const forestScore =
+        (1 - Math.abs(temp - 0.5)) * effectiveWet * (0.42 + controls.biomeMix.temperateForest * 0.95);
+      const rainforestScore = temp * effectiveWet * (0.24 + controls.biomeMix.rainforest * 1.22);
+      const desertScore = temp * (1 - effectiveWet) * (0.32 + controls.biomeMix.desert * 1.2);
+      const tundraScore = (1 - temp + elevAboveSea * 0.3) * (0.3 + controls.biomeMix.tundra * 1.2);
 
-    let bestBiome: ContinentBiome = 'grassland';
-    let bestScore = grassScore;
-    if (forestScore > bestScore) {
-      bestScore = forestScore;
-      bestBiome = 'temperate-forest';
-    }
-    if (rainforestScore > bestScore) {
-      bestScore = rainforestScore;
-      bestBiome = 'rainforest';
-    }
-    if (desertScore > bestScore) {
-      bestScore = desertScore;
-      bestBiome = 'desert';
-    }
-    if (tundraScore > bestScore) {
-      bestBiome = 'tundra';
-    }
+      let bestBiome: ContinentBiome = 'grassland';
+      let bestScore = grassScore;
+      if (forestScore > bestScore) {
+        bestScore = forestScore;
+        bestBiome = 'temperate-forest';
+      }
+      if (rainforestScore > bestScore) {
+        bestScore = rainforestScore;
+        bestBiome = 'rainforest';
+      }
+      if (desertScore > bestScore) {
+        bestScore = desertScore;
+        bestBiome = 'desert';
+      }
+      if (tundraScore > bestScore) {
+        bestBiome = 'tundra';
+      }
 
-    biome[i] = BIOME_INDEX[bestBiome];
+      biome[i] = BIOME_INDEX[bestBiome];
+    }
+  };
+
+  classifyBiomes();
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (land[index] === 0 || river[index] === 1 || ocean[index] === 1 || lake[index] === 1) {
+        continue;
+      }
+      let edgeNeighbors = 0;
+      let moistureSum = 0;
+      let elevationSum = 0;
+      for (const [dx, dy] of NEIGHBORS_8) {
+        const ni = (y + dy) * width + (x + dx);
+        moistureSum += moisture[ni];
+        elevationSum += elevationSigned[ni];
+        if (biome[ni] !== biome[index]) {
+          edgeNeighbors += 1;
+        }
+      }
+      if (edgeNeighbors < 3) {
+        continue;
+      }
+      const moistureAvg = moistureSum / 8;
+      const elevationAvg = elevationSum / 8;
+      moisture[index] = lerp(moisture[index], moistureAvg, 0.15);
+      elevationSigned[index] = lerp(elevationSigned[index], elevationAvg, 0.045);
+      elevation01[index] = clamp01((elevationSigned[index] + 1) * 0.5);
+    }
   }
+
+  classifyBiomes();
 
   const { light, slope } = computeLightAndSlope(width, height, elevation01);
   const { landArea, coastPerimeter } = computeLandAndCoast(width, height, land);
