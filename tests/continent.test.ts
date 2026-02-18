@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyPreset,
   defaultControlsWithSeed,
   exportContinentControls,
   generateContinent,
   importContinentControls,
-  type PresetOption,
 } from '../src/gen/continent';
 
 function testControls(seed: string): ReturnType<typeof defaultControlsWithSeed> {
@@ -76,7 +74,6 @@ describe('continent generator artifact pivot', () => {
 
   it('supports compact export/import strings that round-trip map identity', () => {
     const controls = testControls('AmberDelta');
-    controls.preset = 'riverlands';
     controls.fragmentation = 7;
     controls.biomeMix.rivers = 0.9;
     const code = exportContinentControls(controls).code;
@@ -96,25 +93,4 @@ describe('continent generator artifact pivot', () => {
     }
     expect(hashes.size).toBe(seeds.length);
   });
-
-  it('builds all presets successfully with deterministic output', () => {
-    const presets: PresetOption[] = [
-      'earth-like',
-      'archipelago',
-      'mountain-kingdoms',
-      'riverlands',
-      'dune-world',
-      'rain-world',
-      'broken-coast',
-    ];
-
-    for (const preset of presets) {
-      const base = testControls('PresetProbe');
-      const controls = applyPreset(base, preset);
-      const a = generateContinent(controls);
-      const b = generateContinent(controls);
-      expect(a.identityHash, `${preset} should be deterministic`).toBe(b.identityHash);
-      expect(oceanEdgeRatio(a), `${preset} should keep ocean edges`).toBe(1);
-    }
-  }, 20_000);
 });

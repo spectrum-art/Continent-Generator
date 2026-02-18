@@ -1,19 +1,15 @@
 import {
-  applyPreset,
   ATLAS_PALETTE,
   buildAtlasRgba,
   defaultControlsWithSeed,
   exportContinentControls,
   generateContinent,
   importContinentControls,
-  runPresetDistinctnessSuite,
   randomHumanSeed,
   randomizeControls,
   resetBiomeMix,
   type AspectRatioOption,
   type ContinentControls,
-  type GeneratedContinent,
-  type PresetOption,
   type SizeOption,
 } from '../gen/continent';
 
@@ -29,28 +25,6 @@ type SelectBinding<T extends string> = {
   getValue: () => T;
   setValue: (value: T) => void;
 };
-
-type PerfProbeResult = {
-  durationMs: number;
-  frames: number;
-  avgFps: number;
-  avgFrameMs: number;
-  p95FrameMs: number;
-  worstFrameMs: number;
-  hitchCount: number;
-  zoom: number;
-  mode: 'mid' | 'full' | 'high';
-};
-
-const PRESET_OPTIONS: Array<{ value: PresetOption; label: string }> = [
-  { value: 'earth-like', label: 'Earth-like' },
-  { value: 'archipelago', label: 'Archipelago' },
-  { value: 'mountain-kingdoms', label: 'Mountain Kingdoms' },
-  { value: 'riverlands', label: 'Riverlands' },
-  { value: 'dune-world', label: 'Dune World' },
-  { value: 'rain-world', label: 'Rain World' },
-  { value: 'broken-coast', label: 'Broken Coast' },
-];
 
 const SIZE_OPTIONS: Array<{ value: SizeOption; label: string }> = [
   { value: 'isle', label: 'Isle (50k mi²)' },
@@ -79,15 +53,6 @@ function createButton(label: string): HTMLButtonElement {
   button.style.font = '12px/1.2 monospace';
   button.style.padding = '5px 8px';
   return button;
-}
-
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = clamp(Math.floor((sorted.length - 1) * p), 0, sorted.length - 1);
-  return sorted[idx];
 }
 
 function createRow(label: string): HTMLDivElement {
@@ -218,22 +183,13 @@ function createOffscreenCanvas(width: number, height: number): HTMLCanvasElement
 declare global {
   interface Window {
     __continentTool?: {
-      runPerfProbe: (zoomMode: 'mid' | 'full' | 'high') => Promise<PerfProbeResult>;
-      runValidationPerfSuite: () => Promise<{
-        mid: PerfProbeResult;
-        full: PerfProbeResult;
-        high: PerfProbeResult;
-        pass: boolean;
-      }>;
       getMapHash: () => string;
       getExportCode: () => string;
       importCode: (code: string) => boolean;
       setSeed: (seed: string) => void;
       regenerate: () => void;
       getControls: () => ContinentControls;
-      setPreset: (preset: PresetOption) => void;
       getPalette: () => Record<string, string>;
-      runDistinctnessSuite: (seeds: string[]) => ReturnType<typeof runPresetDistinctnessSuite>;
     };
   }
 }
@@ -280,9 +236,6 @@ export async function startContinentStudio(): Promise<void> {
   seedInput.style.font = '12px/1.2 monospace';
   seedRow.appendChild(seedInput);
   panel.appendChild(seedRow);
-
-  const presetSelect = createSelect('Preset', PRESET_OPTIONS, 'earth-like');
-  panel.appendChild(presetSelect.root);
 
   const sizeSelect = createSelect('Size', SIZE_OPTIONS, 'region');
   panel.appendChild(sizeSelect.root);
@@ -374,15 +327,6 @@ export async function startContinentStudio(): Promise<void> {
   status.style.font = '11px/1.35 monospace';
   panel.appendChild(status);
 
-  const metricsRow = document.createElement('div');
-  metricsRow.style.display = 'flex';
-  metricsRow.style.gap = '6px';
-  metricsRow.style.marginTop = '8px';
-  const runPerfButton = createButton('Run Perf Suite');
-  const runDistinctnessButton = createButton('Preset Distinctness');
-  metricsRow.append(runPerfButton, runDistinctnessButton);
-  panel.appendChild(metricsRow);
-
   const legend = document.createElement('div');
   legend.style.marginTop = '8px';
   legend.style.paddingTop = '6px';
@@ -437,12 +381,6 @@ export async function startContinentStudio(): Promise<void> {
   let showLatLongGrid = latLongGridToggle.input.checked;
   let fpsEma = 60;
   let frameMsEma = 16.7;
-  let p95FrameMs = 16.7;
-  let worstFrameMs = 16.7;
-  let hitchCount = 0;
-  const frameWindow: number[] = [];
-  let perfReport = 'perf=not-run';
-  let distinctnessReport = 'distinctness=not-run';
   let lastFrame = performance.now();
 
   function fitZoomForCurrentMap(): number {
@@ -493,7 +431,7 @@ export async function startContinentStudio(): Promise<void> {
   function readControlsFromUi(): ContinentControls {
     const next: ContinentControls = {
       seed: seedInput.value.trim().length > 0 ? seedInput.value.trim() : randomHumanSeed(),
-      preset: presetSelect.getValue(),
+      preset: 'earth-like',
       size: sizeSelect.getValue(),
       aspectRatio: aspectSelect.getValue(),
       landFraction: Number(landSlider.input.value),
@@ -521,7 +459,6 @@ export async function startContinentStudio(): Promise<void> {
 
   function writeControlsToUi(next: ContinentControls): void {
     seedInput.value = next.seed;
-    presetSelect.setValue(next.preset);
     sizeSelect.setValue(next.size);
     aspectSelect.setValue(next.aspectRatio);
 
@@ -599,123 +536,14 @@ export async function startContinentStudio(): Promise<void> {
     return true;
   }
 
-  async function runPerfProbe(zoomMode: 'mid' | 'full' | 'high'): Promise<PerfProbeResult> {
-    const startX = map.width / 2;
-    const startY = map.height / 2;
-    const targetZoom = zoomMode === 'full' ? fullZoom : zoomMode === 'high' ? highZoom : midZoom;
-    zoom = targetZoom;
-    cameraX = startX;
-    cameraY = startY;
-    clampCamera();
-
-    const durationMs = 3000;
-    const radiusX = Math.min(map.width * 0.16, 160);
-    const radiusY = Math.min(map.height * 0.12, 120);
-    const start = performance.now();
-    let frames = 0;
-    let previous = start;
-    let frameTimeTotal = 0;
-    const frameTimes: number[] = [];
-    let probeHitches = 0;
-
-    return new Promise<PerfProbeResult>((resolve) => {
-      const tick = (now: number): void => {
-        const elapsed = now - start;
-        if (elapsed >= durationMs) {
-          const avgFrameMs = frameTimeTotal / Math.max(1, frames);
-          const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
-          const p95FrameMsLocal = percentile(frameTimes, 0.95);
-          const worstFrameMsLocal = frameTimes.length > 0 ? Math.max(...frameTimes) : 0;
-          cameraX = startX;
-          cameraY = startY;
-          clampCamera();
-          resolve({
-            durationMs,
-            frames,
-            avgFrameMs,
-            avgFps,
-            p95FrameMs: p95FrameMsLocal,
-            worstFrameMs: worstFrameMsLocal,
-            hitchCount: probeHitches,
-            zoom: targetZoom,
-            mode: zoomMode,
-          });
-          return;
-        }
-
-        const dt = now - previous;
-        previous = now;
-        frameTimeTotal += dt;
-        frameTimes.push(dt);
-        if (dt > 80) {
-          probeHitches += 1;
-        }
-        frames += 1;
-
-        const t = elapsed / 1000;
-        cameraX = startX + Math.sin(t * 1.7) * radiusX;
-        cameraY = startY + Math.cos(t * 1.2) * radiusY;
-        clampCamera();
-
-        requestAnimationFrame(tick);
-      };
-
-      requestAnimationFrame(tick);
-    });
-  }
-
   function updateStatusText(): void {
     const exportString = exportCode();
-    p95FrameMs = percentile(frameWindow, 0.95);
-    worstFrameMs = frameWindow.length > 0 ? Math.max(...frameWindow) : frameMsEma;
-    hitchCount = frameWindow.reduce((count, value) => count + (value > 80 ? 1 : 0), 0);
     status.textContent =
       `seed=${controls.seed}\n` +
       `map=${map.width}x${map.height} hash=${map.identityHash}\n` +
       `zoom=${zoom.toFixed(3)} full=${fullZoom.toFixed(3)} mid=${midZoom.toFixed(3)} high=${highZoom.toFixed(3)}\n` +
-      `fps~${fpsEma.toFixed(1)} frame~${frameMsEma.toFixed(2)}ms p95=${p95FrameMs.toFixed(2)} worst=${worstFrameMs.toFixed(2)} hitch(>80ms)=${hitchCount}\n` +
-      `exportLen=${exportString.length}\n` +
-      `${perfReport}\n` +
-      `${distinctnessReport}`;
-  }
-
-  async function runValidationPerfSuite(): Promise<{
-    mid: PerfProbeResult;
-    full: PerfProbeResult;
-    high: PerfProbeResult;
-    pass: boolean;
-  }> {
-    const mid = await runPerfProbe('mid');
-    const full = await runPerfProbe('full');
-    const high = await runPerfProbe('high');
-    const pass =
-      mid.avgFps >= 55 &&
-      mid.p95FrameMs <= 22 &&
-      full.avgFps >= 45 &&
-      full.p95FrameMs <= 28 &&
-      high.avgFps >= 55 &&
-      high.p95FrameMs <= 22 &&
-      mid.hitchCount <= 1 &&
-      full.hitchCount <= 1 &&
-      high.hitchCount <= 1;
-
-    const toLine = (result: PerfProbeResult): string =>
-      `${result.mode}:fps=${result.avgFps.toFixed(1)} p95=${result.p95FrameMs.toFixed(1)}ms worst=${result.worstFrameMs.toFixed(1)}ms hitch=${result.hitchCount}`;
-    perfReport = `${pass ? 'perf=pass' : 'perf=fail'} ${toLine(mid)} | ${toLine(full)} | ${toLine(high)}`;
-    console.table([
-      { mode: mid.mode, avgFps: mid.avgFps, p95: mid.p95FrameMs, worst: mid.worstFrameMs, hitches: mid.hitchCount },
-      { mode: full.mode, avgFps: full.avgFps, p95: full.p95FrameMs, worst: full.worstFrameMs, hitches: full.hitchCount },
-      { mode: high.mode, avgFps: high.avgFps, p95: high.p95FrameMs, worst: high.worstFrameMs, hitches: high.hitchCount },
-    ]);
-    updateStatusText();
-    return { mid, full, high, pass };
-  }
-
-  function applyPresetFromUi(): void {
-    const current = readControlsFromUi();
-    const withPreset = applyPreset(current, presetSelect.getValue());
-    writeControlsToUi(withPreset);
-    regenerate(true);
+      `fps~${fpsEma.toFixed(1)} frame~${frameMsEma.toFixed(2)}ms\n` +
+      `exportLen=${exportString.length}`;
   }
 
   seedInput.value = controls.seed;
@@ -748,10 +576,6 @@ export async function startContinentStudio(): Promise<void> {
 
   saveButton.addEventListener('click', () => {
     void savePng(2);
-  });
-
-  presetSelect.select.addEventListener('change', () => {
-    applyPresetFromUi();
   });
 
   sizeSelect.select.addEventListener('change', () => {
@@ -793,22 +617,6 @@ export async function startContinentStudio(): Promise<void> {
 
   latLongGridToggle.input.addEventListener('change', () => {
     showLatLongGrid = latLongGridToggle.input.checked;
-  });
-
-  runPerfButton.addEventListener('click', () => {
-    perfReport = 'perf=running...';
-    updateStatusText();
-    void runValidationPerfSuite();
-  });
-
-  runDistinctnessButton.addEventListener('click', () => {
-    const seeds = ['GreenChair', 'SilentHarbor', 'RedComet'];
-    const suite = runPresetDistinctnessSuite(seeds);
-    const failing = suite.seedResults.filter((entry) => !entry.pass).map((entry) => entry.seed);
-    distinctnessReport = suite.pass
-      ? `distinctness=pass seeds=${suite.seeds.join(',')}`
-      : `distinctness=fail seeds=${failing.join(',') || 'unknown'}`;
-    updateStatusText();
   });
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -908,10 +716,6 @@ export async function startContinentStudio(): Promise<void> {
   function loop(now: number): void {
     const dt = now - lastFrame;
     lastFrame = now;
-    frameWindow.push(dt);
-    if (frameWindow.length > 300) {
-      frameWindow.shift();
-    }
     frameMsEma = frameMsEma * 0.92 + dt * 0.08;
     const fpsInstant = dt > 0 ? 1000 / dt : 0;
     fpsEma = fpsEma * 0.92 + fpsInstant * 0.08;
@@ -927,8 +731,6 @@ export async function startContinentStudio(): Promise<void> {
   requestAnimationFrame(loop);
 
   window.__continentTool = {
-    runPerfProbe,
-    runValidationPerfSuite,
     getMapHash: () => map.identityHash,
     getExportCode: () => exportCode(),
     importCode,
@@ -939,11 +741,6 @@ export async function startContinentStudio(): Promise<void> {
       regenerate(false);
     },
     getControls: () => readControlsFromUi(),
-    setPreset: (preset: PresetOption) => {
-      presetSelect.setValue(preset);
-      applyPresetFromUi();
-    },
     getPalette: () => ({ ...ATLAS_PALETTE }),
-    runDistinctnessSuite: (seeds: string[]) => runPresetDistinctnessSuite(seeds),
   };
 }
