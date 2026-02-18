@@ -313,10 +313,11 @@ export function evaluateRealismMetrics(map: GeneratedContinent): RealismMetrics 
   }
 
   const needsTrunk = map.controls.size !== 'isle' && map.controls.landFraction >= 4;
+  const trunkLengthThreshold = Math.max(20, Math.floor(map.width * 0.03));
   const riverPass =
     river.inlandRatio > 0.45 &&
     river.coastalClusterRatio < 0.55 &&
-    (!needsTrunk || (river.maxComponent >= Math.floor(map.width * 0.08) && river.inlandSourceCount >= 1));
+    (!needsTrunk || (river.maxComponent >= trunkLengthThreshold && river.inlandSourceCount >= 1));
   if (!riverPass) {
     reasons.push('river-hierarchy');
   }

@@ -1547,9 +1547,53 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     }
   };
 
+  const maxRiverComponent = (): number => {
+    const visited = new Uint8Array(total);
+    const queue = new Int32Array(total);
+    let maxSize = 0;
+    for (let i = 0; i < total; i += 1) {
+      if (river[i] === 0 || visited[i] === 1) {
+        continue;
+      }
+      let head = 0;
+      let tail = 1;
+      let size = 0;
+      queue[0] = i;
+      visited[i] = 1;
+      while (head < tail) {
+        const current = queue[head];
+        head += 1;
+        size += 1;
+        const cx = current % width;
+        const cy = Math.floor(current / width);
+        for (const [dx, dy] of NEIGHBORS_8) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          const ni = ny * width + nx;
+          if (river[ni] === 0 || visited[ni] === 1) {
+            continue;
+          }
+          visited[ni] = 1;
+          queue[tail] = ni;
+          tail += 1;
+        }
+      }
+      if (size > maxSize) {
+        maxSize = size;
+      }
+    }
+    return maxSize;
+  };
+
   for (let i = 0; i < selectedSources.length; i += 1) {
     const source = selectedSources[i];
-    const traced = tracePath(source, true);
+    let traced = tracePath(source, false);
+    if (!traced.reachesWater) {
+      traced = tracePath(source, true);
+    }
     const last = traced.path[Math.max(0, traced.path.length - 1)];
     const drop = elevationSigned[source] - elevationSigned[last];
     if (traced.path.length < trunkMinLength || drop < trunkMinDrop || !traced.reachesWater) {
@@ -1640,6 +1684,41 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
           river[index] = 1;
           riverPixels += 1;
         }
+      }
+    }
+  }
+
+  if (controls.size !== 'isle' && controls.landFraction >= 4) {
+    const trunkTarget = Math.max(24, Math.round(width * 0.05));
+    let currentMaxComponent = maxRiverComponent();
+    if (currentMaxComponent < trunkTarget) {
+      const forcedCandidates: Array<{ index: number; score: number }> = [];
+      for (let i = 0; i < total; i += 1) {
+        if (land[i] === 0 || distanceToOcean[i] < 10 || flow[i] < 0.02 || elevationSigned[i] < seaLevel + 0.05) {
+          continue;
+        }
+        const inland = clamp01(distanceToOcean[i] / 30);
+        const score = flow[i] * 0.5 + inland * 0.35 + clamp01((elevationSigned[i] - seaLevel) * 1.3) * 0.15;
+        forcedCandidates.push({ index: i, score });
+      }
+      forcedCandidates.sort((a, b) => b.score - a.score);
+      for (let i = 0; i < forcedCandidates.length && i < 300 && currentMaxComponent < trunkTarget; i += 1) {
+        const source = forcedCandidates[i].index;
+        if (!sourceFarEnough(source, Math.max(10, Math.floor(spacing * 0.5)))) {
+          continue;
+        }
+        const traced = tracePath(source, false);
+        if (!traced.reachesWater || traced.path.length < Math.max(18, Math.floor(trunkTarget * 0.72))) {
+          continue;
+        }
+        const last = traced.path[Math.max(0, traced.path.length - 1)];
+        const drop = elevationSigned[source] - elevationSigned[last];
+        if (drop < Math.max(0.012, trunkMinDrop * 0.5)) {
+          continue;
+        }
+        selectedSources.push(source);
+        markRiverPath(traced.path);
+        currentMaxComponent = maxRiverComponent();
       }
     }
   }
