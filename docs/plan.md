@@ -1,27 +1,17 @@
 # Map Explorer Plan
 
-## Milestone 14: Terrain-First Coastlines and Realistic Relief
+## Milestone 15: Erosion, Shading, Resolution, and Coastal Realism
 
-- [x] Remove preset dropdown, preset logic paths, and preset-specific tests.
-- [x] Remove non-user milestone buttons (`Run Perf Suite`, `Preset Distinctness`) from UI/runtime surface.
-- [x] Replace mask-first terrain with terrain-first pipeline:
-- [x] plates
-- [x] continuous elevation field
-- [x] sea level threshold from `Land Fraction`
-- [x] coastline from elevation
-- [x] climate → rivers → biomes
-- [x] Rewrite coastal smoothing to operate on elevation near sea level (not binary mask dilation/erosion).
-- [x] Keep ocean edges guaranteed for bounded-map artifact constraints.
-- [x] Strengthen NW directional shaded relief using surface normals.
-- [x] Increase effective terrain detail with multi-scale + micro relief.
-- [x] Improve biome realism from temperature + moisture + elevation + rain shadow context.
-- [x] Make aspect ratio generation-space aware (no post-generation stretch behavior).
-- [x] Keep LOD rendering strategy active for low/mid/high zoom.
-- [x] Add/retain tests for:
-- [x] determinism
-- [x] export/import identity roundtrip
-- [x] land-fraction monotonicity
-- [x] coastline perimeter response to coastal smoothing
-- [x] aspect-ratio identity differences
-- [x] Keep all tests green with `npm test`.
-- [x] Keep production build green with `npm run build`.
+- [x] `ms15_resolution_upgrade`: raise effective map resolution with upsampled output fields.
+- [x] `ms15_directional_hillshade`: strengthen NW directional relief shading from elevation gradients.
+- [x] `ms15_river_incision`: carve river valleys with two incision passes and post-carve flow recompute.
+- [x] `ms15_coastal_variation`: add slope/drainage/relief/noise variation to coastal moisture.
+- [x] `ms15_edge_falloff`: enforce stronger edge-to-ocean transition to avoid clipped borders.
+- [x] `ms15_coastal_smoothing_rewrite`: make smoothing modify coastline contour while beach width stays stable.
+- [x] `ms15_erosion_feedback_pass`: add post-carve smoothing and post-biome blending feedback passes.
+- [x] `ms15_river_distribution_fix`: bias source selection inland and keep longer coherent rivers.
+- [x] `ms15_docs_and_tests`: update docs and add inland-river coverage assertion.
+- [x] Validate determinism + identity behaviors remain intact.
+- [x] Keep bounded-map ocean-edge guarantee passing.
+- [x] Keep `npm test` green.
+- [x] Keep `npm run build` green.

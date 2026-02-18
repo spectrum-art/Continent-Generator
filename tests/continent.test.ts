@@ -38,6 +38,16 @@ function landRatio(map: ReturnType<typeof generateContinent>): number {
   return land / Math.max(1, map.land.length);
 }
 
+function inlandRiverCount(map: ReturnType<typeof generateContinent>, minOceanDistance: number): number {
+  let inland = 0;
+  for (let i = 0; i < map.river.length; i += 1) {
+    if (map.river[i] === 1 && map.distanceToOcean[i] >= minOceanDistance) {
+      inland += 1;
+    }
+  }
+  return inland;
+}
+
 describe('continent generator artifact pivot', () => {
   it('is deterministic for same seed and controls', () => {
     const controls = testControls('GreenChair');
@@ -60,6 +70,14 @@ describe('continent generator artifact pivot', () => {
     controls.aspectRatio = 'wide';
     const map = generateContinent(controls);
     expect(oceanEdgeRatio(map)).toBe(1);
+  });
+
+  it('produces inland river tiles away from coastlines', () => {
+    const controls = testControls('default');
+    controls.size = 'region';
+    controls.biomeMix.rivers = 0.75;
+    const map = generateContinent(controls);
+    expect(inlandRiverCount(map, 10)).toBeGreaterThan(20);
   });
 
   it('responds to Land Fraction control', () => {
