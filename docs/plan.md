@@ -1,19 +1,23 @@
 # Map Explorer Plan
 
-## Milestone 12: Continent Generator Artifact Pivot
+## Milestone 13: Atlas-Grade Geometry + Rendering Overhaul
 
-- [x] Read and align implementation with:
-- [x] `docs/continent-generator-controls.csv`
-- [x] `docs/continent-generator-design-spec.md`
-
-- [x] Replace runtime entrypoint with bounded continent artifact UI.
-- [x] Keep deterministic seeded generation and adapt it to finite map output.
-- [x] Implement control panel matching CSV control set.
-- [x] Implement presets, reroll, randomize, reset, and advanced toggle.
-- [x] Implement compact export/import parameter string.
-- [x] Implement high-resolution PNG export.
-- [x] Guarantee ocean edges around bounded map.
-- [x] Remove infinite-world-specific tests from active suite.
-- [x] Add pivot-focused tests for determinism, edges, presets, and export/import.
-- [x] Validate with `npm test` and `npm run build`.
-- [x] Run 3-second FPS probes for mid/full zoom using requestAnimationFrame.
+- [x] Align implementation with `docs/continent-generator-controls.csv`.
+- [x] Align implementation with `docs/continent-generator-design-spec.md`.
+- [x] Repair metric harness foundations for identity/perf/preset feature vectors.
+- [x] Ensure aspect ratio changes regenerate geometry and update map identity (no stretch clone behavior).
+- [x] Upgrade landmask/coast pipeline for stronger silhouette control and corner/ocean constraints.
+- [x] Strengthen ridge-based mountain shaping inputs and atlas hillshade fields.
+- [x] Keep deterministic flow-based river generation with basin/lake handling and prune artifacts.
+- [x] Add coastline cleanup behavior so higher coastal smoothing produces cleaner coastlines.
+- [x] Add rendering LOD raster strategy (`low`, `base`, `high`) selected by zoom band.
+- [x] Add `Lat/Long Grid` advanced toggle and render overlay.
+- [x] Add in-app perf suite trigger (`mid`/`full`/`high` probes with avg/p95/worst/hitch metrics).
+- [x] Add in-app preset distinctness trigger against fixed seeds.
+- [x] Add/expand automated tests:
+- [x] aspect-ratio identity change
+- [x] export/import identity round-trip with aspect ratio
+- [x] coastal smoothing monotonic perimeter behavior
+- [x] preset distinctness suite pass criteria
+- [x] Keep all tests green with `npm test`.
+- [x] Keep production build green with `npm run build`.
