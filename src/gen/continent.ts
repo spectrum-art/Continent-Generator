@@ -1171,6 +1171,35 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const postIncisionFlow = computeFlowField(width, height, land, elevationSigned, elevation01);
   flow = postIncisionFlow.flow;
 
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (land[index] === 0) {
+        continue;
+      }
+      const coastBlend = Math.exp(-distanceToOceanPostIncision[index] / 8.5);
+      if (coastBlend < 0.02) {
+        continue;
+      }
+
+      const left = elevationSigned[y * width + Math.max(0, x - 1)];
+      const right = elevationSigned[y * width + Math.min(width - 1, x + 1)];
+      const up = elevationSigned[Math.max(0, y - 1) * width + x];
+      const down = elevationSigned[Math.min(height - 1, y + 1) * width + x];
+      const localSlope = clamp01(Math.hypot((right - left) * 0.5, (down - up) * 0.5) * 6.5);
+      const relief = Math.max(0, elevationSigned[index] - seaLevel);
+      const drainage = clamp01(flow[index] * 1.9);
+      const nearShoreLand = clamp01(1 - distanceToLandPostIncision[index] / 7);
+      const nx = x / Math.max(1, width - 1);
+      const ny = y / Math.max(1, height - 1);
+      const coastNoise = fbm(climateSeed ^ 0x3a7f04c5, nx * 15.5, ny * 15.5, 2, 0.55, 2.2) - 0.5;
+
+      const variation =
+        coastBlend * (coastNoise * 0.22 + drainage * 0.16 + nearShoreLand * 0.1 - localSlope * 0.2 - relief * 0.17);
+      moisture[index] = clamp01(moisture[index] + variation);
+    }
+  }
+
   const biome = new Uint8Array(total);
   const beachWidth = clamp(Math.round(1 + (10 - controls.coastalSmoothing) / 4), 1, 4);
   const mountainThreshold = 0.54 + (1 - reliefNorm) * 0.1 - controls.biomeMix.mountains * 0.08;
