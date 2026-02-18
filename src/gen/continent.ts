@@ -750,6 +750,115 @@ function computeLandAndCoast(width: number, height: number, land: Uint8Array): {
   return { landArea, coastPerimeter };
 }
 
+function computeFlowField(
+  width: number,
+  height: number,
+  land: Uint8Array,
+  elevationSigned: Float32Array,
+  elevation01: Float32Array,
+): { downstream: Int32Array; flow: Float32Array } {
+  const total = width * height;
+  const downstream = new Int32Array(total);
+  downstream.fill(-1);
+  const flow = new Float32Array(total);
+  const bins: number[][] = Array.from({ length: 256 }, () => []);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (land[index] === 0) {
+        continue;
+      }
+
+      flow[index] = 1;
+      let bestElevation = elevationSigned[index];
+      let bestNeighbor = -1;
+      for (const [dx, dy] of NEIGHBORS_8) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+          continue;
+        }
+        const ni = ny * width + nx;
+        if (elevationSigned[ni] < bestElevation - 1e-4) {
+          bestElevation = elevationSigned[ni];
+          bestNeighbor = ni;
+        }
+      }
+      downstream[index] = bestNeighbor;
+
+      const bin = clamp(Math.floor(elevation01[index] * 255), 0, 255);
+      bins[bin].push(index);
+    }
+  }
+
+  for (let bin = 255; bin >= 0; bin -= 1) {
+    const bucket = bins[bin];
+    for (let i = 0; i < bucket.length; i += 1) {
+      const index = bucket[i];
+      const out = downstream[index];
+      if (out >= 0) {
+        flow[out] += flow[index];
+      }
+    }
+  }
+
+  let maxFlow = 1;
+  for (let i = 0; i < flow.length; i += 1) {
+    maxFlow = Math.max(maxFlow, flow[i]);
+  }
+  for (let i = 0; i < flow.length; i += 1) {
+    flow[i] /= maxFlow;
+  }
+
+  return { downstream, flow };
+}
+
+function applyRiverIncision(
+  width: number,
+  height: number,
+  elevationSigned: Float32Array,
+  river: Uint8Array,
+  flow: Float32Array,
+  seaLevel: number,
+): void {
+  const radius = 2;
+  const total = width * height;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const delta = new Float32Array(total);
+    const passScale = pass === 0 ? 1 : 0.62;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if (river[index] === 0 || elevationSigned[index] <= seaLevel - 0.02) {
+          continue;
+        }
+        const trunkFactor = Math.sqrt(clamp01(flow[index]));
+        const depth = (0.0055 + trunkFactor * 0.015) * passScale;
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+              continue;
+            }
+            const distance = Math.hypot(dx, dy);
+            if (distance > radius + 0.25) {
+              continue;
+            }
+            const taper = Math.max(0, 1 - distance / (radius + 0.25));
+            const ni = ny * width + nx;
+            delta[ni] -= depth * taper * taper;
+          }
+        }
+      }
+    }
+    for (let i = 0; i < total; i += 1) {
+      elevationSigned[i] = Math.max(-1.2, elevationSigned[i] + delta[i]);
+    }
+  }
+}
+
 export function generateContinent(input: ContinentControls): GeneratedContinent {
   const controls = clampControls(input);
   const normalizedSeed = normalizeSeed(controls.seed);
@@ -954,58 +1063,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     }
   }
 
-  const downstream = new Int32Array(total);
-  downstream.fill(-1);
-  const flow = new Float32Array(total);
-  const bins: number[][] = Array.from({ length: 256 }, () => []);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      if (land[index] === 0) {
-        continue;
-      }
-
-      flow[index] = 1;
-      let bestElevation = elevationSigned[index];
-      let bestNeighbor = -1;
-      for (const [dx, dy] of NEIGHBORS_8) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const ni = ny * width + nx;
-        if (elevationSigned[ni] < bestElevation - 1e-4) {
-          bestElevation = elevationSigned[ni];
-          bestNeighbor = ni;
-        }
-      }
-      downstream[index] = bestNeighbor;
-
-      const bin = clamp(Math.floor(elevation01[index] * 255), 0, 255);
-      bins[bin].push(index);
-    }
-  }
-
-  for (let bin = 255; bin >= 0; bin -= 1) {
-    const bucket = bins[bin];
-    for (let i = 0; i < bucket.length; i += 1) {
-      const index = bucket[i];
-      const out = downstream[index];
-      if (out >= 0) {
-        flow[out] += flow[index];
-      }
-    }
-  }
-
-  let maxFlow = 1;
-  for (let i = 0; i < flow.length; i += 1) {
-    maxFlow = Math.max(maxFlow, flow[i]);
-  }
-  for (let i = 0; i < flow.length; i += 1) {
-    flow[i] /= maxFlow;
-  }
+  let { downstream, flow } = computeFlowField(width, height, land, elevationSigned, elevation01);
 
   const river = new Uint8Array(total);
   const riverMix = controls.biomeMix.rivers;
@@ -1092,6 +1150,27 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     }
   }
 
+  applyRiverIncision(width, height, elevationSigned, river, flow, seaLevel);
+
+  for (let i = 0; i < total; i += 1) {
+    elevation01[i] = clamp01((elevationSigned[i] + 1) * 0.5);
+    land[i] = elevationSigned[i] > seaLevel ? 1 : 0;
+  }
+  enforceOceanEdges(width, height, land);
+  for (let i = 0; i < total; i += 1) {
+    if (land[i] === 0) {
+      river[i] = 0;
+      water[i] = 1;
+    } else {
+      water[i] = 0;
+    }
+  }
+  ({ ocean, lake } = floodOcean(width, height, water));
+  const distanceToOceanPostIncision = bfsDistance(width, height, ocean);
+  const distanceToLandPostIncision = bfsDistance(width, height, land);
+  const postIncisionFlow = computeFlowField(width, height, land, elevationSigned, elevation01);
+  flow = postIncisionFlow.flow;
+
   const biome = new Uint8Array(total);
   const beachWidth = clamp(Math.round(1 + (10 - controls.coastalSmoothing) / 4), 1, 4);
   const mountainThreshold = 0.54 + (1 - reliefNorm) * 0.1 - controls.biomeMix.mountains * 0.08;
@@ -1115,7 +1194,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       continue;
     }
 
-    if (distanceToOcean[i] <= beachWidth) {
+    if (distanceToOceanPostIncision[i] <= beachWidth) {
       biome[i] = BIOME_INDEX.beach;
       continue;
     }
@@ -1208,8 +1287,8 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     ocean,
     lake,
     river,
-    distanceToOcean,
-    distanceToLand,
+    distanceToOcean: distanceToOceanPostIncision,
+    distanceToLand: distanceToLandPostIncision,
     landArea,
     coastPerimeter,
     identityHash,
