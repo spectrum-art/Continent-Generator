@@ -1105,6 +1105,38 @@ function applySlopeFeedbackPass(
   elevationSigned.set(next);
 }
 
+function applyFlowValleyFeedback(
+  width: number,
+  height: number,
+  elevationSigned: Float32Array,
+  flow: Float32Array,
+  seaLevel: number,
+  reliefNorm: number,
+): void {
+  const next = elevationSigned.slice();
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (elevationSigned[index] <= seaLevel + 0.015) {
+        continue;
+      }
+      const accumulation = clamp01((flow[index] - 0.02) * 4.4);
+      if (accumulation <= 0) {
+        continue;
+      }
+      const left = elevationSigned[y * width + (x - 1)];
+      const right = elevationSigned[y * width + (x + 1)];
+      const up = elevationSigned[(y - 1) * width + x];
+      const down = elevationSigned[(y + 1) * width + x];
+      const slope = clamp01(Math.hypot((right - left) * 0.5, (down - up) * 0.5) * 8.2);
+      const carveStrength = (0.0018 + reliefNorm * 0.0052) * accumulation * (0.6 + slope * 0.6);
+      const floor = seaLevel + 0.004;
+      next[index] = Math.max(floor, elevationSigned[index] - carveStrength);
+    }
+  }
+  elevationSigned.set(next);
+}
+
 type ContinuousPlateSample = {
   uplift: number;
   driftX: number;
@@ -1370,6 +1402,11 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   }
 
   let { downstream, flow } = computeFlowField(width, height, land, elevationSigned, elevation01);
+  applyFlowValleyFeedback(width, height, elevationSigned, flow, seaLevel, reliefNorm);
+  for (let i = 0; i < total; i += 1) {
+    elevation01[i] = clamp01((elevationSigned[i] + 1) * 0.5);
+  }
+  ({ downstream, flow } = computeFlowField(width, height, land, elevationSigned, elevation01));
 
   const river = new Uint8Array(total);
   const riverMix = controls.biomeMix.rivers;
