@@ -1,212 +1,121 @@
 import type { GeneratedContinent } from './continent';
 
-const NEIGHBORS_8 = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-  [1, 1],
-  [1, -1],
-  [-1, 1],
-  [-1, -1],
-] as const;
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function percentile(values: number[], p: number): number {
+function mean(values: number[]): number {
   if (values.length === 0) {
     return 0;
   }
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = clamp(Math.floor(sorted.length * p), 0, sorted.length - 1);
-  return sorted[index];
-}
-
-function largestComponentSpanRatio(mask: Uint8Array, width: number, height: number): number {
-  const visited = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let bestRatio = 0;
-
-  for (let i = 0; i < mask.length; i += 1) {
-    if (mask[i] === 0 || visited[i] === 1) {
-      continue;
-    }
-    let minX = width;
-    let maxX = -1;
-    visited[i] = 1;
-    queue[0] = i;
-    let head = 0;
-    let tail = 1;
-    while (head < tail) {
-      const current = queue[head];
-      head += 1;
-      const x = current % width;
-      const y = Math.floor(current / width);
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      for (const [dx, dy] of NEIGHBORS_8) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
-          continue;
-        }
-        const ni = ny * width + nx;
-        if (mask[ni] === 0 || visited[ni] === 1) {
-          continue;
-        }
-        visited[ni] = 1;
-        queue[tail] = ni;
-        tail += 1;
-      }
-    }
-    if (maxX >= minX) {
-      bestRatio = Math.max(bestRatio, (maxX - minX + 1) / Math.max(1, width));
-    }
+  let total = 0;
+  for (const value of values) {
+    total += value;
   }
-
-  return bestRatio;
+  return total / values.length;
 }
 
-function ridgeAnisotropyFromMask(mask: Uint8Array, width: number, height: number): number {
-  let sumX = 0;
-  let sumY = 0;
-  let count = 0;
+function coastlineMetrics(map: GeneratedContinent): {
+  axisAlignedRatio: number;
+  longestAxisRunRatio: number;
+  samples: number;
+} {
+  const { width, height, land } = map;
+  const boundary = new Uint8Array(width * height);
+
+  const landAt = (x: number, y: number): number => {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return 0;
+    }
+    return land[y * width + x] === 1 ? 1 : 0;
+  };
+
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (mask[y * width + x] === 0) {
-        continue;
-      }
-      sumX += x;
-      sumY += y;
-      count += 1;
+      const index = y * width + x;
+      const center = landAt(x, y);
+      const hasDiff =
+        landAt(x + 1, y) !== center ||
+        landAt(x - 1, y) !== center ||
+        landAt(x, y + 1) !== center ||
+        landAt(x, y - 1) !== center;
+      boundary[index] = hasDiff ? 1 : 0;
     }
   }
-  if (count < 20) {
-    return 0;
-  }
-  const mx = sumX / count;
-  const my = sumY / count;
 
-  let cxx = 0;
-  let cyy = 0;
-  let cxy = 0;
+  const axisTolerance = (15 * Math.PI) / 180;
+  let axisAligned = 0;
+  let samples = 0;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (boundary[index] === 0) {
+        continue;
+      }
+      const gx = landAt(x + 1, y) - landAt(x - 1, y);
+      const gy = landAt(x, y + 1) - landAt(x, y - 1);
+      const mag = Math.hypot(gx, gy);
+      if (mag < 1e-6) {
+        continue;
+      }
+      const theta = Math.abs(Math.atan2(gy, gx));
+      const dist = Math.min(theta, Math.abs(theta - Math.PI * 0.5), Math.abs(theta - Math.PI));
+      if (dist <= axisTolerance) {
+        axisAligned += 1;
+      }
+      samples += 1;
+    }
+  }
+
+  let longestRun = 0;
   for (let y = 0; y < height; y += 1) {
+    let run = 0;
     for (let x = 0; x < width; x += 1) {
-      if (mask[y * width + x] === 0) {
-        continue;
+      if (boundary[y * width + x] === 1) {
+        run += 1;
+        longestRun = Math.max(longestRun, run);
+      } else {
+        run = 0;
       }
-      const dx = x - mx;
-      const dy = y - my;
-      cxx += dx * dx;
-      cyy += dy * dy;
-      cxy += dx * dy;
     }
   }
-  cxx /= count;
-  cyy /= count;
-  cxy /= count;
-  const trace = cxx + cyy;
-  const detTerm = Math.sqrt(Math.max(0, (cxx - cyy) * (cxx - cyy) + 4 * cxy * cxy));
-  const l1 = (trace + detTerm) * 0.5;
-  const l2 = (trace - detTerm) * 0.5;
-  return l1 > 1e-8 ? clamp((l1 - l2) / l1, 0, 1) : 0;
-}
-
-function basinDepthSeparation(map: GeneratedContinent): number {
-  const landElev: number[] = [];
-  const landRidge: number[] = [];
-  const landFlow: number[] = [];
-  for (let i = 0; i < map.elevation.length; i += 1) {
-    if (map.land[i] === 0) continue;
-    landElev.push(map.elevation[i]);
-    landRidge.push(map.ridge[i]);
-    landFlow.push(map.flow[i]);
-  }
-
-  if (landElev.length < 30) {
-    return 0;
-  }
-
-  const ridgeCut = percentile(landRidge, 0.86);
-  const valleyCut = percentile(landFlow, 0.78);
-
-  const ridges: number[] = [];
-  const valleys: number[] = [];
-  for (let i = 0; i < map.elevation.length; i += 1) {
-    if (map.land[i] === 0) continue;
-    if (map.ridge[i] >= ridgeCut) ridges.push(map.elevation[i]);
-    if (map.flow[i] >= valleyCut) valleys.push(map.elevation[i]);
-  }
-
-  if (ridges.length < 12) {
-    return 0;
-  }
-  if (valleys.length < 12) {
-    valleys.push(...landElev);
-  }
-  const ridgeHigh = percentile(ridges, 0.7);
-  const valleyLow = percentile(valleys, valleys.length === landElev.length ? 0.12 : 0.28);
-  return ridgeHigh - valleyLow;
-}
-
-function noBlobScore(map: GeneratedContinent): number {
-  const cx = (map.width - 1) * 0.5;
-  const cy = (map.height - 1) * 0.5;
-  const samplesR: number[] = [];
-  const samplesE: number[] = [];
-
-  for (let y = 0; y < map.height; y += 1) {
-    for (let x = 0; x < map.width; x += 1) {
-      const index = y * map.width + x;
-      if (map.land[index] === 0) {
-        continue;
+  for (let x = 0; x < width; x += 1) {
+    let run = 0;
+    for (let y = 0; y < height; y += 1) {
+      if (boundary[y * width + x] === 1) {
+        run += 1;
+        longestRun = Math.max(longestRun, run);
+      } else {
+        run = 0;
       }
-      const r = Math.hypot(x - cx, y - cy) / Math.max(1, Math.min(map.width, map.height));
-      samplesR.push(r);
-      samplesE.push(map.elevation[index]);
     }
   }
-  if (samplesR.length < 20) {
-    return 0;
-  }
 
-  let meanR = 0;
-  let meanE = 0;
-  for (let i = 0; i < samplesR.length; i += 1) {
-    meanR += samplesR[i];
-    meanE += samplesE[i];
-  }
-  meanR /= samplesR.length;
-  meanE /= samplesE.length;
-
-  let num = 0;
-  let denR = 0;
-  let denE = 0;
-  for (let i = 0; i < samplesR.length; i += 1) {
-    const dr = samplesR[i] - meanR;
-    const de = samplesE[i] - meanE;
-    num += dr * de;
-    denR += dr * dr;
-    denE += de * de;
-  }
-  const corr = num / Math.max(1e-6, Math.sqrt(denR * denE));
-  return 1 - Math.abs(corr);
+  return {
+    axisAlignedRatio: samples > 0 ? axisAligned / samples : 1,
+    longestAxisRunRatio: longestRun / Math.max(1, Math.max(width, height)),
+    samples,
+  };
 }
 
 export type DemRealismMetrics = {
-  crestlineContinuity: number;
-  ridgeAnisotropy: number;
-  basinDepthSeparation: number;
-  noBlobScore: number;
+  coastlineAxisAlignedRatio: number;
+  coastlineLongestAxisRunRatio: number;
+  coastlineSampleCount: number;
+  ridgeWidthCv: number;
+  ridgeAmplitudeCv: number;
+  ridgeTubeNessScore: number;
+  junctionSymmetryScore: number;
+  highDegreeNodes: number;
+  resolutionValid: number;
 };
 
 export type DemRealismGates = {
-  crestlineContinuityPass: boolean;
-  ridgeAnisotropyPass: boolean;
-  basinDepthSeparationPass: boolean;
-  noBlobPass: boolean;
+  coastlineOrthogonalityPass: boolean;
+  ridgeTubeNessPass: boolean;
+  junctionSymmetryPass: boolean;
+  resolutionConsistencyPass: boolean;
   pass: boolean;
   reasons: string[];
 };
@@ -217,41 +126,61 @@ export type DemRealismResult = {
 };
 
 export function evaluateDemRealism(map: GeneratedContinent): DemRealismResult {
-  const ridgeMask = new Uint8Array(map.ridge.length);
-  const ridgeLandValues: number[] = [];
-  for (let i = 0; i < map.ridge.length; i += 1) {
-    if (map.land[i] === 1) ridgeLandValues.push(map.ridge[i]);
-  }
-  const ridgeCut = ridgeLandValues.length > 0 ? percentile(ridgeLandValues, 0.86) : 1;
-  for (let i = 0; i < map.ridge.length; i += 1) {
-    ridgeMask[i] = map.land[i] === 1 && map.ridge[i] >= ridgeCut ? 1 : 0;
-  }
+  const coast = coastlineMetrics(map);
+  const diagnostics = map.structuralDiagnostics ?? {
+    ridgeWidthCv: 0,
+    ridgeAmplitudeCv: 0,
+    junctionSymmetryScore: 1,
+    highDegreeNodes: 999,
+    resolutionValid: false,
+  };
 
+  const ridgeTubeNessScore = Math.min(diagnostics.ridgeWidthCv, diagnostics.ridgeAmplitudeCv);
   const metrics: DemRealismMetrics = {
-    crestlineContinuity: largestComponentSpanRatio(ridgeMask, map.width, map.height),
-    ridgeAnisotropy: ridgeAnisotropyFromMask(ridgeMask, map.width, map.height),
-    basinDepthSeparation: basinDepthSeparation(map),
-    noBlobScore: noBlobScore(map),
+    coastlineAxisAlignedRatio: coast.axisAlignedRatio,
+    coastlineLongestAxisRunRatio: coast.longestAxisRunRatio,
+    coastlineSampleCount: coast.samples,
+    ridgeWidthCv: diagnostics.ridgeWidthCv,
+    ridgeAmplitudeCv: diagnostics.ridgeAmplitudeCv,
+    ridgeTubeNessScore,
+    junctionSymmetryScore: diagnostics.junctionSymmetryScore,
+    highDegreeNodes: diagnostics.highDegreeNodes,
+    resolutionValid: diagnostics.resolutionValid ? 1 : 0,
   };
 
   const reasons: string[] = [];
-  const crestlineContinuityPass = metrics.crestlineContinuity > 0.15;
-  if (!crestlineContinuityPass) reasons.push('crestline-continuity');
-  const ridgeAnisotropyPass = metrics.ridgeAnisotropy > 0.2;
-  if (!ridgeAnisotropyPass) reasons.push('ridge-anisotropy');
-  const basinDepthSeparationPass = metrics.basinDepthSeparation > 0.16;
-  if (!basinDepthSeparationPass) reasons.push('basin-depth-separation');
-  const noBlobPass = metrics.noBlobScore > 0.35;
-  if (!noBlobPass) reasons.push('no-blob');
+
+  const coastlineOrthogonalityPass =
+    metrics.coastlineSampleCount > 128 &&
+    metrics.coastlineAxisAlignedRatio <= 0.76 &&
+    metrics.coastlineLongestAxisRunRatio <= 0.34;
+  if (!coastlineOrthogonalityPass) {
+    reasons.push('coast-orthogonality');
+  }
+
+  const ridgeTubeNessPass = metrics.ridgeWidthCv >= 0.12 && metrics.ridgeAmplitudeCv >= 0.12;
+  if (!ridgeTubeNessPass) {
+    reasons.push('ridge-tube-ness');
+  }
+
+  const junctionSymmetryPass = metrics.highDegreeNodes <= 2 && metrics.junctionSymmetryScore <= 0.72;
+  if (!junctionSymmetryPass) {
+    reasons.push('junction-symmetry');
+  }
+
+  const resolutionConsistencyPass = diagnostics.resolutionValid;
+  if (!resolutionConsistencyPass) {
+    reasons.push('resolution-consistency');
+  }
 
   return {
     metrics,
     gates: {
-      crestlineContinuityPass,
-      ridgeAnisotropyPass,
-      basinDepthSeparationPass,
-      noBlobPass,
-      pass: crestlineContinuityPass && ridgeAnisotropyPass && basinDepthSeparationPass && noBlobPass,
+      coastlineOrthogonalityPass,
+      ridgeTubeNessPass,
+      junctionSymmetryPass,
+      resolutionConsistencyPass,
+      pass: coastlineOrthogonalityPass && ridgeTubeNessPass && junctionSymmetryPass && resolutionConsistencyPass,
       reasons,
     },
   };

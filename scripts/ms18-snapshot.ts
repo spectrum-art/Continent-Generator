@@ -101,7 +101,7 @@ function runId(): string {
 }
 
 async function main(): Promise<void> {
-  const outDir = join('artifacts', 'ms18', runId());
+  const outDir = join('artifacts', 'ms20', runId());
   await mkdir(outDir, { recursive: true });
 
   const cases = buildCases();

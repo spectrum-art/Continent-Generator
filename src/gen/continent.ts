@@ -75,6 +75,13 @@ export type GeneratedContinent = {
   coastPerimeter: number;
   identityHash: string;
   controlsHash: string;
+  structuralDiagnostics?: {
+    ridgeWidthCv: number;
+    ridgeAmplitudeCv: number;
+    junctionSymmetryScore: number;
+    highDegreeNodes: number;
+    resolutionValid: boolean;
+  };
 };
 
 export type ExportPayload = {
@@ -1312,6 +1319,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     coastPerimeter,
     identityHash,
     controlsHash,
+    structuralDiagnostics: structural.diagnostics,
   };
 }
 

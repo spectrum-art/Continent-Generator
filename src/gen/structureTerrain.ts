@@ -77,6 +77,15 @@ export type StructuralTerrainResult = {
   ridge: Float32Array;
   flow: Float32Array;
   landPotential: Float32Array;
+  diagnostics: StructuralDiagnostics;
+};
+
+export type StructuralDiagnostics = {
+  ridgeWidthCv: number;
+  ridgeAmplitudeCv: number;
+  junctionSymmetryScore: number;
+  highDegreeNodes: number;
+  resolutionValid: boolean;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -94,6 +103,34 @@ function lerp(a: number, b: number, t: number): number {
 function smoothstep(t: number): number {
   const x = clamp01(t);
   return x * x * (3 - 2 * x);
+}
+
+function mean(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  let total = 0;
+  for (const v of values) {
+    total += v;
+  }
+  return total / values.length;
+}
+
+function coefficientOfVariation(values: number[]): number {
+  if (values.length < 2) {
+    return 0;
+  }
+  const avg = mean(values);
+  if (Math.abs(avg) < 1e-8) {
+    return 0;
+  }
+  let variance = 0;
+  for (const value of values) {
+    const delta = value - avg;
+    variance += delta * delta;
+  }
+  variance /= values.length;
+  return Math.sqrt(variance) / Math.abs(avg);
 }
 
 function hashInts(seed: number, x: number, y: number, salt: number): number {
@@ -951,6 +988,129 @@ function buildBasinGraph(width: number, height: number, ridge: RidgeGraph, seed:
   return { nodes, trunkEdges, tributaryEdges };
 }
 
+function ridgePhase(edge: RidgeEdge, seed: number): number {
+  return valueNoise(seed ^ (edge.a * 7919 + edge.b * 1237), 0.11, 0.77) * Math.PI * 2;
+}
+
+function ridgeSideBias(edge: RidgeEdge, seed: number): number {
+  return (valueNoise(seed ^ (edge.a * 31337 + edge.b * 11939), edge.level * 0.83, 0.41) - 0.5) * 0.9;
+}
+
+function ridgeAmplitudeAt(edge: RidgeEdge, seed: number, s: number, baseAmplitude: number, phase: number): number {
+  const ampNoise = 0.6 + 0.4 * valueNoise(seed ^ (edge.a * 1327 + edge.b * 4253), s * 7.8 + edge.level, edge.level * 0.27);
+  const massif = 0.62 + 0.38 * Math.pow(Math.sin(Math.PI * s + phase), 2);
+  return baseAmplitude * ampNoise * massif;
+}
+
+function ridgeWidthAt(edge: RidgeEdge, seed: number, s: number, baseWidth: number): number {
+  const widthNoise = 0.65 + 0.7 * valueNoise(seed ^ (edge.a * 5741 + edge.b * 3251), s * 6.1 + 0.23, edge.level * 0.41);
+  return Math.max(0.6, baseWidth * widthNoise);
+}
+
+function angleGapSymmetry(angles: number[]): number {
+  if (angles.length !== 3) {
+    return 0;
+  }
+  const sorted = [...angles].sort((a, b) => a - b);
+  const gaps = [
+    sorted[1] - sorted[0],
+    sorted[2] - sorted[1],
+    (sorted[0] + Math.PI * 2) - sorted[2],
+  ];
+  const expected = (Math.PI * 2) / 3;
+  let variance = 0;
+  for (const gap of gaps) {
+    const d = gap - expected;
+    variance += d * d;
+  }
+  variance /= gaps.length;
+  const std = Math.sqrt(variance);
+  return clamp01(1 - std / expected);
+}
+
+function computeStructuralDiagnostics(
+  ridge: RidgeGraph,
+  seed: number,
+  width: number,
+  height: number,
+): StructuralDiagnostics {
+  const allEdges = [...ridge.primaryEdges, ...ridge.secondaryEdges, ...ridge.tertiaryEdges];
+  const widthSamples: number[] = [];
+  const amplitudeSamples: number[] = [];
+
+  for (const edge of allEdges) {
+    const levelFactor = edge.level === 0 ? 0.74 : edge.level === 1 ? 0.5 : 0.38;
+    const baseAmplitude = edge.amplitude * levelFactor;
+    const baseWidth = Math.max(1.1, edge.width * (edge.level === 0 ? 0.22 : edge.level === 1 ? 0.17 : 0.13));
+    const phase = ridgePhase(edge, seed);
+    const side = ridgeSideBias(edge, seed);
+
+    for (let i = 0; i <= 12; i += 1) {
+      const s = i / 12;
+      const amplitude = ridgeAmplitudeAt(edge, seed, s, baseAmplitude, phase);
+      const widthValue = ridgeWidthAt(edge, seed, s, baseWidth) * (1 + side * 0.14 * Math.cos(s * Math.PI * 2));
+      amplitudeSamples.push(Math.max(0, amplitude));
+      widthSamples.push(Math.max(0.35, widthValue));
+    }
+  }
+
+  const adjacency = new Map<number, number[]>();
+  for (let edgeIndex = 0; edgeIndex < allEdges.length; edgeIndex += 1) {
+    const edge = allEdges[edgeIndex];
+    const listA = adjacency.get(edge.a);
+    if (listA) {
+      listA.push(edgeIndex);
+    } else {
+      adjacency.set(edge.a, [edgeIndex]);
+    }
+    const listB = adjacency.get(edge.b);
+    if (listB) {
+      listB.push(edgeIndex);
+    } else {
+      adjacency.set(edge.b, [edgeIndex]);
+    }
+  }
+
+  let highDegreeNodes = 0;
+  const symmetrySamples: number[] = [];
+  const effectiveAmplitude = (edge: RidgeEdge): number => {
+    const levelFactor = edge.level === 0 ? 0.74 : edge.level === 1 ? 0.5 : 0.38;
+    return edge.amplitude * levelFactor;
+  };
+
+  for (const [nodeId, incident] of adjacency) {
+    const strongIncident = incident.filter((edgeIndex) => effectiveAmplitude(allEdges[edgeIndex]) >= 0.16);
+    if (strongIncident.length >= 4) {
+      highDegreeNodes += 1;
+    }
+    if (strongIncident.length !== 3) {
+      continue;
+    }
+    const node = ridge.nodes[nodeId];
+    const angles: number[] = [];
+    for (const edgeIndex of strongIncident) {
+      const edge = allEdges[edgeIndex];
+      const otherId = edge.a === nodeId ? edge.b : edge.a;
+      const other = ridge.nodes[otherId];
+      angles.push(Math.atan2(other.y - node.y, other.x - node.x));
+    }
+    symmetrySamples.push(angleGapSymmetry(angles));
+  }
+
+  const junctionSymmetryScore = mean(symmetrySamples);
+  const ridgeWidthCv = coefficientOfVariation(widthSamples);
+  const ridgeAmplitudeCv = coefficientOfVariation(amplitudeSamples);
+  const resolutionValid = width > 2 && height > 2;
+
+  return {
+    ridgeWidthCv,
+    ridgeAmplitudeCv,
+    junctionSymmetryScore,
+    highDegreeNodes,
+    resolutionValid,
+  };
+}
+
 function rasterizeStructuralDem(
   width: number,
   height: number,
@@ -962,7 +1122,7 @@ function rasterizeStructuralDem(
   divergent: BoundarySegment[],
   ridge: RidgeGraph,
   basins: BasinGraph,
-): { elevation: Float32Array; ridgeField: Float32Array; basinField: Float32Array } {
+): { elevation: Float32Array; ridgeField: Float32Array; basinField: Float32Array; landPotential: Float32Array } {
   const elevation = new Float32Array(width * height);
   const ridgeField = new Float32Array(width * height);
   const basinField = new Float32Array(width * height);
@@ -1005,8 +1165,8 @@ function rasterizeStructuralDem(
     const b = ridge.nodes[edge.b];
     const baseAmplitude = edge.amplitude * levelFactor;
     const baseWidth = Math.max(1.1, edge.width * (edge.level === 0 ? 0.22 : edge.level === 1 ? 0.17 : 0.13));
-    const sideBias = (valueNoise(seed ^ (edge.a * 31337 + edge.b * 11939), edge.level * 0.83, 0.41) - 0.5) * 0.9;
-    const phase = valueNoise(seed ^ (edge.a * 7919 + edge.b * 1237), 0.11, 0.77) * Math.PI * 2;
+    const sideBias = ridgeSideBias(edge, seed);
+    const phase = ridgePhase(edge, seed);
     const maxWidth = baseWidth * 1.8;
 
     const minX = clamp(Math.floor(Math.min(a.x, b.x) - maxWidth * 2.8), 0, width - 1);
@@ -1018,13 +1178,8 @@ function rasterizeStructuralDem(
       for (let x = minX; x <= maxX; x += 1) {
         const d = distanceToSegmentWithProjection(x + 0.5, y + 0.5, a.x, a.y, b.x, b.y);
         const s = d.t;
-
-        const ampNoise = 0.6 + 0.4 * valueNoise(seed ^ (edge.a * 1327 + edge.b * 4253), s * 7.8 + edge.level, edge.level * 0.27);
-        const massif = 0.62 + 0.38 * Math.pow(Math.sin(Math.PI * s + phase), 2);
-        const amplitude = baseAmplitude * ampNoise * massif;
-
-        const widthNoise = 0.65 + 0.7 * valueNoise(seed ^ (edge.a * 5741 + edge.b * 3251), s * 6.1 + 0.23, edge.level * 0.41);
-        const width = baseWidth * widthNoise;
+        const amplitude = ridgeAmplitudeAt(edge, seed, s, baseAmplitude, phase);
+        const width = ridgeWidthAt(edge, seed, s, baseWidth);
         const sideScale = d.signed >= 0 ? 1 + sideBias * 0.34 : 1 - sideBias * 0.34;
         const crossWidth = Math.max(0.6, width * sideScale);
 
@@ -1375,6 +1530,7 @@ export function generateStructuralTerrain(
   const beltsModel = buildConvergentBelts(width, height, plateModel.boundaries, reliefNorm, seed);
   const ridgeGraph = buildRidgeGraph(width, height, beltsModel.belts, seed, reliefNorm, peakNorm);
   const basinGraph = buildBasinGraph(width, height, ridgeGraph, seed);
+  const diagnostics = computeStructuralDiagnostics(ridgeGraph, seed, width, height);
 
   const raster = rasterizeStructuralDem(
     width,
@@ -1401,5 +1557,6 @@ export function generateStructuralTerrain(
     ridge: raster.ridgeField,
     flow,
     landPotential: raster.landPotential,
+    diagnostics,
   };
 }

@@ -3,108 +3,148 @@ import type { GeneratedContinent } from '../src/gen/continent';
 import { defaultControlsWithSeed, generateContinent } from '../src/gen/continent';
 import { evaluateDemRealism } from '../src/gen/realismMetrics';
 
-function fakeDomeMap(width: number, height: number): GeneratedContinent {
+function syntheticMapFromLand(
+  width: number,
+  height: number,
+  land: Uint8Array,
+  diagnostics?: GeneratedContinent['structuralDiagnostics'],
+): GeneratedContinent {
+  const controls = defaultControlsWithSeed('synthetic');
   const total = width * height;
-  const controls = defaultControlsWithSeed('fake');
-  const elevation = new Float32Array(total);
-  const ridge = new Float32Array(total);
-  const slope = new Float32Array(total);
-  const light = new Float32Array(total);
-  const flow = new Float32Array(total);
-  const biome = new Uint8Array(total);
-  const land = new Uint8Array(total);
   const ocean = new Uint8Array(total);
-  const lake = new Uint8Array(total);
-  const river = new Uint8Array(total);
-  const distanceToOcean = new Uint16Array(total);
-  const distanceToLand = new Uint16Array(total);
-  const temperature = new Float32Array(total);
-  const moisture = new Float32Array(total);
-
-  const cx = (width - 1) * 0.5;
-  const cy = (height - 1) * 0.5;
-  const maxR = Math.min(width, height) * 0.45;
-  let landArea = 0;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      const r = Math.hypot(x - cx, y - cy) / maxR;
-      const h = Math.max(0, 1 - r * r);
-      elevation[index] = h;
-      const isLand = h > 0.25 ? 1 : 0;
-      land[index] = isLand;
-      ocean[index] = isLand ? 0 : 1;
-      if (isLand) {
-        landArea += 1;
-      }
-    }
+  for (let i = 0; i < total; i += 1) {
+    ocean[i] = land[i] === 1 ? 0 : 1;
   }
 
   return {
     controls,
-    normalizedSeed: 'fake',
+    normalizedSeed: 'synthetic',
     width,
     height,
     fieldScale: 1,
-    seaLevel: 0.25,
-    elevation,
-    ridge,
-    slope,
-    temperature,
-    moisture,
-    light,
-    flow,
-    biome,
+    seaLevel: 0,
+    elevation: new Float32Array(total),
+    ridge: new Float32Array(total),
+    slope: new Float32Array(total),
+    temperature: new Float32Array(total),
+    moisture: new Float32Array(total),
+    light: new Float32Array(total),
+    flow: new Float32Array(total),
+    biome: new Uint8Array(total),
     land,
     ocean,
-    lake,
-    river,
-    distanceToOcean,
-    distanceToLand,
-    landArea,
+    lake: new Uint8Array(total),
+    river: new Uint8Array(total),
+    distanceToOcean: new Uint16Array(total),
+    distanceToLand: new Uint16Array(total),
+    landArea: 0,
     coastPerimeter: 0,
-    identityHash: 'fake',
-    controlsHash: 'fake',
+    identityHash: 'synthetic',
+    controlsHash: 'synthetic',
+    structuralDiagnostics: diagnostics,
   };
 }
 
-describe('ms19 structural realism gates', () => {
+describe('ms20 structural realism gates', () => {
   it('keeps gate evaluation deterministic', () => {
-    const controls = defaultControlsWithSeed('ms19deterministic');
+    const controls = defaultControlsWithSeed('ms20deterministic');
     controls.size = 'region';
     controls.relief = 8;
-    controls.landFraction = 6;
+    controls.landFraction = 7;
     const a = evaluateDemRealism(generateContinent(controls));
     const b = evaluateDemRealism(generateContinent(controls));
     expect(a).toEqual(b);
   }, 25_000);
 
-  it('produces long crestline continuity and anisotropy on region-scale terrain', () => {
-    const controls = defaultControlsWithSeed('ms19crest');
-    controls.size = 'region';
-    controls.aspectRatio = 'landscape';
-    controls.relief = 8;
-    controls.fragmentation = 5;
-    controls.landFraction = 6;
-    const metrics = evaluateDemRealism(generateContinent(controls));
-    expect(metrics.metrics.crestlineContinuity).toBeGreaterThan(0.3);
-    expect(metrics.metrics.ridgeAnisotropy).toBeGreaterThan(0.2);
-  }, 25_000);
+  it('rejects axis-aligned blocky coastlines', () => {
+    const width = 160;
+    const height = 112;
+    const land = new Uint8Array(width * height);
 
-  it('keeps basin depth separation above minimum threshold', () => {
-    const controls = defaultControlsWithSeed('ms19basin');
-    controls.size = 'region';
-    controls.aspectRatio = 'landscape';
-    controls.relief = 8;
-    controls.landFraction = 6;
-    const metrics = evaluateDemRealism(generateContinent(controls));
-    expect(metrics.metrics.basinDepthSeparation).toBeGreaterThan(0.16);
-  }, 25_000);
+    for (let y = 12; y < height - 12; y += 1) {
+      for (let x = 18; x < width - 18; x += 1) {
+        land[y * width + x] = 1;
+      }
+    }
+    for (let y = 38; y < 78; y += 1) {
+      for (let x = 56; x < 104; x += 1) {
+        land[y * width + x] = 0;
+      }
+    }
 
-  it('rejects smooth dome-like elevation fields', () => {
-    const dome = fakeDomeMap(220, 220);
-    const metrics = evaluateDemRealism(dome);
-    expect(metrics.metrics.noBlobScore).toBeLessThan(0.3);
-    expect(metrics.gates.noBlobPass).toBe(false);
+    const map = syntheticMapFromLand(width, height, land, {
+      ridgeWidthCv: 0.33,
+      ridgeAmplitudeCv: 0.36,
+      junctionSymmetryScore: 0.2,
+      highDegreeNodes: 0,
+      resolutionValid: true,
+    });
+    const result = evaluateDemRealism(map);
+
+    expect(result.gates.coastlineOrthogonalityPass).toBe(false);
+    expect(result.metrics.coastlineAxisAlignedRatio).toBeGreaterThan(0.8);
+    expect(result.metrics.coastlineLongestAxisRunRatio).toBeGreaterThan(0.4);
   });
+
+  it('rejects uniform tube-like ridge diagnostics', () => {
+    const controls = defaultControlsWithSeed('ms20tube');
+    controls.size = 'region';
+    controls.aspectRatio = 'landscape';
+    controls.relief = 7;
+    controls.landFraction = 6;
+
+    const map = generateContinent(controls);
+    const forced: GeneratedContinent = {
+      ...map,
+      structuralDiagnostics: {
+        ridgeWidthCv: 0.03,
+        ridgeAmplitudeCv: 0.04,
+        junctionSymmetryScore: 0.2,
+        highDegreeNodes: 0,
+        resolutionValid: true,
+      },
+    };
+
+    const result = evaluateDemRealism(forced);
+    expect(result.gates.ridgeTubeNessPass).toBe(false);
+    expect(result.metrics.ridgeTubeNessScore).toBeLessThan(0.1);
+  }, 25_000);
+
+  it('rejects symmetric hub-style junctions', () => {
+    const controls = defaultControlsWithSeed('ms20junction');
+    controls.size = 'region';
+    controls.aspectRatio = 'landscape';
+    const map = generateContinent(controls);
+
+    const forced: GeneratedContinent = {
+      ...map,
+      structuralDiagnostics: {
+        ridgeWidthCv: 0.22,
+        ridgeAmplitudeCv: 0.23,
+        junctionSymmetryScore: 0.94,
+        highDegreeNodes: 8,
+        resolutionValid: true,
+      },
+    };
+
+    const result = evaluateDemRealism(forced);
+    expect(result.gates.junctionSymmetryPass).toBe(false);
+    expect(result.metrics.highDegreeNodes).toBeGreaterThan(2);
+  }, 25_000);
+
+  it('passes the full ms20 gate set on generator output', () => {
+    const controls = defaultControlsWithSeed('MistyCove');
+    controls.size = 'region';
+    controls.aspectRatio = 'landscape';
+    controls.relief = 8;
+    controls.fragmentation = 6;
+    controls.landFraction = 6;
+    const result = evaluateDemRealism(generateContinent(controls));
+
+    expect(result.gates.pass).toBe(true);
+    expect(result.metrics.coastlineAxisAlignedRatio).toBeLessThanOrEqual(0.76);
+    expect(result.metrics.ridgeWidthCv).toBeGreaterThanOrEqual(0.12);
+    expect(result.metrics.ridgeAmplitudeCv).toBeGreaterThanOrEqual(0.12);
+    expect(result.metrics.junctionSymmetryScore).toBeLessThanOrEqual(0.72);
+  }, 25_000);
 });
