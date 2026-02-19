@@ -9,6 +9,7 @@ import {
   generateContinent,
   type ContinentControls,
 } from './continent';
+import { evaluateMs21Realism } from './ms21Metrics';
 
 type SnapshotCase = {
   name: string;
@@ -80,13 +81,18 @@ function buildCases(): SnapshotCase[] {
     relief: number;
     fragmentation: number;
   }> = [
-    { name: 'isle_low', seed: 'GreenChair', size: 'isle', aspect: 'square', landFraction: 3, relief: 3, fragmentation: 3 },
-    { name: 'isle_high', seed: 'RedComet', size: 'isle', aspect: 'landscape', landFraction: 7, relief: 8, fragmentation: 8 },
-    { name: 'region_low', seed: 'SilentHarbor', size: 'region', aspect: 'square', landFraction: 4, relief: 4, fragmentation: 3 },
-    { name: 'region_high', seed: 'MistyCove', size: 'region', aspect: 'landscape', landFraction: 7, relief: 8, fragmentation: 8 },
-    { name: 'super_low', seed: 'StoneField', size: 'supercontinent', aspect: 'square', landFraction: 4, relief: 4, fragmentation: 3 },
-    { name: 'super_high', seed: 'AmberDelta', size: 'supercontinent', aspect: 'landscape', landFraction: 7, relief: 8, fragmentation: 8 },
+    { name: 'isle_lowrelief', seed: 'GreenChair', size: 'isle', aspect: 'square', landFraction: 3, relief: 3, fragmentation: 3 },
+    { name: 'isle_highrelief', seed: 'RedComet', size: 'isle', aspect: 'landscape', landFraction: 7, relief: 8, fragmentation: 7 },
+    { name: 'region_lowland', seed: 'SilentHarbor', size: 'region', aspect: 'square', landFraction: 4, relief: 4, fragmentation: 3 },
+    { name: 'region_mid', seed: 'MistyCove', size: 'region', aspect: 'landscape', landFraction: 6, relief: 6, fragmentation: 5 },
+    { name: 'region_highrelief', seed: 'AmberDelta', size: 'region', aspect: 'landscape', landFraction: 7, relief: 9, fragmentation: 8 },
+    { name: 'subcontinent_balanced', seed: 'StoneField', size: 'subcontinent', aspect: 'wide', landFraction: 6, relief: 7, fragmentation: 5 },
+    { name: 'subcontinent_fragmented', seed: 'IronCove', size: 'subcontinent', aspect: 'landscape', landFraction: 6, relief: 8, fragmentation: 8 },
+    { name: 'super_lowland', seed: 'QuietMesa', size: 'supercontinent', aspect: 'square', landFraction: 4, relief: 4, fragmentation: 4 },
+    { name: 'super_mid', seed: 'SolarPass', size: 'supercontinent', aspect: 'landscape', landFraction: 6, relief: 7, fragmentation: 5 },
+    { name: 'super_high', seed: 'WildSummit', size: 'supercontinent', aspect: 'wide', landFraction: 7, relief: 9, fragmentation: 8 },
   ];
+
   return configs.map((entry) => {
     const controls = defaultControlsWithSeed(entry.seed);
     controls.size = entry.size;
@@ -98,41 +104,88 @@ function buildCases(): SnapshotCase[] {
   });
 }
 
+function critiqueLine(failedReasons: string[]): string {
+  if (failedReasons.length === 0) {
+    return 'PASS: all realism gates satisfied.';
+  }
+  const stages: Record<string, string> = {
+    conditioning: 'Tune hydrology conditioning (priority-flood / outlet policy).',
+    incision: 'Tune incision loop (channel threshold, incision k, iteration count).',
+    diffusion: 'Tune diffusion strength to preserve ridge/valley separation.',
+    'sea-level': 'Tune sea-level quantile and coastline smoothing (avoid flattening).',
+    hillshade: 'Tune hillshade (multi-azimuth weights or edge handling).',
+  };
+  const unique = [...new Set(failedReasons)];
+  const hints = unique.map((r) => stages[r] ?? `Inspect stage: ${r}`).join(' ');
+  return `FAIL: ${unique.join(', ')}. ${hints}`;
+}
+
 async function main(): Promise<void> {
   const outDir = join('artifacts', 'ms21', runId());
   await mkdir(outDir, { recursive: true });
 
   const cases = buildCases();
-  const outputs: Array<{ name: string; identityHash: string; width: number; height: number }> = [];
+  const outputs: Array<{
+    name: string;
+    identityHash: string;
+    width: number;
+    height: number;
+    metrics: ReturnType<typeof evaluateMs21Realism>;
+  }> = [];
 
   for (const c of cases) {
     const map = generateContinent(c.controls);
+    const metrics = evaluateMs21Realism(map);
     outputs.push({
       name: c.name,
       identityHash: map.identityHash,
       width: map.width,
       height: map.height,
+      metrics,
     });
 
-    if (c.name === 'region_high') {
+    if (c.name === 'region_highrelief') {
       await writePng(join(outDir, 'dem.png'), map.width, map.height, buildElevationRgba(map));
       await writePng(join(outDir, 'normal.png'), map.width, map.height, buildNormalRgba(map));
       await writePng(join(outDir, 'hillshade.png'), map.width, map.height, buildAtlasRgba(map));
     }
   }
 
+  const failing = outputs.filter((o) => !o.metrics.gates.pass);
   const summary = {
     totalCases: outputs.length,
-    passCount: outputs.length,
-    failCount: 0,
-    failing: [] as string[],
+    passCount: outputs.length - failing.length,
+    failCount: failing.length,
+    failing: failing.map((f) => ({ name: f.name, reasons: f.metrics.gates.reasons })),
   };
 
   await writeFile(join(outDir, 'metrics.json'), JSON.stringify({ summary, cases: outputs }, null, 2), 'utf8');
-  await writeFile(join(outDir, 'critique.txt'), 'MS21 scaffold snapshot: metrics gates not yet enabled.\n', 'utf8');
+
+  const critique = [
+    `MS21 Snapshot Run: ${outDir}`,
+    `cases=${summary.totalCases} pass=${summary.passCount} fail=${summary.failCount}`,
+    '',
+  ];
+  for (const item of outputs) {
+    critique.push(`${item.name}: ${critiqueLine(item.metrics.gates.reasons)}`);
+    critique.push(`  sink_count=${item.metrics.metrics.sink_count}`);
+    critique.push(`  sink_fraction=${item.metrics.metrics.sink_fraction.toFixed(6)}`);
+    critique.push(`  drain_to_ocean_fraction=${item.metrics.metrics.drain_to_ocean_fraction.toFixed(6)}`);
+    critique.push(`  trunk_river_lengths=${item.metrics.metrics.trunk_river_lengths.join(',')}`);
+    critique.push(`  elevation_spread_above_sea=${item.metrics.metrics.elevation_spread_above_sea.toFixed(6)}`);
+    critique.push(`  stddev_above_sea=${item.metrics.metrics.stddev_above_sea.toFixed(6)}`);
+    critique.push(`  curvature_ratio=${item.metrics.metrics.curvature_stats.ratio.toFixed(6)}`);
+    critique.push(`  hillshade_edge_discontinuity_score=${item.metrics.metrics.hillshade_edge_discontinuity_score.toFixed(6)}`);
+    critique.push('');
+  }
+  await writeFile(join(outDir, 'critique.txt'), critique.join('\n'), 'utf8');
 
   console.log(`snapshot_dir=${outDir}`);
   console.log(`cases=${summary.totalCases} pass=${summary.passCount} fail=${summary.failCount}`);
+
+  if (summary.failCount > 0) {
+    process.exitCode = 1;
+  }
 }
 
 void main();

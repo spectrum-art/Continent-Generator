@@ -481,9 +481,19 @@ export function generateDemCore(input: DemCoreInput): DemCoreState {
     seaLevel,
     input.controls.coastalSmoothing,
   );
-  const masks = buildMasks(input.width, input.height, demFinal, seaLevel);
-  const oceanFlood = floodOcean(input.width, input.height, masks.water);
-  const finalFlow = computeFlowFields(input.width, input.height, demFinal, oceanFlood.ocean);
+  let masks = buildMasks(input.width, input.height, demFinal, seaLevel);
+  let oceanFlood = floodOcean(input.width, input.height, masks.water);
+  const conditionedFinal = conditionHydrology(
+    input.width,
+    input.height,
+    demFinal,
+    'drain-mostly',
+    oceanFlood.ocean,
+  );
+  const demHydro = conditionedFinal.elevation;
+  masks = buildMasks(input.width, input.height, demHydro, seaLevel);
+  oceanFlood = floodOcean(input.width, input.height, masks.water);
+  const finalFlow = computeFlowFields(input.width, input.height, demHydro, oceanFlood.ocean);
 
   const river = new Uint8Array(input.width * input.height);
   const riverThreshold = 0.2 + (1 - landFractionNorm) * 0.05;
@@ -492,7 +502,7 @@ export function generateDemCore(input: DemCoreInput): DemCoreState {
   }
   state.demConditioned = conditioned.elevation;
   state.demEroded = eroded.elevation;
-  state.demFinal = demFinal;
+  state.demFinal = demHydro;
   state.seaLevel = seaLevel;
   state.land = masks.land;
   state.ocean = oceanFlood.ocean;

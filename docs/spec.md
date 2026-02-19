@@ -1,52 +1,70 @@
 # Map Explorer Spec
 
-## Milestone 20: Structural Raster Bug Fixes + Ridge De-Tubing
+## Milestone 21: Hydrology-Conditioned DEM + Incision/Diffusion
 
 ## Scope
-- Deterministic bounded continent generator (case-insensitive seed normalization).
-- Preserve MS19 structure-first core and remove visible structural artifacts:
-  - blocky/axis-aligned coastline raster artifacts
-  - tube-like uniform ridge glows
-  - symmetric junction hub signatures
-- No new user-facing UI controls.
+- Deterministic, DEM-first terrain pipeline focused on grayscale relief realism.
+- UI scaffold remains intact; terrain core rebuilt around explicit stages.
+- No new user-facing features required for this milestone.
 
-## MS20 Terrain Updates
-1. Land/coast shape uses authoritative continuous `landPotential` at the final map resolution.
-2. Sea-level target may be solved against `landPotential` and then refined by coast-elevation smoothing.
-3. Crestline rasterization now varies along edge arc length:
-  - variable amplitude with massif/saddle envelopes
-  - variable width with independent low-frequency modulation
-  - asymmetric cross-section via coherent side bias
-  - non-Gaussian profile blend to avoid uniform tube glow
-4. Junction suppression keeps continuity through nodes and downgrades branch-like spokes.
-5. Structural diagnostics are emitted from generator internals for realism gates.
+## MS21 Pipeline
+1. Macro structure field:
+- elongated uplift belts
+- broad cratonic plateaus
+- broad subsidence basins
+- low-magnitude continental tilt
 
-## Outputs
-- `buildElevationRgba`: grayscale DEM render.
-- `buildNormalRgba`: normal map derived from DEM gradients.
-- `buildAtlasRgba`: shaded-relief grayscale atlas render.
-- Snapshot harness remains `npm run snapshot` and writes:
-  - `dem.png`
-  - `normal.png`
-  - `hillshade.png`
-  - `metrics.json`
+2. Hydrology conditioning:
+- priority-flood style conditioning in `drain-mostly` mode
+- stable D8 downstream routing
+- flow accumulation fields
 
-## Realism Gates (MS20)
-Programmatic gates (arrays/graphs only):
-- coastline orthogonality:
-  - axis-aligned boundary orientation ratio
-  - longest axis-aligned coastline run ratio
-- ridge tube-ness:
-  - ridge width coefficient-of-variation
-  - ridge amplitude coefficient-of-variation
-- junction symmetry:
-  - high-degree node count (strong edges only)
-  - degree-3 angle symmetry score
-- resolution consistency:
-  - authoritative field dimensions and valid structural diagnostics
+3. Erosion loop:
+- stream-power incision gated by channel threshold
+- hillslope diffusion
+- multiple fixed iterations by map size
+- no per-iteration normalization
 
-`evaluateDemRealism()` returns gate booleans + reasons and is used by tests and snapshot reporting.
+4. Sea level and land fraction:
+- sea level chosen by quantile target from eroded DEM
+- preserve elevation dynamic range above sea level
+- mild coastal-band smoothing only near sea boundary
 
-## Determinism
-- Same controls + seed always produce same map identity hash and realism metrics.
-- Export/import roundtrip preserves map identity.
+5. Cartographic hillshade:
+- central-difference normals
+- multi-azimuth shading with NW-weighted primary light
+- diffuse/ambient support for slope readability
+- normal map derived from the same DEM
+
+## Artifacts
+`npm run snapshot` writes:
+- `artifacts/ms21/<timestamp>/dem.png`
+- `artifacts/ms21/<timestamp>/normal.png`
+- `artifacts/ms21/<timestamp>/hillshade.png`
+- `artifacts/ms21/<timestamp>/metrics.json`
+- `artifacts/ms21/<timestamp>/critique.txt`
+
+## Metrics + Gates
+Per-case metrics include:
+- `sink_count`, `sink_fraction`
+- `drain_to_ocean_fraction`
+- `max_flow_acc_values`, `max_flow_acc_reach_ocean`
+- `trunk_river_lengths`
+- `elevation_spread_above_sea`, `stddev_above_sea`
+- `curvature_stats` (concave/convex counts + ratio)
+- `hillshade_edge_discontinuity_score`
+
+Gates:
+- drainage completeness
+- trunk river hierarchy
+- above-sea dynamic range
+- curvature ridge/valley separation
+- hillshade seam regression
+
+Snapshot exits non-zero if any case fails gates.
+
+## Validation
+Run:
+- `npm test`
+- `npm run build`
+- `npm run snapshot`

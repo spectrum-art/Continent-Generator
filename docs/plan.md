@@ -1,15 +1,16 @@
 # Map Explorer Plan
 
-## Milestone 20 Checkpoints
+## Milestone 21 Checkpoints
+- [x] `ms21: baseline + new modules + snapshot harness scaffold`
+- [x] `ms21: macro uplift belts + cratons/basins`
+- [x] `ms21: hydrology conditioning (priority-flood) + flow fields`
+- [x] `ms21: incision + diffusion erosion loop`
+- [x] `ms21: sea level quantile + land fraction without flattening`
+- [x] `ms21: cartographic hillshade (multi-azimuth) + normal map`
+- [x] `ms21: realism metrics + fewer-better tests + docs`
 
-- [x] `ms20: baseline snapshots + structural diagnostics notes`
-- [x] `ms20: robust landmask + coastline rasterization (no blocky edges)`
-- [x] `ms20: crestline field rewrite (variable width/amplitude + non-gaussian/asymmetric profile)`
-- [x] `ms20: junction suppression + belt continuity rules`
-- [x] `ms20: tests/gates for mask orthogonality, ridge tube-ness, junction symmetry`
-- [x] `ms20: docs + perf sanity + final snapshot`
-
-## Validation
-- [x] `npm test`
-- [x] `npm run build`
-- [x] `npm run snapshot`
+## Acceptance Checklist
+- [x] `npm test` passes
+- [x] `npm run build` passes
+- [x] `npm run snapshot` passes with all gates
+- [x] Artifacts written to `artifacts/ms21/<timestamp>/`
