@@ -728,6 +728,23 @@ function buildBasinGraph(width: number, height: number, ridge: RidgeGraph, seed:
     }
   }
 
+  for (let i = 0; i + 3 < trunkNodeIds.length; i += 3) {
+    const a = trunkNodeIds[i];
+    const b = trunkNodeIds[i + 3];
+    const pa = nodes[a];
+    const pb = nodes[b];
+    const d = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+    if (d < Math.min(width, height) * 0.18) {
+      trunkEdges.push({
+        a,
+        b,
+        level: 0,
+        width: Math.min(width, height) * 0.04,
+        depth: 0.36,
+      });
+    }
+  }
+
   if (trunkNodeIds.length > 0) {
     for (let i = 0; i < ridge.secondaryEdges.length; i += 2) {
       const edge = ridge.secondaryEdges[i];
@@ -751,12 +768,20 @@ function buildBasinGraph(width: number, height: number, ridge: RidgeGraph, seed:
         continue;
       }
       const source = add(mx, my);
+      const bend = add(lerp(mx, nodes[nearest].x, 0.55), lerp(my, nodes[nearest].y, 0.55));
       tributaryEdges.push({
         a: source,
-        b: nearest,
+        b: bend,
         level: 1,
         width: edge.width * 0.88,
         depth: edge.amplitude * 0.35,
+      });
+      tributaryEdges.push({
+        a: bend,
+        b: nearest,
+        level: 1,
+        width: edge.width * 0.74,
+        depth: edge.amplitude * 0.31,
       });
     }
   }
