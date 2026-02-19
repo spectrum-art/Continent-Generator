@@ -1,5 +1,4 @@
 import { generateDemCore } from './dem';
-import { seaLevelForLandFraction, smoothCoastFromElevation } from './structureTerrain';
 
 export type SizeOption = 'isle' | 'region' | 'subcontinent' | 'supercontinent';
 export type AspectRatioOption = 'wide' | 'landscape' | 'square' | 'portrait' | 'narrow';
@@ -1230,30 +1229,18 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const total = width * height;
 
   const seed = hashString(normalizedSeed);
-  const landFractionNorm = (controls.landFraction - 1) / 9;
   const demCore = generateDemCore({ width, height, seed, controls });
-  const elevation = demCore.demFinal.slice();
-  const seaLevel = seaLevelForLandFraction(elevation, landFractionNorm);
-  smoothCoastFromElevation(width, height, elevation, seaLevel, controls.coastalSmoothing);
-
-  const land = new Uint8Array(total);
-  const water = new Uint8Array(total);
-  for (let i = 0; i < total; i += 1) {
-    land[i] = elevation[i] > seaLevel ? 1 : 0;
-    water[i] = land[i] === 1 ? 0 : 1;
-  }
-  enforceOceanEdges(width, height, land);
-  for (let i = 0; i < total; i += 1) {
-    water[i] = land[i] === 1 ? 0 : 1;
-  }
-
-  const { ocean, lake } = floodOcean(width, height, water);
+  const elevation = demCore.demFinal;
+  const seaLevel = demCore.seaLevel;
+  const land = demCore.land;
+  const ocean = demCore.ocean;
+  const lake = demCore.lake;
+  const river = demCore.river;
   const distanceToOcean = bfsDistance(width, height, ocean);
   const distanceToLand = bfsDistance(width, height, land);
 
   const { light, slope } = computeLightAndSlope(width, height, elevation);
-  const flowField = computeFlowField(width, height, elevation);
-  const flow = flowField.flow;
+  const flow = demCore.flowNormalized;
 
   let minElevation = Number.POSITIVE_INFINITY;
   let maxElevation = Number.NEGATIVE_INFINITY;
@@ -1271,7 +1258,6 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   }
 
   const biome = new Uint8Array(total);
-  const river = new Uint8Array(total);
   const temperature = new Float32Array(total);
   const moisture = new Float32Array(total);
   for (let i = 0; i < total; i += 1) {
@@ -1288,8 +1274,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     } else {
       biome[i] = BIOME_INDEX.grassland;
     }
-    if (land[i] === 1 && flow[i] > 0.22 && slope[i] > 0.03) {
-      river[i] = 1;
+    if (river[i] === 1) {
       biome[i] = BIOME_INDEX.river;
     }
     temperature[i] = 0;

@@ -1,5 +1,5 @@
 import type { ContinentControls } from './continent';
-import { conditionHydrology } from './hydrology';
+import { computeFlowFields, conditionHydrology } from './hydrology';
 import { runIncisionDiffusion } from './erosion';
 
 export type DemCoreInput = {
@@ -291,6 +291,146 @@ function edgeOutletMask(width: number, height: number): Uint8Array {
   return mask;
 }
 
+function quantizedThreshold(values: Float32Array, upperRatio: number): number {
+  const bins = 4096;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < values.length; i += 1) {
+    min = Math.min(min, values[i]);
+    max = Math.max(max, values[i]);
+  }
+  const span = Math.max(1e-6, max - min);
+  const histogram = new Uint32Array(bins);
+  for (let i = 0; i < values.length; i += 1) {
+    const q = clamp(Math.floor(((values[i] - min) / span) * (bins - 1)), 0, bins - 1);
+    histogram[q] += 1;
+  }
+  const target = Math.round(clamp01(upperRatio) * values.length);
+  let acc = 0;
+  let cut = bins - 1;
+  for (let b = bins - 1; b >= 0; b -= 1) {
+    acc += histogram[b];
+    if (acc >= target) {
+      cut = b;
+      break;
+    }
+  }
+  return min + (cut / Math.max(1, bins - 1)) * span;
+}
+
+function smoothCoastalBand(
+  width: number,
+  height: number,
+  elevation: Float32Array,
+  seaLevel: number,
+  coastalSmoothing: number,
+): Float32Array {
+  const smooth = (coastalSmoothing - 1) / 9;
+  const passes = 1 + Math.round(smooth * 2);
+  const band = lerp(0.015, 0.08, smooth);
+  let current = elevation.slice();
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next = current.slice();
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const delta = Math.abs(current[index] - seaLevel);
+        if (delta > band) {
+          continue;
+        }
+        const avg = (
+          current[index - 1] +
+          current[index + 1] +
+          current[index - width] +
+          current[index + width]
+        ) * 0.25;
+        const strength = smoothstep(1 - delta / Math.max(1e-6, band)) * (0.04 + smooth * 0.14);
+        next[index] = lerp(current[index], avg, strength);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function floodOcean(width: number, height: number, water: Uint8Array): { ocean: Uint8Array; lake: Uint8Array } {
+  const total = width * height;
+  const ocean = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+
+  const enqueue = (x: number, y: number): void => {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return;
+    }
+    const index = y * width + x;
+    if (water[index] === 0 || ocean[index] === 1) {
+      return;
+    }
+    ocean[index] = 1;
+    queue[tail] = index;
+    tail += 1;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 0; y < height; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (head < tail) {
+    const current = queue[head];
+    head += 1;
+    const x = current % width;
+    const y = Math.floor(current / width);
+    if (x > 0) enqueue(x - 1, y);
+    if (x + 1 < width) enqueue(x + 1, y);
+    if (y > 0) enqueue(x, y - 1);
+    if (y + 1 < height) enqueue(x, y + 1);
+  }
+
+  const lake = new Uint8Array(total);
+  for (let i = 0; i < total; i += 1) {
+    if (water[i] === 1 && ocean[i] === 0) {
+      lake[i] = 1;
+    }
+  }
+  return { ocean, lake };
+}
+
+function buildMasks(
+  width: number,
+  height: number,
+  elevation: Float32Array,
+  seaLevel: number,
+): { land: Uint8Array; water: Uint8Array } {
+  const total = width * height;
+  const land = new Uint8Array(total);
+  const water = new Uint8Array(total);
+  for (let i = 0; i < total; i += 1) {
+    const isLand = elevation[i] > seaLevel ? 1 : 0;
+    land[i] = isLand;
+    water[i] = isLand === 1 ? 0 : 1;
+  }
+  for (let x = 0; x < width; x += 1) {
+    land[x] = 0;
+    land[(height - 1) * width + x] = 0;
+  }
+  for (let y = 0; y < height; y += 1) {
+    land[y * width] = 0;
+    land[y * width + width - 1] = 0;
+  }
+  for (let i = 0; i < total; i += 1) {
+    water[i] = land[i] === 1 ? 0 : 1;
+  }
+  return { land, water };
+}
+
 export function createEmptyDemState(width: number, height: number): DemCoreState {
   const total = width * height;
   return {
@@ -331,11 +471,35 @@ export function generateDemCore(input: DemCoreInput): DemCoreState {
     m: 1.05,
     n: 1.08,
   }, outlets);
+  const landFractionNorm = (input.controls.landFraction - 1) / 9;
+  const targetLand = 0.12 + landFractionNorm * 0.72;
+  const seaLevel = quantizedThreshold(eroded.elevation, targetLand);
+  const demFinal = smoothCoastalBand(
+    input.width,
+    input.height,
+    eroded.elevation,
+    seaLevel,
+    input.controls.coastalSmoothing,
+  );
+  const masks = buildMasks(input.width, input.height, demFinal, seaLevel);
+  const oceanFlood = floodOcean(input.width, input.height, masks.water);
+  const finalFlow = computeFlowFields(input.width, input.height, demFinal, oceanFlood.ocean);
+
+  const river = new Uint8Array(input.width * input.height);
+  const riverThreshold = 0.2 + (1 - landFractionNorm) * 0.05;
+  for (let i = 0; i < river.length; i += 1) {
+    river[i] = masks.land[i] === 1 && finalFlow.flowNorm[i] >= riverThreshold ? 1 : 0;
+  }
   state.demConditioned = conditioned.elevation;
   state.demEroded = eroded.elevation;
-  state.demFinal = eroded.elevation.slice();
-  state.flowDirection = eroded.flow.downstream;
-  state.flowAccumulation = eroded.flow.accumulation;
-  state.flowNormalized = eroded.flow.flowNorm;
+  state.demFinal = demFinal;
+  state.seaLevel = seaLevel;
+  state.land = masks.land;
+  state.ocean = oceanFlood.ocean;
+  state.lake = oceanFlood.lake;
+  state.river = river;
+  state.flowDirection = finalFlow.downstream;
+  state.flowAccumulation = finalFlow.accumulation;
+  state.flowNormalized = finalFlow.flowNorm;
   return state;
 }
