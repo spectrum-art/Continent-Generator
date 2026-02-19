@@ -1,4 +1,5 @@
 import { generateDemCore } from './dem';
+import { buildHillshade } from './hillshade';
 
 export type SizeOption = 'isle' | 'region' | 'subcontinent' | 'supercontinent';
 export type AspectRatioOption = 'wide' | 'landscape' | 'square' | 'portrait' | 'narrow';
@@ -968,83 +969,11 @@ export function computeLightAndSlope(width: number, height: number, elevation01:
   light: Float32Array;
   slope: Float32Array;
 } {
-  const total = width * height;
-  const smooth = elevation01.slice();
-  const scratch = new Float32Array(total);
-  const light = new Float32Array(total);
-  const slope = new Float32Array(total);
-
-  for (let pass = 0; pass < 2; pass += 1) {
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const index = y * width + x;
-        const avg = (
-          smooth[index] * 0.5 +
-          smooth[index - 1] +
-          smooth[index + 1] +
-          smooth[index - width] +
-          smooth[index + width]
-        ) / 4.5;
-        scratch[index] = avg;
-      }
-    }
-    for (let x = 0; x < width; x += 1) {
-      scratch[x] = smooth[x];
-      scratch[(height - 1) * width + x] = smooth[(height - 1) * width + x];
-    }
-    for (let y = 0; y < height; y += 1) {
-      scratch[y * width] = smooth[y * width];
-      scratch[y * width + width - 1] = smooth[y * width + width - 1];
-    }
-    smooth.set(scratch);
-  }
-
-  let minElevation = Number.POSITIVE_INFINITY;
-  let maxElevation = Number.NEGATIVE_INFINITY;
-  for (let i = 0; i < smooth.length; i += 1) {
-    minElevation = Math.min(minElevation, smooth[i]);
-    maxElevation = Math.max(maxElevation, smooth[i]);
-  }
-  const reliefSpan = Math.max(1e-6, maxElevation - minElevation);
-  const normalScale = 4.6 / reliefSpan;
-  const slopeScale = 3.4 / reliefSpan;
-
-  const lx = -1;
-  const ly = -1;
-  const lz = 1;
-  const lLen = Math.hypot(lx, ly, lz) || 1;
-  const lnx = lx / lLen;
-  const lny = ly / lLen;
-  const lnz = lz / lLen;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const xl = Math.max(0, x - 1);
-      const xr = Math.min(width - 1, x + 1);
-      const yu = Math.max(0, y - 1);
-      const yd = Math.min(height - 1, y + 1);
-
-      const dzdx = (smooth[y * width + xr] - smooth[y * width + xl]) * 0.5;
-      const dzdy = (smooth[yd * width + x] - smooth[yu * width + x]) * 0.5;
-      const nx = -dzdx * normalScale;
-      const ny = -dzdy * normalScale;
-      const nz = 1;
-      const nLen = Math.hypot(nx, ny, nz) || 1;
-      const nnx = nx / nLen;
-      const nny = ny / nLen;
-      const nnz = nz / nLen;
-
-      const lambert = Math.max(0, nnx * lnx + nny * lny + nnz * lnz);
-      const ambient = 0.31;
-      const diffuse = 0.69 * lambert;
-      const value = clamp01(ambient + diffuse);
-      const index = y * width + x;
-      light[index] = clamp01(Math.pow(value, 0.92));
-      slope[index] = clamp01(Math.hypot(dzdx, dzdy) * slopeScale);
-    }
-  }
-
-  return { light, slope };
+  const shaded = buildHillshade(width, height, elevation01);
+  return {
+    light: shaded.light,
+    slope: shaded.slope,
+  };
 }
 
 function checksumFloatArray(values: Float32Array): number {
@@ -1239,7 +1168,9 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const distanceToOcean = bfsDistance(width, height, ocean);
   const distanceToLand = bfsDistance(width, height, land);
 
-  const { light, slope } = computeLightAndSlope(width, height, elevation);
+  const shade = buildHillshade(width, height, elevation, ocean);
+  const light = shade.light;
+  const slope = shade.slope;
   const flow = demCore.flowNormalized;
 
   let minElevation = Number.POSITIVE_INFINITY;
@@ -1406,23 +1337,15 @@ export function buildNormalRgba(
   outputHeight = map.height,
 ): Uint8ClampedArray {
   const rgba = new Uint8ClampedArray(outputWidth * outputHeight * 4);
+  const normals = buildHillshade(map.width, map.height, map.elevation, map.ocean);
   for (let y = 0; y < outputHeight; y += 1) {
     const sy = Math.min(map.height - 1, Math.floor((y / Math.max(1, outputHeight - 1)) * (map.height - 1)));
     for (let x = 0; x < outputWidth; x += 1) {
       const sx = Math.min(map.width - 1, Math.floor((x / Math.max(1, outputWidth - 1)) * (map.width - 1)));
-      const xl = Math.max(0, sx - 1);
-      const xr = Math.min(map.width - 1, sx + 1);
-      const yu = Math.max(0, sy - 1);
-      const yd = Math.min(map.height - 1, sy + 1);
-      const dzdx = (map.elevation[sy * map.width + xr] - map.elevation[sy * map.width + xl]) * 0.5;
-      const dzdy = (map.elevation[yd * map.width + sx] - map.elevation[yu * map.width + sx]) * 0.5;
-      const nx = -dzdx * 5;
-      const ny = -dzdy * 5;
-      const nz = 1;
-      const len = Math.hypot(nx, ny, nz) || 1;
-      const rx = clamp(Math.round(((nx / len) * 0.5 + 0.5) * 255), 0, 255);
-      const gy = clamp(Math.round(((ny / len) * 0.5 + 0.5) * 255), 0, 255);
-      const bz = clamp(Math.round(((nz / len) * 0.5 + 0.5) * 255), 0, 255);
+      const index = sy * map.width + sx;
+      const rx = clamp(Math.round((normals.normalX[index] * 0.5 + 0.5) * 255), 0, 255);
+      const gy = clamp(Math.round((normals.normalY[index] * 0.5 + 0.5) * 255), 0, 255);
+      const bz = clamp(Math.round((normals.normalZ[index] * 0.5 + 0.5) * 255), 0, 255);
       const out = (y * outputWidth + x) * 4;
       rgba[out] = rx;
       rgba[out + 1] = gy;
