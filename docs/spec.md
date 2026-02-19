@@ -1,31 +1,25 @@
 # Map Explorer Spec
 
-## Milestone 19: Structure-First Orogeny + Basin Graph
+## Milestone 20: Structural Raster Bug Fixes + Ridge De-Tubing
 
 ## Scope
 - Deterministic bounded continent generator (case-insensitive seed normalization).
-- DEM-first terrain core rebuilt around explicit structural objects:
-  - plate partition
-  - boundary extraction/classification
-  - convergent belts
-  - crestline ridge graph
-  - basin/valley graph
-  - structural rasterization + erosion
+- Preserve MS19 structure-first core and remove visible structural artifacts:
+  - blocky/axis-aligned coastline raster artifacts
+  - tube-like uniform ridge glows
+  - symmetric junction hub signatures
 - No new user-facing UI controls.
 
-## Generation Pipeline (MS19)
-1. Voronoi-like plate partition over the map and plate motion vectors.
-2. Boundary extraction and classification into convergent/divergent/transform.
-3. Convergent belt construction from boundary geometry.
-4. Crestline graph construction with primary spines and controlled branching.
-5. Ridge hierarchy expansion (primary/secondary/tertiary edges).
-6. Basin graph construction (trunk valleys + tributaries + edge outlets).
-7. DEM rasterization from graph primitives:
-  - positive ridge contributions
-  - negative valley contributions
-  - low-amplitude fine noise only after structure
-8. Structural erosion (6–10 passes) driven by flow accumulation and basin-field bias.
-9. Sea level cut after erosion; hillshade from full DEM gradient with NW lighting.
+## MS20 Terrain Updates
+1. Land/coast shape uses authoritative continuous `landPotential` at the final map resolution.
+2. Sea-level target may be solved against `landPotential` and then refined by coast-elevation smoothing.
+3. Crestline rasterization now varies along edge arc length:
+  - variable amplitude with massif/saddle envelopes
+  - variable width with independent low-frequency modulation
+  - asymmetric cross-section via coherent side bias
+  - non-Gaussian profile blend to avoid uniform tube glow
+4. Junction suppression keeps continuity through nodes and downgrades branch-like spokes.
+5. Structural diagnostics are emitted from generator internals for realism gates.
 
 ## Outputs
 - `buildElevationRgba`: grayscale DEM render.
@@ -37,12 +31,19 @@
   - `hillshade.png`
   - `metrics.json`
 
-## Realism Gates (MS19)
-Fewer, stronger structural gates:
-- crestline continuity
-- ridge anisotropy
-- basin depth separation
-- no-blob rejection
+## Realism Gates (MS20)
+Programmatic gates (arrays/graphs only):
+- coastline orthogonality:
+  - axis-aligned boundary orientation ratio
+  - longest axis-aligned coastline run ratio
+- ridge tube-ness:
+  - ridge width coefficient-of-variation
+  - ridge amplitude coefficient-of-variation
+- junction symmetry:
+  - high-degree node count (strong edges only)
+  - degree-3 angle symmetry score
+- resolution consistency:
+  - authoritative field dimensions and valid structural diagnostics
 
 `evaluateDemRealism()` returns gate booleans + reasons and is used by tests and snapshot reporting.
 
