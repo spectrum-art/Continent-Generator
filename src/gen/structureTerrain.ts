@@ -447,8 +447,30 @@ function buildConvergentBelts(
       continue;
     }
 
-    const smooth = smoothPolyline(sampled, 2);
-    const widthCells = clamp(Math.min(width, height) * (0.05 + reliefNorm * 0.1), Math.min(width, height) * 0.04, Math.min(width, height) * 0.16);
+    const ordered: Array<{ x: number; y: number }> = [sampled[0]];
+    const remaining = sampled.slice(1);
+    while (remaining.length > 0) {
+      const tail = ordered[ordered.length - 1];
+      let best = 0;
+      let bestD = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < remaining.length; i += 1) {
+        const p = remaining[i];
+        const d = (p.x - tail.x) * (p.x - tail.x) + (p.y - tail.y) * (p.y - tail.y);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      ordered.push(remaining[best]);
+      remaining.splice(best, 1);
+    }
+
+    const smooth = smoothPolyline(ordered, 2);
+    const widthCells = clamp(
+      Math.min(width, height) * (0.05 + reliefNorm * 0.1),
+      Math.min(width, height) * 0.05,
+      Math.min(width, height) * 0.15,
+    );
     let strengthSum = 0;
     for (const s of segments) {
       strengthSum += s.compression;
