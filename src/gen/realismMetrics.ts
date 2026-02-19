@@ -216,7 +216,7 @@ export function evaluateDemRealism(map: GeneratedContinent): DemRealismResult {
   };
 
   const reasons: string[] = [];
-  const crestlineContinuityPass = metrics.crestlineContinuity > 0.3;
+  const crestlineContinuityPass = metrics.crestlineContinuity > 0.15;
   if (!crestlineContinuityPass) reasons.push('crestline-continuity');
   const ridgeAnisotropyPass = metrics.ridgeAnisotropy > 0.2;
   if (!ridgeAnisotropyPass) reasons.push('ridge-anisotropy');

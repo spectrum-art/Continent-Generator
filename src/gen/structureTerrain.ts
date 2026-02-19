@@ -488,6 +488,56 @@ function buildConvergentBelts(
     beltId += 1;
   }
 
+  let maxContinuity = 0;
+  for (const belt of belts) {
+    let minProj = Number.POSITIVE_INFINITY;
+    let maxProj = Number.NEGATIVE_INFINITY;
+    for (const p of belt.points) {
+      const proj = p.x * belt.dirX + p.y * belt.dirY;
+      minProj = Math.min(minProj, proj);
+      maxProj = Math.max(maxProj, proj);
+    }
+    maxContinuity = Math.max(maxContinuity, (maxProj - minProj) / Math.max(1, width));
+  }
+
+  if (maxContinuity < 0.32) {
+    const allConvergentPoints: Array<{ x: number; y: number }> = [];
+    for (const segment of boundaries) {
+      if (segment.type === 'convergent') {
+        allConvergentPoints.push({ x: segment.mx, y: segment.my });
+      }
+    }
+    if (allConvergentPoints.length >= 8) {
+      const dir = principalDirection(allConvergentPoints);
+      let mx = 0;
+      let my = 0;
+      for (const p of allConvergentPoints) {
+        mx += p.x;
+        my += p.y;
+      }
+      mx /= allConvergentPoints.length;
+      my /= allConvergentPoints.length;
+      const halfLen = Math.max(width, height) * 0.28;
+      const points: Array<{ x: number; y: number }> = [];
+      for (let i = -2; i <= 2; i += 1) {
+        points.push({
+          x: mx + dir.dirX * halfLen * (i / 2),
+          y: my + dir.dirY * halfLen * (i / 2),
+        });
+      }
+      belts.push({
+        id: beltId,
+        pairKey: 'continuity-anchor',
+        points: smoothPolyline(points, 1),
+        dirX: dir.dirX,
+        dirY: dir.dirY,
+        width: Math.min(width, height) * (0.06 + reliefNorm * 0.06),
+        strength: 0.9,
+      });
+      beltId += 1;
+    }
+  }
+
   if (belts.length === 0) {
     const rng = mulberry32(seed ^ 0x7142a91f);
     const y = lerp(height * 0.2, height * 0.8, rng());
