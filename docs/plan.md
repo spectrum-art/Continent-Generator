@@ -1,26 +1,17 @@
 # Map Explorer Plan
 
-## Milestone 17: Continuous-Field Terrain Refactor + Self-Evaluating Realism Gates
+## Milestone 18 Checkpoints
 
-- [x] `ms17: snapshot harness v2 + structural metrics (baseline)`
-- [x] `ms17: continuous macro elevation refactor`
-- [x] `ms17: global stress/orientation field`
-- [x] `ms17: anisotropic ridge synthesis`
-- [x] `ms17: valley/erosion feedback (lightweight)`
-- [x] `ms17: basin-driven hydrology + trunk rivers`
-- [x] `ms17: global hillshade rewrite (no wedges)`
-- [x] `ms17: rectangle mitigation via continuous warps`
-- [x] `ms17: tests + docs + perf sanity`
+- [x] `ms18: remove legacy elevation pipeline`
+- [x] `ms18: macro uplift field`
+- [x] `ms18: anisotropic ridge synthesis`
+- [x] `ms18: erosion-first valley pass`
+- [x] `ms18: dem export + normal map`
+- [x] `ms18: hillshade rewrite`
+- [x] `ms18: realism gates`
+- [x] `ms18: docs + perf sanity`
 
-## Completed Work
-- [x] Added deterministic snapshot case matrix and PNG montage output.
-- [x] Added image-derived artifact detectors for wedges, radial ridge patterns, silhouette boxiness, and river hierarchy.
-- [x] Refactored macro elevation away from nearest/second plate partitioning to continuous weighted fields.
-- [x] Introduced smoothed global stress/orientation vector field for ridge direction control.
-- [x] Upgraded ridge synthesis to anisotropic branch/spine structure.
-- [x] Added lightweight flow-feedback valley pass prior to final hydrology routing.
-- [x] Enforced Region+ trunk river guarantees with inland basin targeting.
-- [x] Rewrote hillshade to full-field smoothed gradients with NW lighting.
-- [x] Added seeded core warps to reduce high-land rectangular silhouettes.
-- [x] Kept deterministic behavior, tests green, and build green.
-- [x] Snapshot realism gate matrix currently passes all configured cases (`12/12`).
+## Validation Checklist
+- [x] `npm test`
+- [x] `npm run build`
+- [x] `npm run snapshot`

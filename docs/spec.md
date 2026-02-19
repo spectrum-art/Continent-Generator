@@ -1,85 +1,47 @@
 # Map Explorer Spec
 
-## Milestone 17: Continuous-Field Terrain + Self-Evaluating Realism Gates
+## Milestone 18: DEM-First Geological Rebuild
 
-## Scope
-- Deterministic bounded continent generator (seed + controls, case-insensitive seed normalization).
-- Terrain refactor uses continuous global fields, not stitched regional/sector plate partitions.
-- No new user-facing controls added.
-- NW directional lighting remains fixed.
-- Realism is enforced by automated gates from generated snapshots and image-derived metrics.
+## Product Focus
+- Single bounded continent artifact driven by deterministic controls.
+- Terrain core is DEM-first: geology and erosion produce elevation; hillshade is derived from DEM.
+- Non-core systems (biomes/rivers/gameplay scaffolding) are de-emphasized for this milestone.
 
-## Continuous-Field Pipeline (MS17)
-1. Build plate set and sample a continuous plate influence field (weighted kernels).
-2. Synthesize macro elevation from:
-- continuous uplift
-- macro basin/slope field
-- continuous warped continental frame + seeded land cores
-3. Build a global stress/orientation vector field (continuous, smoothed).
-4. Run anisotropic ridge synthesis aligned to stress direction.
-5. Apply lightweight flow-feedback valley carving (1 pass + recompute).
-6. Hydrology:
-- basin/inland-biased sources
-- trunk + tributary routing
-- fallback source pass
-- trunk enforcement for Region+ where land supports it
-7. River incision in two passes with flow recompute between passes.
-8. Global hillshade:
-- full-field smoothing
-- central-difference gradients
-- NW Lambert + ambient lighting
-9. Biome classification from climate + elevation + hydrology.
+## DEM Pipeline (MS18)
+1. Generate macro tectonic domains (`convergent`, `divergent`, `craton`, `transform`) and blend into one continuous uplift field.
+2. Apply macro shape and edge-ocean control directly in elevation space (no binary mask sculpting).
+3. Derive continuous stress orientation from uplift gradients.
+4. Synthesize anisotropic ridge detail aligned with the stress field (multi-band ridged noise).
+5. Run erosion-first valley carving using flow accumulation feedback (2 lightweight passes).
+6. Normalize DEM, solve sea level from Land Fraction, and apply coastal smoothing near sea level.
+7. Compute global hillshade from full-field central-difference normals with fixed NW lighting.
 
-## Snapshot Harness V2
-- Command: `npm run snapshot`
-- Output directory: `artifacts/ms17/<run-id>/`
-- Files:
-- `case_<name>.png` (triptych: full map + mountain crop + interior river/plains crop)
-- `montage.png` (matrix of all case triptychs)
-- `metrics.json` (per-case structural metrics + gate outcomes)
-- `critique.txt` (run summary + failing gate reasons)
+## Outputs
+- Renderer uses DEM-derived grayscale hillshade (`buildAtlasRgba`).
+- Snapshot command (`npm run snapshot`) writes:
+  - `dem.png`
+  - `normal.png`
+  - `hillshade.png`
+  - `metrics.json`
 
-## Structural Metrics + Gates
-- Wedge detector:
-- dominant orientation share
-- low-frequency orientation share
-- radial/tangential convergence
-- ring jump p95
-- Radial ridge detector:
-- mountain high-pass orientation radial alignment
-- periodic peak share
-- Rectangular silhouette detector:
-- coastline axis-aligned normal score
-- bbox fill ratio
-- coastline cardinal bias
-- River hierarchy detector:
-- inland ratio
-- coastal clustering ratio
-- max connected river component
-- inland source count
+## Realism Gates
+`evaluateDemRealism()` computes and gates:
+- radial symmetry rejection
+- ridge anisotropy
+- valley depth variance
+- curvature cluster separation
+- silhouette angular bias
+- seam discontinuity
+- hillshade wedge concentration
 
-Gate status is aggregated as:
-- `wedgesPass`
-- `radialPass`
-- `rectanglePass`
-- `riverPass`
-- `pass` (all above true)
+`npm run snapshot` returns non-zero when any case fails the gate set.
 
-## Current MS17 Snapshot Result
-- Latest run matrix: `12` cases
-- Result: `pass=12`, `fail=0`
+## Determinism + Identity
+- Seed normalization is case-insensitive.
+- Identity hash remains deterministic for same controls.
+- Import/export compact string round-trips preserve identity hash.
 
-## Determinism
-- Deterministic across:
-- terrain generation
-- realism metrics
-- snapshot case matrix + outputs for same code/inputs
-- Export/import controls still preserve map identity hash.
-
-## Performance Sanity (Local Probe)
-- Single generation pass timings (`vite-node`):
-- `isle/square/lf4`: ~`1295ms`
-- `region/landscape/lf5`: ~`2824ms`
-- `supercontinent/landscape/lf7`: ~`6171ms`
-
-MS17 prioritizes realism correctness and artifact elimination while keeping generation performance in a stable range.
+## Performance Notes
+- Expensive macro field generation runs at a reduced base grid and is upsampled.
+- Erosion uses limited iterations (2) for predictable runtime.
+- Build/test/snapshot remain part of milestone gates.
