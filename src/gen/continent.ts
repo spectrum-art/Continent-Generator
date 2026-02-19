@@ -1229,7 +1229,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const landFractionNorm = (controls.landFraction - 1) / 9;
   const structural = generateStructuralTerrain(width, height, seed, controls);
   const elevation = structural.elevation;
-  const seaLevel = seaLevelForLandFraction(elevation, landFractionNorm);
+  const seaLevel = seaLevelForLandFraction(elevation, landFractionNorm, structural.landPotential);
   smoothCoastFromElevation(width, height, elevation, seaLevel, controls.coastalSmoothing);
 
   const land = new Uint8Array(total);

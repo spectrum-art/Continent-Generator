@@ -76,6 +76,7 @@ export type StructuralTerrainResult = {
   elevation: Float32Array;
   ridge: Float32Array;
   flow: Float32Array;
+  landPotential: Float32Array;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -188,6 +189,12 @@ function quantizedThreshold(values: Float32Array, targetUpperRatio: number): num
     }
   }
   return min + (cut / Math.max(1, bins - 1)) * span;
+}
+
+function assertFieldSize(name: string, array: { length: number }, width: number, height: number): void {
+  if (array.length !== width * height) {
+    throw new Error(`${name} has invalid length ${array.length} for ${width}x${height}`);
+  }
 }
 
 function distanceToSegmentSquared(
@@ -854,6 +861,7 @@ function rasterizeStructuralDem(
   const elevation = new Float32Array(width * height);
   const ridgeField = new Float32Array(width * height);
   const basinField = new Float32Array(width * height);
+  const landPotential = new Float32Array(width * height);
   const aspect = width / Math.max(1, height);
 
   for (let y = 0; y < height; y += 1) {
@@ -866,6 +874,9 @@ function rasterizeStructuralDem(
       const edgeDist = Math.min(nx, 1 - nx, ny, 1 - ny);
       const continentMask = 1 - smoothstep((radius - (0.36 + landFractionNorm * 0.24)) / 0.27);
       const edgeOcean = smoothstep((edgeDist - 0.01) / (0.13 + landFractionNorm * 0.06));
+      const coastNoise = (fbm(seed ^ 0x41dd93e7, nx * 1.9, ny * 1.9, 3, 0.56, 2.05) - 0.5) * 0.16;
+      const macroLand = continentMask * edgeOcean + coastNoise;
+      landPotential[y * width + x] = macroLand;
       const baseMacro = (fbm(seed ^ 0x2f9d31a5, nx * 1.4, ny * 1.4, 3, 0.57, 2.0) - 0.5) * 0.08;
       const baseRegional = (fbm(seed ^ 0x9c7d52ab, nx * 3.1, ny * 3.1, 2, 0.56, 2.1) - 0.5) * 0.05;
       const base = -0.6 + continentMask * (0.82 + landFractionNorm * 0.54) * edgeOcean + baseMacro + baseRegional;
@@ -880,6 +891,7 @@ function rasterizeStructuralDem(
       const a = belt.points[i];
       const b = belt.points[i + 1];
       applySegmentGaussian(elevation, width, height, a.x, a.y, b.x, b.y, upliftAmp, sigma);
+      applySegmentGaussian(landPotential, width, height, a.x, a.y, b.x, b.y, 0.18 + upliftAmp * 0.24, sigma * 0.75);
     }
   }
 
@@ -952,7 +964,24 @@ function rasterizeStructuralDem(
     basinField[i] = clamp01(basinField[i] / basinMax);
   }
 
-  return { elevation, ridgeField, basinField };
+  const smoothBuffer = landPotential.slice();
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        smoothBuffer[index] = (
+          landPotential[index] * 0.45 +
+          landPotential[index - 1] +
+          landPotential[index + 1] +
+          landPotential[index - width] +
+          landPotential[index + width]
+        ) / 4.45;
+      }
+    }
+    landPotential.set(smoothBuffer);
+  }
+
+  return { elevation, ridgeField, basinField, landPotential };
 }
 
 function computeFlowAccumulation(width: number, height: number, elevation: Float32Array): {
@@ -1074,9 +1103,13 @@ function applyStructuralErosion(
   return flowNorm;
 }
 
-export function seaLevelForLandFraction(elevation: Float32Array, landFractionNorm: number): number {
+export function seaLevelForLandFraction(
+  elevation: Float32Array,
+  landFractionNorm: number,
+  landPotential?: Float32Array,
+): number {
   const targetLand = clamp(0.12 + landFractionNorm * 0.7, 0.08, 0.86);
-  return quantizedThreshold(elevation, targetLand);
+  return quantizedThreshold(landPotential ?? elevation, targetLand);
 }
 
 export function smoothCoastFromElevation(
@@ -1087,46 +1120,102 @@ export function smoothCoastFromElevation(
   smoothing: number,
 ): void {
   const smooth = (smoothing - 1) / 9;
-  const passes = clamp(Math.round(1 + smooth * 3), 1, 4);
+  const total = width * height;
+  const isLand = new Uint8Array(total);
+  for (let i = 0; i < total; i += 1) {
+    isLand[i] = elevation[i] > seaLevel ? 1 : 0;
+  }
+
+  const distToLand = new Uint16Array(total);
+  const distToWater = new Uint16Array(total);
+  distToLand.fill(0xffff);
+  distToWater.fill(0xffff);
+  const queue = new Int32Array(total);
+
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < total; i += 1) {
+    if (isLand[i] === 1) {
+      distToLand[i] = 0;
+      queue[tail] = i;
+      tail += 1;
+    }
+  }
+  while (head < tail) {
+    const current = queue[head];
+    head += 1;
+    const x = current % width;
+    const y = Math.floor(current / width);
+    const nextDistance = distToLand[current] + 1;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const ni = ny * width + nx;
+        if (distToLand[ni] <= nextDistance) continue;
+        distToLand[ni] = nextDistance;
+        queue[tail] = ni;
+        tail += 1;
+      }
+    }
+  }
+
+  head = 0;
+  tail = 0;
+  for (let i = 0; i < total; i += 1) {
+    if (isLand[i] === 0) {
+      distToWater[i] = 0;
+      queue[tail] = i;
+      tail += 1;
+    }
+  }
+  while (head < tail) {
+    const current = queue[head];
+    head += 1;
+    const x = current % width;
+    const y = Math.floor(current / width);
+    const nextDistance = distToWater[current] + 1;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const ni = ny * width + nx;
+        if (distToWater[ni] <= nextDistance) continue;
+        distToWater[ni] = nextDistance;
+        queue[tail] = ni;
+        tail += 1;
+      }
+    }
+  }
 
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
-  for (let i = 0; i < elevation.length; i += 1) {
+  for (let i = 0; i < total; i += 1) {
     min = Math.min(min, elevation[i]);
     max = Math.max(max, elevation[i]);
   }
   const span = Math.max(1e-6, max - min);
-  const band = lerp(span * 0.03, span * 0.11, smooth);
+  const band = lerp(2, 7, smooth);
+  const strengthScale = 0.05 + smooth * 0.2;
 
-  let current = elevation.slice();
-  for (let pass = 0; pass < passes; pass += 1) {
-    const next = current.slice();
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const index = y * width + x;
-        const distance = Math.abs(current[index] - seaLevel);
-        if (distance > band) {
-          continue;
-        }
-        const avg = (
-          current[index - 1] +
-          current[index + 1] +
-          current[index - width] +
-          current[index + width] +
-          current[index - width - 1] +
-          current[index - width + 1] +
-          current[index + width - 1] +
-          current[index + width + 1]
-        ) / 8;
-        const t = 1 - distance / Math.max(1e-6, band);
-        const strength = smoothstep(t) * (0.06 + smooth * 0.22);
-        next[index] = lerp(current[index], avg, strength);
-      }
+  const next = elevation.slice();
+  for (let i = 0; i < total; i += 1) {
+    const signedDistance = isLand[i] === 1 ? distToWater[i] : -distToLand[i];
+    const ad = Math.abs(signedDistance);
+    if (ad > band) {
+      continue;
     }
-    current = next;
+    const t = 1 - ad / Math.max(1e-6, band);
+    const blend = smoothstep(t) * strengthScale;
+    const target = seaLevel + (signedDistance / Math.max(1, band)) * (span * 0.06);
+    next[i] = lerp(elevation[i], target, blend);
   }
 
-  elevation.set(current);
+  elevation.set(next);
 }
 
 export function generateStructuralTerrain(
@@ -1161,9 +1250,15 @@ export function generateStructuralTerrain(
 
   const flow = applyStructuralErosion(width, height, raster.elevation, raster.basinField, reliefNorm);
 
+  assertFieldSize('elevation', raster.elevation, width, height);
+  assertFieldSize('ridge', raster.ridgeField, width, height);
+  assertFieldSize('flow', flow, width, height);
+  assertFieldSize('landPotential', raster.landPotential, width, height);
+
   return {
     elevation: raster.elevation,
     ridge: raster.ridgeField,
     flow,
+    landPotential: raster.landPotential,
   };
 }
