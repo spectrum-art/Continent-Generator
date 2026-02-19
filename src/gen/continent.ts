@@ -525,11 +525,11 @@ function buildMacroUplift(
         const along = dx * d.dirX + dy * d.dirY;
         const perp = -dx * d.dirY + dy * d.dirX;
         const dist2 = dx * dx + dy * dy;
-        const w = Math.exp(-dist2 * (8.5 + fragNorm * 4.2));
+        const w = Math.exp(-dist2 * (8.1 + fragNorm * 4.6));
 
         let local = 0;
         if (d.type === 'convergent') {
-          const belt = Math.exp(-(perp * perp) * (18 + reliefNorm * 22));
+          const belt = Math.exp(-(perp * perp) * (16 + reliefNorm * 24));
           const chain = ridgedFbm(seed ^ (i * 7919), along * 4.6, perp * 2.8, 3, 0.58, 2.08);
           local = belt * (0.45 + chain * 0.9);
         } else if (d.type === 'divergent') {
