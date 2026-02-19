@@ -430,6 +430,10 @@ function smoothPolyline(points: Array<{ x: number; y: number }>, passes: number)
   return out;
 }
 
+function pointEdgeDistance(x: number, y: number, width: number, height: number): number {
+  return Math.min(x, y, width - 1 - x, height - 1 - y);
+}
+
 function buildConvergentBelts(
   width: number,
   height: number,
@@ -503,7 +507,21 @@ function buildConvergentBelts(
       remaining.splice(best, 1);
     }
 
-    const smooth = smoothPolyline(ordered, 2);
+    let smooth = smoothPolyline(ordered, 2);
+    if (smooth.length >= 2) {
+      const first = smooth[0];
+      const last = smooth[smooth.length - 1];
+      const edgeFirst = pointEdgeDistance(first.x, first.y, width, height);
+      const edgeLast = pointEdgeDistance(last.x, last.y, width, height);
+      const extendLen = Math.min(width, height) * 0.08;
+      if (edgeFirst > extendLen) {
+        smooth = [{ x: first.x - dir.dirX * extendLen, y: first.y - dir.dirY * extendLen }, ...smooth];
+      }
+      if (edgeLast > extendLen) {
+        smooth = [...smooth, { x: last.x + dir.dirX * extendLen, y: last.y + dir.dirY * extendLen }];
+      }
+      smooth = smoothPolyline(smooth, 1);
+    }
     const widthCells = clamp(
       Math.min(width, height) * (0.05 + reliefNorm * 0.1),
       Math.min(width, height) * 0.05,
@@ -644,12 +662,15 @@ function buildRidgeGraph(
 
     const primaryAmplitude = (0.48 + reliefNorm * 0.52 + peakNorm * 0.4) * (0.8 + belt.strength * 0.6);
     for (let i = 0; i < beltNodeIds.length - 1; i += 1) {
+      const t = (i + 0.5) / Math.max(1, beltNodeIds.length - 1);
+      const endBlend = Math.min(t, 1 - t);
+      const taper = 0.25 + 0.75 * smoothstep(endBlend / 0.24);
       primaryEdges.push({
         a: beltNodeIds[i],
         b: beltNodeIds[i + 1],
         level: 0,
         width: belt.width * 0.56,
-        amplitude: primaryAmplitude,
+        amplitude: primaryAmplitude * taper,
       });
       linkDegree(beltNodeIds[i], beltNodeIds[i + 1]);
     }
@@ -751,6 +772,59 @@ function buildRidgeGraph(
           linkDegree(parent, child);
           parent = child;
         }
+      }
+    }
+  }
+
+  const allEdges: RidgeEdge[] = [...primaryEdges, ...secondaryEdges, ...tertiaryEdges];
+  const edgeDegree = new Array(nodes.length).fill(0).map(() => [] as number[]);
+  for (let i = 0; i < allEdges.length; i += 1) {
+    const e = allEdges[i];
+    edgeDegree[e.a].push(i);
+    edgeDegree[e.b].push(i);
+  }
+
+  const directionAtNode = (edge: RidgeEdge, nodeId: number): { x: number; y: number } => {
+    const from = nodes[nodeId];
+    const other = nodes[edge.a === nodeId ? edge.b : edge.a];
+    const dx = other.x - from.x;
+    const dy = other.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: dx / len, y: dy / len };
+  };
+
+  for (let nodeId = 0; nodeId < edgeDegree.length; nodeId += 1) {
+    const incident = edgeDegree[nodeId];
+    if (incident.length < 3) {
+      continue;
+    }
+    let bestI = -1;
+    let bestJ = -1;
+    let bestAlign = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < incident.length; i += 1) {
+      for (let j = i + 1; j < incident.length; j += 1) {
+        const vi = directionAtNode(allEdges[incident[i]], nodeId);
+        const vj = directionAtNode(allEdges[incident[j]], nodeId);
+        const align = Math.abs(vi.x * vj.x + vi.y * vj.y + 1);
+        if (align < bestAlign) {
+          bestAlign = align;
+          bestI = incident[i];
+          bestJ = incident[j];
+        }
+      }
+    }
+    const keep = new Set<number>(bestI >= 0 ? [bestI, bestJ] : []);
+    for (const edgeIndex of incident) {
+      if (keep.has(edgeIndex)) {
+        continue;
+      }
+      const e = allEdges[edgeIndex];
+      if (incident.length > 3) {
+        e.amplitude *= 0.14;
+        e.width *= 0.58;
+      } else {
+        e.amplitude *= 0.42;
+        e.width *= 0.78;
       }
     }
   }
