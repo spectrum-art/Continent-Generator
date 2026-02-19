@@ -1,4 +1,5 @@
 import type { ContinentControls } from './continent';
+import { computeFlowFields, conditionHydrology } from './hydrology';
 
 export type DemCoreInput = {
   width: number;
@@ -297,8 +298,13 @@ export function createEmptyDemState(width: number, height: number): DemCoreState
 export function generateDemCore(input: DemCoreInput): DemCoreState {
   const state = createEmptyDemState(input.width, input.height);
   state.demBase = buildMacroDem(input);
-  state.demConditioned = state.demBase.slice();
-  state.demEroded = state.demBase.slice();
-  state.demFinal = state.demBase.slice();
+  const conditioned = conditionHydrology(input.width, input.height, state.demBase, 'drain-mostly');
+  const flow = computeFlowFields(input.width, input.height, conditioned.elevation);
+  state.demConditioned = conditioned.elevation;
+  state.demEroded = conditioned.elevation.slice();
+  state.demFinal = conditioned.elevation.slice();
+  state.flowDirection = flow.downstream;
+  state.flowAccumulation = flow.accumulation;
+  state.flowNormalized = flow.flowNorm;
   return state;
 }
