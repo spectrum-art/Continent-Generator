@@ -1016,8 +1016,8 @@ export function computeLightAndSlope(width: number, height: number, elevation01:
       const nnz = nz / nLen;
 
       const lambert = Math.max(0, nnx * lnx + nny * lny + nnz * lnz);
-      const ambient = 0.34;
-      const diffuse = 0.66 * lambert;
+      const ambient = 0.31;
+      const diffuse = 0.69 * lambert;
       const value = clamp01(ambient + diffuse);
       const index = y * width + x;
       light[index] = clamp01(Math.pow(value, 0.92));
