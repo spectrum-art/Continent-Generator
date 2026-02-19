@@ -115,25 +115,39 @@ function ridgeAnisotropyFromMask(mask: Uint8Array, width: number, height: number
 }
 
 function basinDepthSeparation(map: GeneratedContinent): number {
-  const ridges: number[] = [];
-  const valleys: number[] = [];
-
+  const landElev: number[] = [];
+  const landRidge: number[] = [];
+  const landFlow: number[] = [];
   for (let i = 0; i < map.elevation.length; i += 1) {
-    if (map.land[i] === 0) {
-      continue;
-    }
-    if (map.ridge[i] > 0.62) {
-      ridges.push(map.elevation[i]);
-    }
-    if (map.flow[i] > 0.58) {
-      valleys.push(map.elevation[i]);
-    }
+    if (map.land[i] === 0) continue;
+    landElev.push(map.elevation[i]);
+    landRidge.push(map.ridge[i]);
+    landFlow.push(map.flow[i]);
   }
-  if (ridges.length < 20 || valleys.length < 20) {
+
+  if (landElev.length < 30) {
     return 0;
   }
-  const ridgeHigh = percentile(ridges, 0.82);
-  const valleyLow = percentile(valleys, 0.22);
+
+  const ridgeCut = percentile(landRidge, 0.86);
+  const valleyCut = percentile(landFlow, 0.78);
+
+  const ridges: number[] = [];
+  const valleys: number[] = [];
+  for (let i = 0; i < map.elevation.length; i += 1) {
+    if (map.land[i] === 0) continue;
+    if (map.ridge[i] >= ridgeCut) ridges.push(map.elevation[i]);
+    if (map.flow[i] >= valleyCut) valleys.push(map.elevation[i]);
+  }
+
+  if (ridges.length < 12) {
+    return 0;
+  }
+  if (valleys.length < 12) {
+    valleys.push(...landElev);
+  }
+  const ridgeHigh = percentile(ridges, 0.7);
+  const valleyLow = percentile(valleys, valleys.length === landElev.length ? 0.12 : 0.28);
   return ridgeHigh - valleyLow;
 }
 
@@ -204,8 +218,13 @@ export type DemRealismResult = {
 
 export function evaluateDemRealism(map: GeneratedContinent): DemRealismResult {
   const ridgeMask = new Uint8Array(map.ridge.length);
+  const ridgeLandValues: number[] = [];
   for (let i = 0; i < map.ridge.length; i += 1) {
-    ridgeMask[i] = map.ridge[i] > 0.62 ? 1 : 0;
+    if (map.land[i] === 1) ridgeLandValues.push(map.ridge[i]);
+  }
+  const ridgeCut = ridgeLandValues.length > 0 ? percentile(ridgeLandValues, 0.86) : 1;
+  for (let i = 0; i < map.ridge.length; i += 1) {
+    ridgeMask[i] = map.land[i] === 1 && map.ridge[i] >= ridgeCut ? 1 : 0;
   }
 
   const metrics: DemRealismMetrics = {

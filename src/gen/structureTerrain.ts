@@ -250,6 +250,37 @@ function applySegmentGaussian(
   }
 }
 
+function distanceToSegmentWithProjection(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { distance: number; t: number; signed: number } {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const denom = abx * abx + aby * aby;
+  if (denom <= 1e-6) {
+    const dx = px - ax;
+    const dy = py - ay;
+    return { distance: Math.hypot(dx, dy), t: 0, signed: 0 };
+  }
+  const t = clamp((apx * abx + apy * aby) / denom, 0, 1);
+  const qx = ax + abx * t;
+  const qy = ay + aby * t;
+  const dx = px - qx;
+  const dy = py - qy;
+  const cross = abx * (py - ay) - aby * (px - ax);
+  return {
+    distance: Math.hypot(dx, dy),
+    t,
+    signed: Math.sign(cross),
+  };
+}
+
 function generatePlates(width: number, height: number, seed: number, controls: ContinentControls): Plate[] {
   const rng = mulberry32(seed ^ 0x8a5f4d31);
   const baseCount = controls.size === 'isle' ? 3 : controls.size === 'region' ? 4 : controls.size === 'subcontinent' ? 6 : 8;
@@ -898,10 +929,46 @@ function rasterizeStructuralDem(
   const applyRidgeEdge = (edge: RidgeEdge, levelFactor: number): void => {
     const a = ridge.nodes[edge.a];
     const b = ridge.nodes[edge.b];
-    const amplitude = edge.amplitude * levelFactor;
-    const sigma = Math.max(1.1, edge.width * (edge.level === 0 ? 0.18 : edge.level === 1 ? 0.15 : 0.12));
-    applySegmentGaussian(elevation, width, height, a.x, a.y, b.x, b.y, amplitude, sigma);
-    applySegmentGaussian(ridgeField, width, height, a.x, a.y, b.x, b.y, amplitude, sigma * 1.05);
+    const baseAmplitude = edge.amplitude * levelFactor;
+    const baseWidth = Math.max(1.1, edge.width * (edge.level === 0 ? 0.22 : edge.level === 1 ? 0.17 : 0.13));
+    const sideBias = (valueNoise(seed ^ (edge.a * 31337 + edge.b * 11939), edge.level * 0.83, 0.41) - 0.5) * 0.9;
+    const phase = valueNoise(seed ^ (edge.a * 7919 + edge.b * 1237), 0.11, 0.77) * Math.PI * 2;
+    const maxWidth = baseWidth * 1.8;
+
+    const minX = clamp(Math.floor(Math.min(a.x, b.x) - maxWidth * 2.8), 0, width - 1);
+    const maxX = clamp(Math.ceil(Math.max(a.x, b.x) + maxWidth * 2.8), 0, width - 1);
+    const minY = clamp(Math.floor(Math.min(a.y, b.y) - maxWidth * 2.8), 0, height - 1);
+    const maxY = clamp(Math.ceil(Math.max(a.y, b.y) + maxWidth * 2.8), 0, height - 1);
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        const d = distanceToSegmentWithProjection(x + 0.5, y + 0.5, a.x, a.y, b.x, b.y);
+        const s = d.t;
+
+        const ampNoise = 0.6 + 0.4 * valueNoise(seed ^ (edge.a * 1327 + edge.b * 4253), s * 7.8 + edge.level, edge.level * 0.27);
+        const massif = 0.62 + 0.38 * Math.pow(Math.sin(Math.PI * s + phase), 2);
+        const amplitude = baseAmplitude * ampNoise * massif;
+
+        const widthNoise = 0.65 + 0.7 * valueNoise(seed ^ (edge.a * 5741 + edge.b * 3251), s * 6.1 + 0.23, edge.level * 0.41);
+        const width = baseWidth * widthNoise;
+        const sideScale = d.signed >= 0 ? 1 + sideBias * 0.34 : 1 - sideBias * 0.34;
+        const crossWidth = Math.max(0.6, width * sideScale);
+
+        const p = 1.22 + 0.68 * valueNoise(seed ^ (edge.a * 9151 + edge.b * 151), s * 5.3, 0.73);
+        const nd = d.distance / Math.max(1e-6, crossWidth);
+        if (nd > 2.7) {
+          continue;
+        }
+        const broadFalloff = Math.exp(-Math.pow(nd, p));
+        const sharpCrest = Math.max(0, 1 - nd * (1.3 + 0.15 * sideBias));
+        const profile = broadFalloff * 0.72 + sharpCrest * sharpCrest * 0.28;
+        const contribution = amplitude * profile;
+
+        const index = y * width + x;
+        elevation[index] += contribution;
+        ridgeField[index] += contribution;
+      }
+    }
   };
 
   for (const edge of ridge.primaryEdges) {
