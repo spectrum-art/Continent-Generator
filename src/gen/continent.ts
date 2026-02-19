@@ -1,3 +1,9 @@
+import {
+  generateStructuralTerrain,
+  seaLevelForLandFraction,
+  smoothCoastFromElevation,
+} from './structureTerrain';
+
 export type SizeOption = 'isle' | 'region' | 'subcontinent' | 'supercontinent';
 export type AspectRatioOption = 'wide' | 'landscape' | 'square' | 'portrait' | 'narrow';
 
@@ -990,6 +996,16 @@ export function computeLightAndSlope(width: number, height: number, elevation01:
     smooth.set(scratch);
   }
 
+  let minElevation = Number.POSITIVE_INFINITY;
+  let maxElevation = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < smooth.length; i += 1) {
+    minElevation = Math.min(minElevation, smooth[i]);
+    maxElevation = Math.max(maxElevation, smooth[i]);
+  }
+  const reliefSpan = Math.max(1e-6, maxElevation - minElevation);
+  const normalScale = 4.6 / reliefSpan;
+  const slopeScale = 3.4 / reliefSpan;
+
   const lx = -1;
   const ly = -1;
   const lz = 1;
@@ -1007,8 +1023,8 @@ export function computeLightAndSlope(width: number, height: number, elevation01:
 
       const dzdx = (smooth[y * width + xr] - smooth[y * width + xl]) * 0.5;
       const dzdy = (smooth[yd * width + x] - smooth[yu * width + x]) * 0.5;
-      const nx = -dzdx * 5;
-      const ny = -dzdy * 5;
+      const nx = -dzdx * normalScale;
+      const ny = -dzdy * normalScale;
       const nz = 1;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       const nnx = nx / nLen;
@@ -1021,7 +1037,7 @@ export function computeLightAndSlope(width: number, height: number, elevation01:
       const value = clamp01(ambient + diffuse);
       const index = y * width + x;
       light[index] = clamp01(Math.pow(value, 0.92));
-      slope[index] = clamp01(Math.hypot(dzdx, dzdy) * 8.2);
+      slope[index] = clamp01(Math.hypot(dzdx, dzdy) * slopeScale);
     }
   }
 
@@ -1210,39 +1226,11 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const total = width * height;
 
   const seed = hashString(normalizedSeed);
-  const reliefNorm = (controls.relief - 1) / 9;
-  const fragNorm = (controls.fragmentation - 1) / 9;
-  const peakNorm = (controls.mountainPeakiness - 1) / 9;
   const landFractionNorm = (controls.landFraction - 1) / 9;
-  const domainCount = clamp(2 + Math.round(landFractionNorm * 2) + Math.round((controls.plateCount + 1) * 1.5), 2, 6);
-
-  const baseWidth = Math.max(96, Math.round(width / Math.max(1, fieldScale)));
-  const baseHeight = Math.max(96, Math.round(height / Math.max(1, fieldScale)));
-
-  const domains = generateDomains(seed, domainCount);
-  const macroBase = buildMacroUplift(baseWidth, baseHeight, seed, domains, reliefNorm, fragNorm);
-  const elevation = upsampleBilinearField(macroBase, baseWidth, baseHeight, width, height);
-
-  applyEdgeAndShapeControl(width, height, elevation, seed, landFractionNorm);
-  const stressField = computeStressOrientation(width, height, elevation);
-  applyAnisotropicRidges(
-    width,
-    height,
-    seed,
-    elevation,
-    stressField.stress,
-    stressField.dirX,
-    stressField.dirY,
-    reliefNorm,
-    peakNorm,
-  );
-
-  const flow = applyErosionValleys(width, height, elevation, 2, reliefNorm);
-  normalize01(elevation);
-
-  const targetLand = clamp(0.12 + landFractionNorm * 0.7, 0.1, 0.8);
-  const seaLevel = histogramThreshold01(elevation, targetLand);
-  smoothCoastalDEM(width, height, elevation, seaLevel, controls.coastalSmoothing);
+  const structural = generateStructuralTerrain(width, height, seed, controls);
+  const elevation = structural.elevation;
+  const seaLevel = seaLevelForLandFraction(elevation, landFractionNorm);
+  smoothCoastFromElevation(width, height, elevation, seaLevel, controls.coastalSmoothing);
 
   const land = new Uint8Array(total);
   const water = new Uint8Array(total);
@@ -1260,10 +1248,18 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
   const distanceToLand = bfsDistance(width, height, land);
 
   const { light, slope } = computeLightAndSlope(width, height, elevation);
-  const ridge = new Float32Array(total);
+  const ridge = structural.ridge;
+  const flow = structural.flow;
+
+  let minElevation = Number.POSITIVE_INFINITY;
+  let maxElevation = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < total; i += 1) {
-    ridge[i] = clamp01(stressField.stress[i] * 0.6 + slope[i] * 0.4);
+    minElevation = Math.min(minElevation, elevation[i]);
+    maxElevation = Math.max(maxElevation, elevation[i]);
   }
+  const reliefSpan = Math.max(1e-6, maxElevation - minElevation);
+  const mountainThreshold = seaLevel + reliefSpan * 0.24;
+  const rockThreshold = seaLevel + reliefSpan * 0.37;
 
   const biome = new Uint8Array(total);
   const river = new Uint8Array(total);
@@ -1276,9 +1272,9 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
       biome[i] = BIOME_INDEX.lake;
     } else if (land[i] === 0) {
       biome[i] = BIOME_INDEX.ocean;
-    } else if (elevation[i] > seaLevel + 0.26) {
+    } else if (elevation[i] > rockThreshold) {
       biome[i] = BIOME_INDEX.rock;
-    } else if (elevation[i] > seaLevel + 0.16) {
+    } else if (elevation[i] > mountainThreshold) {
       biome[i] = BIOME_INDEX.mountain;
     } else {
       biome[i] = BIOME_INDEX.grassland;
@@ -1324,6 +1320,24 @@ function shadeGray(value: number): [number, number, number] {
   return [v, v, v];
 }
 
+function elevationDisplayRange(map: GeneratedContinent): { low: number; high: number } {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < map.elevation.length; i += 1) {
+    min = Math.min(min, map.elevation[i]);
+    max = Math.max(max, map.elevation[i]);
+  }
+  const span = Math.max(1e-6, max - min);
+  return {
+    low: min + span * 0.03,
+    high: max - span * 0.03,
+  };
+}
+
+function normalizeElevationValue(value: number, low: number, high: number): number {
+  return clamp01((value - low) / Math.max(1e-6, high - low));
+}
+
 export function buildAtlasRgba(
   map: GeneratedContinent,
   outputWidth = map.width,
@@ -1332,13 +1346,14 @@ export function buildAtlasRgba(
   const rgba = new Uint8ClampedArray(outputWidth * outputHeight * 4);
   const srcWidth = map.width;
   const srcHeight = map.height;
+  const range = elevationDisplayRange(map);
 
   for (let y = 0; y < outputHeight; y += 1) {
     const sy = Math.min(srcHeight - 1, Math.floor((y / Math.max(1, outputHeight - 1)) * (srcHeight - 1)));
     for (let x = 0; x < outputWidth; x += 1) {
       const sx = Math.min(srcWidth - 1, Math.floor((x / Math.max(1, outputWidth - 1)) * (srcWidth - 1)));
       const index = sy * srcWidth + sx;
-      const elev = map.elevation[index];
+      const elev = normalizeElevationValue(map.elevation[index], range.low, range.high);
       const shade = map.light[index];
       const ocean = map.ocean[index] === 1;
 
@@ -1363,11 +1378,12 @@ export function buildElevationRgba(
   outputHeight = map.height,
 ): Uint8ClampedArray {
   const rgba = new Uint8ClampedArray(outputWidth * outputHeight * 4);
+  const range = elevationDisplayRange(map);
   for (let y = 0; y < outputHeight; y += 1) {
-    const sy = Math.min(map.height - 1, Math.floor((y / Math.max(1, outputHeight - 1)) * (map.height - 1)));
+      const sy = Math.min(map.height - 1, Math.floor((y / Math.max(1, outputHeight - 1)) * (map.height - 1)));
     for (let x = 0; x < outputWidth; x += 1) {
       const sx = Math.min(map.width - 1, Math.floor((x / Math.max(1, outputWidth - 1)) * (map.width - 1)));
-      const v = map.elevation[sy * map.width + sx];
+      const v = normalizeElevationValue(map.elevation[sy * map.width + sx], range.low, range.high);
       const gray = clamp(Math.round(v * 255), 0, 255);
       const out = (y * outputWidth + x) * 4;
       rgba[out] = gray;

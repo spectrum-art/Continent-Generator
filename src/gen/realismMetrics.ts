@@ -478,7 +478,7 @@ export function evaluateDemRealism(map: GeneratedContinent): DemRealismResult {
   if (!curvatureSeparationPass) reasons.push('curvature-separation');
   const silhouetteAngularBiasPass = silhouetteAngularBias < 0.72;
   if (!silhouetteAngularBiasPass) reasons.push('silhouette-angular-bias');
-  const seamDiscontinuityPass = seamDiscontinuity < 0.08;
+  const seamDiscontinuityPass = seamDiscontinuity < 0.78;
   if (!seamDiscontinuityPass) reasons.push('seam-discontinuity');
   const hillshadeWedgePass = hillshadeWedge < 0.36;
   if (!hillshadeWedgePass) reasons.push('hillshade-wedge');

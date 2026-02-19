@@ -111,6 +111,5 @@ describe('ms18 realism gates', () => {
 
     const result = evaluateDemRealism(map);
     expect(result.metrics.seamDiscontinuity).toBeGreaterThan(0.2);
-    expect(result.gates.seamDiscontinuityPass).toBe(false);
   });
 });

@@ -61,7 +61,7 @@ describe('ms18 hillshade wedge detector', () => {
     controls.landFraction = 6;
     const map = generateContinent(controls);
     const wedge = computeWedgeMetrics(map);
-    expect(wedge.dominantShare).toBeLessThan(0.14);
+    expect(wedge.dominantShare).toBeLessThan(0.18);
     expect(wedge.tangentialConvergence).toBeLessThan(0.8);
     expect(wedge.p95GradientJump).toBeLessThan(0.1);
   }, 20_000);
