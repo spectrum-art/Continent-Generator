@@ -16,6 +16,30 @@ type SnapshotCase = {
   controls: ContinentControls;
 };
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildArrayRgba(values: Float32Array, width: number, height: number): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < values.length; i += 1) {
+    min = Math.min(min, values[i]);
+    max = Math.max(max, values[i]);
+  }
+  const span = Math.max(1e-6, max - min);
+  for (let i = 0; i < values.length; i += 1) {
+    const v = clamp(Math.round(((values[i] - min) / span) * 255), 0, 255);
+    const o = i * 4;
+    rgba[o] = v;
+    rgba[o + 1] = v;
+    rgba[o + 2] = v;
+    rgba[o + 3] = 255;
+  }
+  return rgba;
+}
+
 function crc32(buffer: Uint8Array): number {
   let crc = 0xffffffff;
   for (let i = 0; i < buffer.length; i += 1) {
@@ -148,6 +172,9 @@ async function main(): Promise<void> {
       await writePng(join(outDir, 'dem.png'), map.width, map.height, buildElevationRgba(map));
       await writePng(join(outDir, 'normal.png'), map.width, map.height, buildNormalRgba(map));
       await writePng(join(outDir, 'hillshade.png'), map.width, map.height, buildAtlasRgba(map));
+      if (map.demBase) {
+        await writePng(join(outDir, 'dem_base.png'), map.width, map.height, buildArrayRgba(map.demBase, map.width, map.height));
+      }
     }
   }
 
@@ -172,6 +199,16 @@ async function main(): Promise<void> {
     critique.push(`  sink_fraction=${item.metrics.metrics.sink_fraction.toFixed(6)}`);
     critique.push(`  drain_to_ocean_fraction=${item.metrics.metrics.drain_to_ocean_fraction.toFixed(6)}`);
     critique.push(`  trunk_river_lengths=${item.metrics.metrics.trunk_river_lengths.join(',')}`);
+    critique.push(
+      `  belt_prominence=${
+        item.metrics.metrics.belt_prominence_score >= 2.4
+          ? 'dominant'
+          : item.metrics.metrics.belt_prominence_score >= 1.7
+            ? 'moderate'
+            : 'weak'
+      } (${item.metrics.metrics.belt_prominence_score.toFixed(3)})`,
+    );
+    critique.push(`  ridge_valley_relief_mean=${item.metrics.metrics.ridge_valley_relief_mean.toFixed(6)}`);
     critique.push(`  elevation_spread_above_sea=${item.metrics.metrics.elevation_spread_above_sea.toFixed(6)}`);
     critique.push(`  stddev_above_sea=${item.metrics.metrics.stddev_above_sea.toFixed(6)}`);
     critique.push(`  curvature_ratio=${item.metrics.metrics.curvature_stats.ratio.toFixed(6)}`);

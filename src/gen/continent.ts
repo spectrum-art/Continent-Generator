@@ -63,6 +63,7 @@ export type GeneratedContinent = {
   flow: Float32Array;
   flowDirection: Int32Array;
   flowAccumulation: Float32Array;
+  demBase?: Float32Array;
   biome: Uint8Array;
   land: Uint8Array;
   ocean: Uint8Array;
@@ -1234,6 +1235,7 @@ export function generateContinent(input: ContinentControls): GeneratedContinent 
     flow,
     flowDirection: demCore.flowDirection,
     flowAccumulation: demCore.flowAccumulation,
+    demBase: demCore.demBase,
     biome,
     land,
     ocean,

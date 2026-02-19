@@ -263,6 +263,59 @@ function hillshadeEdgeDiscontinuity(map: GeneratedContinent): number {
   return borderMean / Math.max(1e-6, interiorMean);
 }
 
+function beltProminence(map: GeneratedContinent): number {
+  const landElevations: number[] = [];
+  for (let i = 0; i < map.elevation.length; i += 1) {
+    if (map.land[i] === 1) {
+      landElevations.push(map.elevation[i]);
+    }
+  }
+  if (landElevations.length < 64) {
+    return 1;
+  }
+  const highCut = percentile(landElevations, 0.9);
+  const points: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < map.height; y += 1) {
+    for (let x = 0; x < map.width; x += 1) {
+      const i = y * map.width + x;
+      if (map.land[i] === 1 && map.elevation[i] >= highCut) {
+        points.push({ x, y });
+      }
+    }
+  }
+  if (points.length < 32) {
+    return 1;
+  }
+
+  let mx = 0;
+  let my = 0;
+  for (const p of points) {
+    mx += p.x;
+    my += p.y;
+  }
+  mx /= points.length;
+  my /= points.length;
+
+  let cxx = 0;
+  let cyy = 0;
+  let cxy = 0;
+  for (const p of points) {
+    const dx = p.x - mx;
+    const dy = p.y - my;
+    cxx += dx * dx;
+    cyy += dy * dy;
+    cxy += dx * dy;
+  }
+  cxx /= points.length;
+  cyy /= points.length;
+  cxy /= points.length;
+  const trace = cxx + cyy;
+  const det = Math.sqrt(Math.max(0, (cxx - cyy) * (cxx - cyy) + 4 * cxy * cxy));
+  const l1 = (trace + det) * 0.5;
+  const l2 = Math.max(1e-6, (trace - det) * 0.5);
+  return Math.sqrt(Math.max(1, l1 / l2));
+}
+
 export type Ms21Metrics = {
   sink_count: number;
   sink_fraction: number;
@@ -278,6 +331,7 @@ export type Ms21Metrics = {
     ratio: number;
   };
   ridge_valley_relief_mean: number;
+  belt_prominence_score: number;
   hillshade_edge_discontinuity_score: number;
 };
 
@@ -302,6 +356,7 @@ export function evaluateMs21Realism(map: GeneratedContinent): Ms21Result {
   const elev = elevationStats(map);
   const curvature = curvatureStats(map);
   const seamScore = hillshadeEdgeDiscontinuity(map);
+  const beltProminenceScore = beltProminence(map);
 
   const metrics: Ms21Metrics = {
     sink_count: drainage.sinkCount,
@@ -318,6 +373,7 @@ export function evaluateMs21Realism(map: GeneratedContinent): Ms21Result {
       ratio: curvature.ratio,
     },
     ridge_valley_relief_mean: curvature.ridgeValleyReliefMean,
+    belt_prominence_score: beltProminenceScore,
     hillshade_edge_discontinuity_score: seamScore,
   };
 
