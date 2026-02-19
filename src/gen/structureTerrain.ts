@@ -524,18 +524,34 @@ function buildRidgeGraph(
   peakNorm: number,
 ): RidgeGraph {
   const nodes: RidgeNode[] = [];
+  const degree: number[] = [];
   const primaryEdges: RidgeEdge[] = [];
   const secondaryEdges: RidgeEdge[] = [];
   const tertiaryEdges: RidgeEdge[] = [];
 
+  const pushNode = (x: number, y: number): number => {
+    const id = addNode(nodes, x, y, width, height);
+    degree[id] = degree[id] ?? 0;
+    return id;
+  };
+
+  const linkDegree = (a: number, b: number): void => {
+    degree[a] = (degree[a] ?? 0) + 1;
+    degree[b] = (degree[b] ?? 0) + 1;
+  };
+
   for (const belt of belts) {
     const beltNodeIds: number[] = [];
+    let bendAcc = 0;
     for (let i = 0; i < belt.points.length; i += 1) {
       const p = belt.points[i];
-      const jitter = (valueNoise(seed ^ (belt.id * 977 + 37), i * 0.22, belt.id * 0.7) - 0.5) * belt.width * 0.16;
-      const x = p.x - belt.dirY * jitter;
-      const y = p.y + belt.dirX * jitter;
-      beltNodeIds.push(addNode(nodes, x, y, width, height));
+      bendAcc += (valueNoise(seed ^ (belt.id * 977 + 37), i * 0.22, belt.id * 0.7) - 0.5) * 0.12;
+      bendAcc *= 0.82;
+      const jitter = (valueNoise(seed ^ (belt.id * 977 + 71), i * 0.31, belt.id * 0.41) - 0.5) * belt.width * 0.08;
+      const curve = Math.sin((i / Math.max(1, belt.points.length - 1)) * Math.PI * 2 + bendAcc) * belt.width * 0.06;
+      const x = p.x - belt.dirY * (jitter + curve);
+      const y = p.y + belt.dirX * (jitter + curve);
+      beltNodeIds.push(pushNode(x, y));
     }
 
     const primaryAmplitude = (0.48 + reliefNorm * 0.52 + peakNorm * 0.4) * (0.8 + belt.strength * 0.6);
@@ -547,12 +563,16 @@ function buildRidgeGraph(
         width: belt.width * 0.56,
         amplitude: primaryAmplitude,
       });
+      linkDegree(beltNodeIds[i], beltNodeIds[i + 1]);
     }
 
     const stride = clamp(Math.floor(beltNodeIds.length / 10), 2, 6);
     for (let i = 2; i < beltNodeIds.length - 2; i += stride) {
       const r = valueNoise(seed ^ (belt.id * 211 + i * 17), i * 0.19, belt.id * 0.37);
       if (r < 0.35) {
+        continue;
+      }
+      if ((degree[beltNodeIds[i]] ?? 0) > 3) {
         continue;
       }
       const prev = nodes[beltNodeIds[i - 1]];
@@ -589,7 +609,7 @@ function buildRidgeGraph(
         dy = ndy;
 
         const parent = nodes[parentId];
-        const childId = addNode(nodes, parent.x + dx * stepLength, parent.y + dy * stepLength, width, height);
+        const childId = pushNode(parent.x + dx * stepLength, parent.y + dy * stepLength);
         secondaryEdges.push({
           a: parentId,
           b: childId,
@@ -597,6 +617,7 @@ function buildRidgeGraph(
           width: belt.width * 0.34,
           amplitude: primaryAmplitude * 0.54 * (1 - seg * 0.12),
         });
+        linkDegree(parentId, childId);
         parentId = childId;
         lastSecondaryNode = childId;
       }
@@ -612,7 +633,7 @@ function buildRidgeGraph(
         ty1 *= sign2;
         for (let t = 0; t < tertiarySegments; t += 1) {
           const p = nodes[parent];
-          const child = addNode(nodes, p.x + tx1 * step, p.y + ty1 * step, width, height);
+          const child = pushNode(p.x + tx1 * step, p.y + ty1 * step);
           tertiaryEdges.push({
             a: parent,
             b: child,
@@ -620,6 +641,7 @@ function buildRidgeGraph(
             width: belt.width * 0.2,
             amplitude: primaryAmplitude * 0.28 * (1 - t * 0.18),
           });
+          linkDegree(parent, child);
           parent = child;
         }
       }
