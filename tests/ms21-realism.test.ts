@@ -39,6 +39,8 @@ describe('ms21 realism gates', () => {
     expect(result.metrics.curvature_stats.convex_count).toBeGreaterThanOrEqual(120);
     expect(result.metrics.curvature_stats.ratio).toBeGreaterThanOrEqual(0.35);
     expect(result.metrics.curvature_stats.ratio).toBeLessThanOrEqual(2.8);
+    expect(result.metrics.ridge_valley_relief_mean).toBeGreaterThanOrEqual(result.metrics.stddev_above_sea * 0.42);
+    expect(result.gates.ridgeValleyContrastPass).toBe(true);
   }, 25_000);
 
   it('keeps hillshade edge discontinuity below seam threshold', () => {

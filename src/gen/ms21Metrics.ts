@@ -286,6 +286,7 @@ export type Ms21Gates = {
   trunkRiverPass: boolean;
   dynamicRangePass: boolean;
   curvaturePass: boolean;
+  ridgeValleyContrastPass: boolean;
   hillshadeSeamPass: boolean;
   pass: boolean;
   reasons: string[];
@@ -344,6 +345,9 @@ export function evaluateMs21Realism(map: GeneratedContinent): Ms21Result {
     metrics.curvature_stats.ratio <= 2.8;
   if (!curvaturePass) reasons.push('diffusion');
 
+  const ridgeValleyContrastPass = metrics.ridge_valley_relief_mean >= metrics.stddev_above_sea * 0.42;
+  if (!ridgeValleyContrastPass) reasons.push('incision-dominance');
+
   const hillshadeSeamPass = metrics.hillshade_edge_discontinuity_score <= 2.2;
   if (!hillshadeSeamPass) reasons.push('hillshade');
 
@@ -354,8 +358,15 @@ export function evaluateMs21Realism(map: GeneratedContinent): Ms21Result {
       trunkRiverPass,
       dynamicRangePass,
       curvaturePass,
+      ridgeValleyContrastPass,
       hillshadeSeamPass,
-      pass: drainageCompletenessPass && trunkRiverPass && dynamicRangePass && curvaturePass && hillshadeSeamPass,
+      pass:
+        drainageCompletenessPass &&
+        trunkRiverPass &&
+        dynamicRangePass &&
+        curvaturePass &&
+        ridgeValleyContrastPass &&
+        hillshadeSeamPass,
       reasons,
     },
   };
