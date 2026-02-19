@@ -777,7 +777,7 @@ function applyErosionValleys(
         const up = elevation[(y - 1) * width + x];
         const down = elevation[(y + 1) * width + x];
         const slope = Math.hypot((right - left) * 0.5, (down - up) * 0.5);
-        const carve = (0.0026 + reliefNorm * 0.0042) * flow[index] * (0.55 + slope * 3.2);
+        const carve = (0.0028 + reliefNorm * 0.004) * flow[index] * (0.55 + slope * 3.35);
         next[index] = clamp01(elevation[index] - carve);
       }
     }
