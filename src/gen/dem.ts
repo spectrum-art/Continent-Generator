@@ -1,5 +1,6 @@
 import type { ContinentControls } from './continent';
-import { computeFlowFields, conditionHydrology } from './hydrology';
+import { conditionHydrology } from './hydrology';
+import { runIncisionDiffusion } from './erosion';
 
 export type DemCoreInput = {
   width: number;
@@ -277,6 +278,19 @@ function buildMacroDem(input: DemCoreInput): Float32Array {
   return dem;
 }
 
+function edgeOutletMask(width: number, height: number): Uint8Array {
+  const mask = new Uint8Array(width * height);
+  for (let x = 0; x < width; x += 1) {
+    mask[x] = 1;
+    mask[(height - 1) * width + x] = 1;
+  }
+  for (let y = 0; y < height; y += 1) {
+    mask[y * width] = 1;
+    mask[y * width + width - 1] = 1;
+  }
+  return mask;
+}
+
 export function createEmptyDemState(width: number, height: number): DemCoreState {
   const total = width * height;
   return {
@@ -298,13 +312,30 @@ export function createEmptyDemState(width: number, height: number): DemCoreState
 export function generateDemCore(input: DemCoreInput): DemCoreState {
   const state = createEmptyDemState(input.width, input.height);
   state.demBase = buildMacroDem(input);
-  const conditioned = conditionHydrology(input.width, input.height, state.demBase, 'drain-mostly');
-  const flow = computeFlowFields(input.width, input.height, conditioned.elevation);
+  const outlets = edgeOutletMask(input.width, input.height);
+  const conditioned = conditionHydrology(input.width, input.height, state.demBase, 'drain-mostly', outlets);
+  const reliefNorm = (input.controls.relief - 1) / 9;
+  const sizeIterations =
+    input.controls.size === 'isle'
+      ? 8
+      : input.controls.size === 'region'
+        ? 12
+        : input.controls.size === 'subcontinent'
+          ? 14
+          : 16;
+  const eroded = runIncisionDiffusion(input.width, input.height, conditioned.elevation, {
+    iterations: sizeIterations,
+    incisionK: 0.0032 + reliefNorm * 0.0044,
+    diffusionK: 0.09 - reliefNorm * 0.03,
+    channelThreshold: 0.18,
+    m: 1.05,
+    n: 1.08,
+  }, outlets);
   state.demConditioned = conditioned.elevation;
-  state.demEroded = conditioned.elevation.slice();
-  state.demFinal = conditioned.elevation.slice();
-  state.flowDirection = flow.downstream;
-  state.flowAccumulation = flow.accumulation;
-  state.flowNormalized = flow.flowNorm;
+  state.demEroded = eroded.elevation;
+  state.demFinal = eroded.elevation.slice();
+  state.flowDirection = eroded.flow.downstream;
+  state.flowAccumulation = eroded.flow.accumulation;
+  state.flowNormalized = eroded.flow.flowNorm;
   return state;
 }
