@@ -1269,8 +1269,8 @@ function elevationDisplayRange(map: GeneratedContinent): { low: number; high: nu
   }
   const span = Math.max(1e-6, max - min);
   return {
-    low: min + span * 0.03,
-    high: max - span * 0.03,
+    low: min + span * 0.01,
+    high: max - span * 0.01,
   };
 }
 
@@ -1298,8 +1298,8 @@ export function buildAtlasRgba(
       const ocean = map.ocean[index] === 1;
 
       const value = ocean
-        ? clamp01(0.08 + elev * 0.45)
-        : clamp01(0.15 + elev * 0.35 + shade * 0.62);
+        ? clamp01(0.06 + elev * 0.5)
+        : clamp01(0.1 + elev * 0.48 + shade * 0.68);
       const [r, g, b] = shadeGray(value);
       const out = (y * outputWidth + x) * 4;
       rgba[out] = r;

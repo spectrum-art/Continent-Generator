@@ -174,8 +174,10 @@ function curvatureStats(map: GeneratedContinent): {
   concaveCount: number;
   convexCount: number;
   ratio: number;
+  ridgeValleyReliefMean: number;
 } {
   const laps: number[] = [];
+  const elevs: number[] = [];
   for (let y = 1; y < map.height - 1; y += 1) {
     for (let x = 1; x < map.width - 1; x += 1) {
       const index = y * map.width + x;
@@ -190,24 +192,42 @@ function curvatureStats(map: GeneratedContinent): {
         map.elevation[index + map.width]
       ) * 0.25;
       laps.push(avg - center);
+      elevs.push(center);
     }
   }
   const absLaps = laps.map((v) => Math.abs(v));
   const threshold = Math.max(1e-6, percentile(absLaps, 0.7));
+  const concaveTop = percentile(laps, 0.95);
+  const convexTop = percentile(laps, 0.05);
   let concaveCount = 0;
   let convexCount = 0;
-  for (const lap of laps) {
+  let ridgeSum = 0;
+  let ridgeCount = 0;
+  let valleySum = 0;
+  let valleyCount = 0;
+  for (let i = 0; i < laps.length; i += 1) {
+    const lap = laps[i];
     if (lap > threshold) {
       concaveCount += 1;
     } else if (lap < -threshold) {
       convexCount += 1;
     }
+    if (lap >= concaveTop) {
+      valleySum += elevs[i];
+      valleyCount += 1;
+    } else if (lap <= convexTop) {
+      ridgeSum += elevs[i];
+      ridgeCount += 1;
+    }
   }
+  const ridgeMean = ridgeCount > 0 ? ridgeSum / ridgeCount : 0;
+  const valleyMean = valleyCount > 0 ? valleySum / valleyCount : 0;
 
   return {
     concaveCount,
     convexCount,
     ratio: concaveCount / Math.max(1, convexCount),
+    ridgeValleyReliefMean: ridgeMean - valleyMean,
   };
 }
 
@@ -257,6 +277,7 @@ export type Ms21Metrics = {
     convex_count: number;
     ratio: number;
   };
+  ridge_valley_relief_mean: number;
   hillshade_edge_discontinuity_score: number;
 };
 
@@ -295,6 +316,7 @@ export function evaluateMs21Realism(map: GeneratedContinent): Ms21Result {
       convex_count: curvature.convexCount,
       ratio: curvature.ratio,
     },
+    ridge_valley_relief_mean: curvature.ridgeValleyReliefMean,
     hillshade_edge_discontinuity_score: seamScore,
   };
 

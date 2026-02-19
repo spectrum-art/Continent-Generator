@@ -370,8 +370,8 @@ function smoothCoastalBand(
   coastalSmoothing: number,
 ): Float32Array {
   const smooth = (coastalSmoothing - 1) / 9;
-  const passes = 1 + Math.round(smooth * 2);
-  const band = lerp(0.015, 0.08, smooth);
+  const passes = 1 + Math.round(smooth * 1);
+  const band = lerp(0.012, 0.05, smooth);
   let current = elevation.slice();
 
   for (let pass = 0; pass < passes; pass += 1) {
@@ -389,7 +389,7 @@ function smoothCoastalBand(
           current[index - width] +
           current[index + width]
         ) * 0.25;
-        const strength = smoothstep(1 - delta / Math.max(1e-6, band)) * (0.04 + smooth * 0.14);
+        const strength = smoothstep(1 - delta / Math.max(1e-6, band)) * (0.02 + smooth * 0.07);
         next[index] = lerp(current[index], avg, strength);
       }
     }
