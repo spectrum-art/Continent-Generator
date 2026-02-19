@@ -296,11 +296,19 @@ function buildPlateModel(width: number, height: number, plates: Plate[]): PlateM
   ): void => {
     const pa = plates[a];
     const pb = plates[b];
-    const nx0 = pb.cx - pa.cx;
-    const ny0 = pb.cy - pa.cy;
-    const nLen = Math.hypot(nx0, ny0) || 1;
-    const nx = nx0 / nLen;
-    const ny = ny0 / nLen;
+    const tx = x1 - x0;
+    const ty = y1 - y0;
+    let nx = -ty;
+    let ny = tx;
+    const cenX = pb.cx - pa.cx;
+    const cenY = pb.cy - pa.cy;
+    if (nx * cenX + ny * cenY < 0) {
+      nx *= -1;
+      ny *= -1;
+    }
+    const nLen = Math.hypot(nx, ny) || 1;
+    nx /= nLen;
+    ny /= nLen;
     const rvx = pb.vx - pa.vx;
     const rvy = pb.vy - pa.vy;
     const projected = rvx * nx + rvy * ny;
