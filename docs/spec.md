@@ -1,47 +1,51 @@
 # Map Explorer Spec
 
-## Milestone 18: DEM-First Geological Rebuild
+## Milestone 19: Structure-First Orogeny + Basin Graph
 
-## Product Focus
-- Single bounded continent artifact driven by deterministic controls.
-- Terrain core is DEM-first: geology and erosion produce elevation; hillshade is derived from DEM.
-- Non-core systems (biomes/rivers/gameplay scaffolding) are de-emphasized for this milestone.
+## Scope
+- Deterministic bounded continent generator (case-insensitive seed normalization).
+- DEM-first terrain core rebuilt around explicit structural objects:
+  - plate partition
+  - boundary extraction/classification
+  - convergent belts
+  - crestline ridge graph
+  - basin/valley graph
+  - structural rasterization + erosion
+- No new user-facing UI controls.
 
-## DEM Pipeline (MS18)
-1. Generate macro tectonic domains (`convergent`, `divergent`, `craton`, `transform`) and blend into one continuous uplift field.
-2. Apply macro shape and edge-ocean control directly in elevation space (no binary mask sculpting).
-3. Derive continuous stress orientation from uplift gradients.
-4. Synthesize anisotropic ridge detail aligned with the stress field (multi-band ridged noise).
-5. Run erosion-first valley carving using flow accumulation feedback (2 lightweight passes).
-6. Normalize DEM, solve sea level from Land Fraction, and apply coastal smoothing near sea level.
-7. Compute global hillshade from full-field central-difference normals with fixed NW lighting.
+## Generation Pipeline (MS19)
+1. Voronoi-like plate partition over the map and plate motion vectors.
+2. Boundary extraction and classification into convergent/divergent/transform.
+3. Convergent belt construction from boundary geometry.
+4. Crestline graph construction with primary spines and controlled branching.
+5. Ridge hierarchy expansion (primary/secondary/tertiary edges).
+6. Basin graph construction (trunk valleys + tributaries + edge outlets).
+7. DEM rasterization from graph primitives:
+  - positive ridge contributions
+  - negative valley contributions
+  - low-amplitude fine noise only after structure
+8. Structural erosion (6–10 passes) driven by flow accumulation and basin-field bias.
+9. Sea level cut after erosion; hillshade from full DEM gradient with NW lighting.
 
 ## Outputs
-- Renderer uses DEM-derived grayscale hillshade (`buildAtlasRgba`).
-- Snapshot command (`npm run snapshot`) writes:
+- `buildElevationRgba`: grayscale DEM render.
+- `buildNormalRgba`: normal map derived from DEM gradients.
+- `buildAtlasRgba`: shaded-relief grayscale atlas render.
+- Snapshot harness remains `npm run snapshot` and writes:
   - `dem.png`
   - `normal.png`
   - `hillshade.png`
   - `metrics.json`
 
-## Realism Gates
-`evaluateDemRealism()` computes and gates:
-- radial symmetry rejection
+## Realism Gates (MS19)
+Fewer, stronger structural gates:
+- crestline continuity
 - ridge anisotropy
-- valley depth variance
-- curvature cluster separation
-- silhouette angular bias
-- seam discontinuity
-- hillshade wedge concentration
+- basin depth separation
+- no-blob rejection
 
-`npm run snapshot` returns non-zero when any case fails the gate set.
+`evaluateDemRealism()` returns gate booleans + reasons and is used by tests and snapshot reporting.
 
-## Determinism + Identity
-- Seed normalization is case-insensitive.
-- Identity hash remains deterministic for same controls.
-- Import/export compact string round-trips preserve identity hash.
-
-## Performance Notes
-- Expensive macro field generation runs at a reduced base grid and is upsampled.
-- Erosion uses limited iterations (2) for predictable runtime.
-- Build/test/snapshot remain part of milestone gates.
+## Determinism
+- Same controls + seed always produce same map identity hash and realism metrics.
+- Export/import roundtrip preserves map identity.

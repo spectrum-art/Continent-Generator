@@ -1,17 +1,17 @@
 # Map Explorer Plan
 
-## Milestone 18 Checkpoints
+## Milestone 19 Checkpoints
 
-- [x] `ms18: remove legacy elevation pipeline`
-- [x] `ms18: macro uplift field`
-- [x] `ms18: anisotropic ridge synthesis`
-- [x] `ms18: erosion-first valley pass`
-- [x] `ms18: dem export + normal map`
-- [x] `ms18: hillshade rewrite`
-- [x] `ms18: realism gates`
-- [x] `ms18: docs + perf sanity`
+- [x] `ms19: remove MS18 ridge/uplift logic`
+- [x] `ms19: plate partition + boundary classification`
+- [x] `ms19: convergent belt geometry`
+- [x] `ms19: crestline graph`
+- [x] `ms19: ridge hierarchy`
+- [x] `ms19: basin graph`
+- [x] `ms19: DEM rasterization`
+- [x] `ms19: structural erosion`
+- [x] `ms19: tests + docs`
 
-## Validation Checklist
+## Validation
 - [x] `npm test`
 - [x] `npm run build`
-- [x] `npm run snapshot`
