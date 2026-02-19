@@ -800,9 +800,10 @@ function rasterizeStructuralDem(
   divergent: BoundarySegment[],
   ridge: RidgeGraph,
   basins: BasinGraph,
-): { elevation: Float32Array; ridgeField: Float32Array } {
+): { elevation: Float32Array; ridgeField: Float32Array; basinField: Float32Array } {
   const elevation = new Float32Array(width * height);
   const ridgeField = new Float32Array(width * height);
+  const basinField = new Float32Array(width * height);
   const aspect = width / Math.max(1, height);
 
   for (let y = 0; y < height; y += 1) {
@@ -857,6 +858,7 @@ function rasterizeStructuralDem(
     const sigma = Math.max(1.2, edge.width * (edge.level === 0 ? 0.23 : 0.18));
     const amplitude = edge.depth * factor;
     applySegmentGaussian(elevation, width, height, a.x, a.y, b.x, b.y, -amplitude, sigma);
+    applySegmentGaussian(basinField, width, height, a.x, a.y, b.x, b.y, amplitude, sigma * 1.08);
   };
 
   for (const edge of basins.trunkEdges) {
@@ -892,7 +894,15 @@ function rasterizeStructuralDem(
     ridgeField[i] = clamp01(ridgeField[i] / ridgeMax);
   }
 
-  return { elevation, ridgeField };
+  let basinMax = 1e-6;
+  for (let i = 0; i < basinField.length; i += 1) {
+    basinMax = Math.max(basinMax, basinField[i]);
+  }
+  for (let i = 0; i < basinField.length; i += 1) {
+    basinField[i] = clamp01(basinField[i] / basinMax);
+  }
+
+  return { elevation, ridgeField, basinField };
 }
 
 function computeFlowAccumulation(width: number, height: number, elevation: Float32Array): {
@@ -975,9 +985,10 @@ function applyStructuralErosion(
   width: number,
   height: number,
   elevation: Float32Array,
+  basinField: Float32Array,
   reliefNorm: number,
 ): Float32Array {
-  const iterations = clamp(5 + Math.round(reliefNorm * 4), 5, 10);
+  const iterations = clamp(6 + Math.round(reliefNorm * 4), 6, 10);
   let flowNorm = new Float32Array(width * height);
 
   for (let pass = 0; pass < iterations; pass += 1) {
@@ -1001,7 +1012,8 @@ function applyStructuralErosion(
           continue;
         }
         const area = Math.max(1, flow.accumulation[index]);
-        const incision = k * Math.pow(area, m) * Math.pow(drop, n);
+        const basinBias = 0.7 + basinField[index] * 0.9;
+        const incision = k * Math.pow(area, m) * Math.pow(drop, n) * basinBias;
         next[index] -= clamp(incision, 0, 0.055);
       }
     }
@@ -1097,7 +1109,7 @@ export function generateStructuralTerrain(
     basinGraph,
   );
 
-  const flow = applyStructuralErosion(width, height, raster.elevation, reliefNorm);
+  const flow = applyStructuralErosion(width, height, raster.elevation, raster.basinField, reliefNorm);
 
   return {
     elevation: raster.elevation,
