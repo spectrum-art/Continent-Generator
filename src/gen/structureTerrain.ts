@@ -815,15 +815,15 @@ function rasterizeStructuralDem(
       const edgeDist = Math.min(nx, 1 - nx, ny, 1 - ny);
       const continentMask = 1 - smoothstep((radius - (0.36 + landFractionNorm * 0.24)) / 0.27);
       const edgeOcean = smoothstep((edgeDist - 0.01) / (0.13 + landFractionNorm * 0.06));
-      const baseMacro = (fbm(seed ^ 0x2f9d31a5, nx * 1.4, ny * 1.4, 3, 0.57, 2.0) - 0.5) * 0.11;
-      const baseRegional = (fbm(seed ^ 0x9c7d52ab, nx * 3.1, ny * 3.1, 2, 0.56, 2.1) - 0.5) * 0.08;
+      const baseMacro = (fbm(seed ^ 0x2f9d31a5, nx * 1.4, ny * 1.4, 3, 0.57, 2.0) - 0.5) * 0.08;
+      const baseRegional = (fbm(seed ^ 0x9c7d52ab, nx * 3.1, ny * 3.1, 2, 0.56, 2.1) - 0.5) * 0.05;
       const base = -0.6 + continentMask * (0.82 + landFractionNorm * 0.54) * edgeOcean + baseMacro + baseRegional;
       elevation[y * width + x] = base;
     }
   }
 
   for (const belt of belts) {
-    const upliftAmp = (0.12 + reliefNorm * 0.34) * (0.7 + belt.strength * 0.8);
+    const upliftAmp = (0.16 + reliefNorm * 0.38) * (0.72 + belt.strength * 0.85);
     const sigma = belt.width * 0.52;
     for (let i = 0; i < belt.points.length - 1; i += 1) {
       const a = belt.points[i];
@@ -842,7 +842,7 @@ function rasterizeStructuralDem(
   };
 
   for (const edge of ridge.primaryEdges) {
-    applyRidgeEdge(edge, 0.62);
+    applyRidgeEdge(edge, 0.74);
   }
   for (const edge of ridge.secondaryEdges) {
     applyRidgeEdge(edge, 0.5);
@@ -860,7 +860,7 @@ function rasterizeStructuralDem(
   };
 
   for (const edge of basins.trunkEdges) {
-    applyValleyEdge(edge, 0.5 + reliefNorm * 0.38);
+    applyValleyEdge(edge, 0.58 + reliefNorm * 0.42);
   }
   for (const edge of basins.tributaryEdges) {
     applyValleyEdge(edge, 0.33 + fragmentationNorm * 0.14);
@@ -879,7 +879,7 @@ function rasterizeStructuralDem(
     for (let x = 0; x < width; x += 1) {
       const nx = x / Math.max(1, width - 1);
       const index = y * width + x;
-      const fine = (fbm(seed ^ 0x5af31b6d, nx * 8.2, ny * 8.2, 2, 0.55, 2.2) - 0.5) * 0.045;
+      const fine = (fbm(seed ^ 0x5af31b6d, nx * 8.2, ny * 8.2, 2, 0.55, 2.2) - 0.5) * 0.03;
       elevation[index] += fine;
     }
   }
