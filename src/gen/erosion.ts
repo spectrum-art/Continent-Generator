@@ -56,7 +56,7 @@ export function runIncisionDiffusion(
           continue;
         }
         const incision = options.incisionK * Math.pow(acc, options.m) * Math.pow(slope, options.n);
-        incised[index] -= clamp(incision, 0, 0.018);
+        incised[index] -= clamp(incision, 0, 0.026);
       }
     }
 
@@ -64,13 +64,17 @@ export function runIncisionDiffusion(
     for (let y = 1; y < height - 1; y += 1) {
       for (let x = 1; x < width - 1; x += 1) {
         const index = y * width + x;
+        const acc = flow.flowNorm[index];
+        if (acc >= options.channelThreshold) {
+          continue;
+        }
         let sum = 0;
         for (const [dx, dy] of NEIGHBORS_4) {
           sum += incised[(y + dy) * width + (x + dx)];
         }
         const lap = sum * 0.25 - incised[index];
-        const channelFactor = flow.flowNorm[index] > options.channelThreshold ? 0.35 : 1;
-        diffused[index] += lap * options.diffusionK * channelFactor;
+        const hillslopeFactor = 0.7 + (1 - acc) * 0.3;
+        diffused[index] += lap * options.diffusionK * hillslopeFactor;
       }
     }
 

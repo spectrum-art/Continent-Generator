@@ -501,19 +501,19 @@ export function generateDemCore(input: DemCoreInput): DemCoreState {
   const reliefNorm = (input.controls.relief - 1) / 9;
   const sizeIterations =
     input.controls.size === 'isle'
-      ? 8
+      ? 14
       : input.controls.size === 'region'
-        ? 12
+        ? 18
         : input.controls.size === 'subcontinent'
-          ? 14
-          : 16;
+          ? 21
+          : 24;
   const eroded = runIncisionDiffusion(input.width, input.height, conditioned.elevation, {
     iterations: sizeIterations,
-    incisionK: 0.0032 + reliefNorm * 0.0044,
-    diffusionK: 0.09 - reliefNorm * 0.03,
-    channelThreshold: 0.18,
-    m: 1.05,
-    n: 1.08,
+    incisionK: 0.0052 + reliefNorm * 0.0058,
+    diffusionK: 0.034 - reliefNorm * 0.014,
+    channelThreshold: 0.135,
+    m: 0.72,
+    n: 1.02,
   }, outlets);
   const landFractionNorm = (input.controls.landFraction - 1) / 9;
   const targetLand = 0.12 + landFractionNorm * 0.72;
