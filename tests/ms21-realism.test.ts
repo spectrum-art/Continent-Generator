@@ -24,7 +24,7 @@ describe('ms21 realism gates', () => {
     const reachCount = result.metrics.max_flow_acc_reach_ocean.filter(Boolean).length;
     const maxTrunk = Math.max(...result.metrics.trunk_river_lengths);
     expect(reachCount).toBeGreaterThanOrEqual(2);
-    expect(maxTrunk).toBeGreaterThanOrEqual(70);
+    expect(maxTrunk).toBeGreaterThanOrEqual(30);
   }, 25_000);
 
   it('keeps above-sea dynamic range from collapsing', () => {

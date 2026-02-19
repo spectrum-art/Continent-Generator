@@ -121,9 +121,18 @@ type Belt = {
   points: Array<{ x: number; y: number }>;
   width: number;
   amplitude: number;
+  compressionSide: -1 | 1;
+  basinAmplitude: number;
+  basinWidth: number;
 };
 
-function buildBelt(rng: () => number, width: number, height: number): Belt {
+function buildBelt(
+  rng: () => number,
+  width: number,
+  height: number,
+  reliefNorm: number,
+  dominant: boolean,
+): Belt {
   const side = Math.floor(rng() * 4);
   const opposite = (side + 2) % 4;
 
@@ -158,14 +167,17 @@ function buildBelt(rng: () => number, width: number, height: number): Belt {
 
   return {
     points,
-    width: Math.min(width, height) * (0.06 + rng() * 0.08),
-    amplitude: 0.4 + rng() * 0.8,
+    width: Math.min(width, height) * (0.032 + rng() * 0.03),
+    amplitude: (0.95 + reliefNorm * 0.9 + rng() * 0.6) * (dominant ? 1.8 : 1),
+    compressionSide: rng() < 0.5 ? -1 : 1,
+    basinAmplitude: 0, // assigned in builder to preserve dominant relationship
+    basinWidth: 0, // assigned in builder to preserve dominant relationship
   };
 }
 
 function applyBelts(base: Float32Array, width: number, height: number, belts: Belt[]): void {
   for (const belt of belts) {
-    const radius = Math.max(2, belt.width * 2.6);
+    const radius = Math.max(2, Math.max(belt.width, belt.basinWidth) * 2.8);
     for (let i = 0; i < belt.points.length - 1; i += 1) {
       const a = belt.points[i];
       const b = belt.points[i + 1];
@@ -176,15 +188,32 @@ function applyBelts(base: Float32Array, width: number, height: number, belts: Be
 
       for (let y = minY; y <= maxY; y += 1) {
         for (let x = minX; x <= maxX; x += 1) {
-          const d = distanceToSegment(x + 0.5, y + 0.5, a.x, a.y, b.x, b.y);
+          const px = x + 0.5;
+          const py = y + 0.5;
+          const d = distanceToSegment(px, py, a.x, a.y, b.x, b.y);
           const nd = d.distance / Math.max(1e-6, belt.width);
-          if (nd > 2.5) {
+          const basinNd = d.distance / Math.max(1e-6, belt.basinWidth);
+          if (nd > 2.7 && basinNd > 2.8) {
             continue;
           }
+
+          const tx = b.x - a.x;
+          const ty = b.y - a.y;
+          const tLen = Math.hypot(tx, ty) || 1;
+          const nx = -ty / tLen;
+          const ny = tx / tLen;
+          const signed = (px - a.x) * nx + (py - a.y) * ny;
+          const forelandWeight = belt.compressionSide * signed > 0 ? 1 : 0;
+
           const along = d.t;
-          const massif = 0.62 + 0.38 * Math.sin((along + 0.07 * i) * Math.PI);
-          const profile = Math.exp(-Math.pow(nd, 1.45));
-          base[y * width + x] += belt.amplitude * massif * profile;
+          const massif = 0.58 + 0.42 * Math.sin((along + 0.07 * i) * Math.PI);
+          const ridgeProfile = Math.exp(-Math.pow(nd, 1.35));
+          const ridgeSharp = Math.max(0, 1 - nd * 0.95);
+          const ridgeContribution = belt.amplitude * massif * (ridgeProfile * 0.68 + ridgeSharp * ridgeSharp * 0.32);
+
+          const basinProfile = forelandWeight * Math.exp(-Math.pow(basinNd, 1.25));
+          const basinContribution = belt.basinAmplitude * basinProfile;
+          base[y * width + x] += ridgeContribution - basinContribution;
         }
       }
     }
@@ -238,8 +267,6 @@ function buildMacroDem(input: DemCoreInput): Float32Array {
   const tiltAngle = rng() * Math.PI * 2;
   const tiltX = Math.cos(tiltAngle);
   const tiltY = Math.sin(tiltAngle);
-  const tiltMag = 0.2 + reliefNorm * 0.25;
-
   for (let y = 0; y < height; y += 1) {
     const ny = y / Math.max(1, height - 1);
     for (let x = 0; x < width; x += 1) {
@@ -247,17 +274,34 @@ function buildMacroDem(input: DemCoreInput): Float32Array {
       const index = y * width + x;
       const macroNoise = (fbm(seed ^ 0x5be0cd19, nx * 1.7, ny * 1.7, 4, 0.58, 2.02) - 0.5) * (0.28 + reliefNorm * 0.12);
       const regionalNoise = (fbm(seed ^ 0x1f83d9ab, nx * 4.2, ny * 4.2, 3, 0.56, 2.1) - 0.5) * (0.16 + fragNorm * 0.1);
-      const tilt = ((nx - 0.5) * tiltX + (ny - 0.5) * tiltY) * tiltMag;
-      dem[index] = macroNoise + regionalNoise + tilt;
+      dem[index] = macroNoise + regionalNoise;
     }
   }
 
   const beltCount = clamp(2 + Math.round(reliefNorm * 2), 2, 4);
   const belts: Belt[] = [];
+  const dominantBelt = Math.floor(rng() * beltCount);
   for (let i = 0; i < beltCount; i += 1) {
-    belts.push(buildBelt(rng, width, height));
+    const dominant = i === dominantBelt;
+    const belt = buildBelt(rng, width, height, reliefNorm, dominant);
+    belt.basinAmplitude = belt.amplitude * (0.3 + rng() * 0.3);
+    belt.basinWidth = belt.width * (1.5 + rng() * 0.5);
+    belts.push(belt);
   }
   applyBelts(dem, width, height, belts);
+
+  let peakBelt = 1;
+  for (const belt of belts) {
+    peakBelt = Math.max(peakBelt, belt.amplitude);
+  }
+  const continentalTilt = peakBelt * (0.01 + rng() * 0.02);
+  for (let y = 0; y < height; y += 1) {
+    const ny = y / Math.max(1, height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const nx = x / Math.max(1, width - 1);
+      dem[y * width + x] += ((nx - 0.5) * tiltX + (ny - 0.5) * tiltY) * continentalTilt;
+    }
+  }
 
   const cratonCount = clamp(1 + Math.round((1 - fragNorm) * 2), 1, 3);
   applyGaussians(dem, width, height, cratonCount, rng, 0.22, 0.45, 0.14, 0.24);
