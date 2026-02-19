@@ -685,13 +685,13 @@ function applyAnisotropicRidges(
       const along = px * tx + py * ty;
       const across = -px * ty + py * tx;
 
-      const backbone = ridgedFbm(seed ^ 0x6aa4bb1d, along * 6.2, across * 1.9, 3, 0.6, 2.05);
+      const backbone = ridgedFbm(seed ^ 0x6aa4bb1d, along * 6.8, across * 1.7, 3, 0.6, 2.05);
       const medium = ridgedFbm(seed ^ 0x9e315f07, along * 13.4, across * 4.5, 3, 0.56, 2.1);
       const fine = ridgedFbm(seed ^ 0xc31fd4a9, along * 24.6, across * 9.1, 2, 0.54, 2.2);
       const ridges = backbone * 0.5 + medium * 0.34 + fine * 0.16;
 
       const ridgeSigned = (ridges - 0.5) * 2;
-      const amplitude = (0.022 + reliefNorm * 0.09 + peakNorm * 0.1) * mountainMask * (0.35 + localStress * 1.05);
+      const amplitude = (0.022 + reliefNorm * 0.094 + peakNorm * 0.1) * mountainMask * (0.34 + localStress * 1.08);
       const valley = (1 - ridges) * (0.008 + reliefNorm * 0.04 + peakNorm * 0.03) * mountainMask;
       next[index] = clamp01(elevation[index] + ridgeSigned * amplitude - valley);
     }
