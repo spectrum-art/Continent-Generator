@@ -622,6 +622,25 @@ function buildRidgeGraph(
         lastSecondaryNode = childId;
       }
 
+      if (lastSecondaryNode >= 0 && valueNoise(seed ^ (belt.id * 131 + i * 97), i * 0.27, 0.91) > 0.72) {
+        const mirrorSign = -sign;
+        const mirrorAngle = (28 + valueNoise(seed ^ (belt.id * 719 + i * 29), i * 0.09, 0.77) * 18) * (Math.PI / 180) * mirrorSign;
+        const cA = Math.cos(mirrorAngle);
+        const sA = Math.sin(mirrorAngle);
+        const mdx0 = tx * cA - ty * sA;
+        const mdy0 = tx * sA + ty * cA;
+        const parent = nodes[beltNodeIds[i]];
+        const mChild = pushNode(parent.x + mdx0 * stepLength * 0.9, parent.y + mdy0 * stepLength * 0.9);
+        secondaryEdges.push({
+          a: beltNodeIds[i],
+          b: mChild,
+          level: 1,
+          width: belt.width * 0.3,
+          amplitude: primaryAmplitude * 0.38,
+        });
+        linkDegree(beltNodeIds[i], mChild);
+      }
+
       if (lastSecondaryNode >= 0 && valueNoise(seed ^ (i * 887 + belt.id * 29), i * 0.17, 0.61) > 0.45) {
         const tertiarySegments = 2;
         const step = belt.width * 0.22;
