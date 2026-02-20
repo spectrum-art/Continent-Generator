@@ -92,9 +92,16 @@ def generate_tectonic_scaffold(
 
     crust, shelf = _crust_and_shelf_fields(land_mask, cfg)
 
-    zeros = np.zeros((height, width), dtype=np.float32)
     orogeny = np.clip(orogeny * (0.2 + 0.8 * crust), 0.0, 1.0).astype(np.float32)
     rift = np.clip(rift * (0.4 + 0.6 * np.maximum(crust, 1.0 - shelf)), 0.0, 1.0).astype(np.float32)
+    interior_basin = _interior_basin_field(
+        width,
+        height,
+        land_mask,
+        crust,
+        rng.fork("tectonics_interior_basin"),
+        cfg,
+    )
 
     return TectonicsResult(
         plate_count=plate_count,
@@ -116,7 +123,7 @@ def generate_tectonic_scaffold(
         transform_field=transform,
         crust_thickness=crust,
         shelf_proximity=shelf,
-        interior_basin_field=zeros,
+        interior_basin_field=interior_basin,
     )
 
 
@@ -401,6 +408,33 @@ def _crust_and_shelf_fields(land_mask: np.ndarray, cfg: TectonicsConfig) -> tupl
     shelf = box_blur(land, cfg.shelf_radius_px, passes=max(1, cfg.blur_passes - 1))
     shelf = np.power(np.clip(shelf, 0.0, 1.0), cfg.shelf_power)
     return crust.astype(np.float32), shelf.astype(np.float32)
+
+
+def _interior_basin_field(
+    width: int,
+    height: int,
+    land_mask: np.ndarray,
+    crust: np.ndarray,
+    rng: RngStream,
+    cfg: TectonicsConfig,
+) -> np.ndarray:
+    noise = fbm_noise(
+        width,
+        height,
+        rng.fork("basin-noise").generator(),
+        base_res=cfg.interior_basin_base_res,
+        octaves=cfg.interior_basin_octaves,
+    )
+    noise_norm = _normalize01(noise)
+    lowland_noise = 1.0 - noise_norm
+    broad_interior = box_blur(
+        np.clip(crust - 0.25, 0.0, 1.0),
+        cfg.interior_basin_radius_px,
+        passes=cfg.blur_passes,
+    )
+    interior_basin = broad_interior * lowland_noise * land_mask.astype(np.float32)
+    interior_basin = np.power(_normalize01(interior_basin), cfg.interior_basin_power)
+    return interior_basin.astype(np.float32)
 
 
 def _normalize01(values: np.ndarray) -> np.ndarray:

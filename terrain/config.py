@@ -41,6 +41,7 @@ class HeightConfig:
     rift_strength_m: float = 950.0
     transform_strength_m: float = 280.0
     tectonic_detail_m: float = 140.0
+    interior_basin_strength_m: float = 1200.0
     detail_land_m: float = 180.0
     detail_ocean_m: float = 70.0
     ocean_depth_m: float = 3200.0
@@ -79,6 +80,10 @@ class TectonicsConfig:
     triple_junction_boost: float = 0.7
     orogeny_tangent_base_res: int = 7
     orogeny_tangent_octaves: int = 4
+    interior_basin_base_res: int = 3
+    interior_basin_octaves: int = 4
+    interior_basin_radius_px: int = 18
+    interior_basin_power: float = 1.4
     crust_power: float = 1.3
     shelf_power: float = 1.8
 

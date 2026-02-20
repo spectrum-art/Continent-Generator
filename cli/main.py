@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     crust_8 = float_preview_u8(result.tectonics.crust_thickness, robust_percentiles=(0.0, 100.0))
     orogeny_8 = float_preview_u8(result.tectonics.orogeny_field, robust_percentiles=(0.0, 100.0))
     orogeny_tangent_8 = float_preview_u8(result.tectonics.orogeny_tangent, robust_percentiles=(0.0, 100.0))
+    interior_basin_8 = float_preview_u8(result.tectonics.interior_basin_field, robust_percentiles=(0.0, 100.0))
 
     out_dir = resolve_output_dir(
         args.out,
@@ -109,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     write_png_u8(out_dir / "debug_crust.png", crust_8)
     write_png_u8(out_dir / "debug_orogeny.png", orogeny_8)
     write_png_u8(out_dir / "debug_orogeny_tangent.png", orogeny_tangent_8)
+    write_png_u8(out_dir / "debug_interior_basin.png", interior_basin_8)
 
     if args.json:
         timestamp = datetime.now(timezone.utc).isoformat()

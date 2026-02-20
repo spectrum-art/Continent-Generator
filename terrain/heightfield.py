@@ -110,6 +110,7 @@ def generate_heightfield(
         + orogeny * cfg.height.orogeny_strength_m
         + transform * cfg.height.transform_strength_m
         - rift * cfg.height.rift_strength_m
+        - tectonics.interior_basin_field * cfg.height.interior_basin_strength_m
     )
 
     detail = fbm_noise(width, height, rng.fork("detail").generator(), base_res=10, octaves=4)
