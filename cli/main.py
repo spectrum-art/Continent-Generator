@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from pathlib import Path
+import platform
+import time
 
+import numpy as np
 from terrain.config import DEFAULT_HEIGHT, DEFAULT_MPP, DEFAULT_WIDTH, GeneratorConfig
 from terrain.derive import (
     boundary_type_u8,
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     config = GeneratorConfig()
     rng = RngStream(parsed_seed.seed_hash)
 
+    generation_start = time.perf_counter()
     result = generate_heightfield(
         args.w,
         args.h,
@@ -58,12 +61,14 @@ def main(argv: list[str] | None = None) -> int:
         rng,
         config=config,
     )
+    generation_seconds = time.perf_counter() - generation_start
 
     shade = hillshade(
         result.height_m,
         meters_per_pixel=args.mpp,
         azimuth_deg=config.render.hillshade_azimuth_deg,
         altitude_deg=config.render.hillshade_altitude_deg,
+        z_factor=config.render.hillshade_z_factor,
     )
     height_16 = height_preview_u16(result.height_m)
     mask_8 = land_mask_u8(result.land_mask)
@@ -124,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
             **deterministic_meta,
             "generated_at_utc": timestamp,
             "original_seed": parsed_seed.original,
+            "generation_seconds": generation_seconds,
+            "python_version": platform.python_version(),
+            "numpy_version": np.__version__,
         }
         write_json(out_dir / "deterministic_meta.json", deterministic_meta)
         write_json(out_dir / "meta.json", meta)
@@ -134,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{result.mask_metrics.land_fraction:.3f}; "
         f"dominant landmass ratio {result.mask_metrics.largest_land_ratio:.3f}"
     )
+    print(f"Generation time: {generation_seconds:.3f} s ({args.w}x{args.h})")
     return 0
 
 

@@ -11,6 +11,7 @@ def hillshade(
     meters_per_pixel: float,
     azimuth_deg: float = 315.0,
     altitude_deg: float = 45.0,
+    z_factor: float = 1.0,
 ) -> np.ndarray:
     """Compute an 8-bit grayscale hillshade from a heightfield."""
 
@@ -20,6 +21,8 @@ def hillshade(
         raise ValueError("meters_per_pixel must be positive")
 
     dz_dy, dz_dx = np.gradient(height_m.astype(np.float32), meters_per_pixel, meters_per_pixel)
+    dz_dx = dz_dx * float(z_factor)
+    dz_dy = dz_dy * float(z_factor)
 
     slope = np.pi / 2.0 - np.arctan(np.hypot(dz_dx, dz_dy))
     aspect = np.arctan2(-dz_dx, dz_dy)

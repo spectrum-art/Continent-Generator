@@ -1,25 +1,30 @@
 # Terrain Generator Spec
 
 ## Milestone 0 (Completed)
-Milestone 0 established a deterministic continent-scale heightfield pipeline with:
-- Seed parsing + canonicalization
-- Forked RNG streams
-- Land mask and connected-component metrics
-- Heightfield + hillshade + preview outputs
+Milestone 0 established deterministic continent-scale heightfield generation with seed parsing, forked RNG, mask metrics, and baseline outputs.
 
-## Milestone 1 Goal
-Introduce a deterministic plate-proxy tectonic scaffold that improves continental relief realism with directional mountain belts, rifts, and transform-like lineaments, while keeping raster heightfield as source of truth.
+## Milestone 1 (Completed)
+Milestone 1 adds a deterministic plate-proxy tectonic scaffold and integrates it into uplift.
 
-## Milestone 1 Constraints
+## Milestone 1 Constraints (Maintained)
 - Deterministic for `(seed, width, height, mpp, config)`
-- No SciPy; use `numpy` + `Pillow` only
-- Forked RNG per stage (`tectonics_plate_count`, `tectonics_plate_sites`, `tectonics_plate_motion`, etc.)
-- Architecture remains compatible with future fragmentation/supercontinent controls
+- Raster heightfield remains source of truth
+- No SciPy dependency
+- Forked RNG by stage to keep refactors stable
 
 ## Milestone 1 Acceptance Criteria
-- `terrain/tectonics.py` provides plate-partition and boundary-derived tectonic fields.
-- Height pipeline consumes tectonics fields to produce directional, clustered mountain belts and elongated rift lowlands.
-- CLI writes tectonic debug outputs:
+- `terrain/tectonics.py` generates:
+  - plate partition (`6..12` plates)
+  - plate motion vectors
+  - boundary classification (`convergent/divergent/transform`)
+  - tectonic intensity fields (`orogeny`, `rift`, `transform`)
+  - crust and shelf proxy fields
+- `terrain/heightfield.py` consumes tectonic fields for structured uplift:
+  - directional mountain belts (plate-fabric anisotropy)
+  - elongated rift lowlands
+  - transform lineament modulation
+  - shelf-influenced ocean depth transition
+- CLI outputs include tectonic debug rasters:
   - `debug_plates.png`
   - `debug_boundary_type.png`
   - `debug_convergence.png`
@@ -27,12 +32,13 @@ Introduce a deterministic plate-proxy tectonic scaffold that improves continenta
   - `debug_transform.png`
   - `debug_crust.png`
   - `debug_orogeny.png`
-- Determinism is preserved for `height.npy` and PNG outputs.
-- CLI prints generation runtime and stores runtime only in `meta.json`.
-- `deterministic_meta.json` remains strictly deterministic and excludes runtime and timestamp.
+- Runtime instrumentation:
+  - CLI prints generation runtime
+  - `meta.json` includes `generation_seconds`
+  - `deterministic_meta.json` excludes runtime and timestamps
+- Tests cover deterministic tectonic fields and basic structural sanity.
 
-## Design Notes
-- Plate proxy uses 6–12 Voronoi-like plates from deterministic site sampling.
-- Boundary classes: convergent/divergent/transform from relative motion and local boundary normal.
-- Tectonic intensity fields are widened by repeated box blur passes (no distance transform dependency).
-- Crust/shelf fields use blurred land-mask proxies to shape interiors and ocean margins.
+## Design Decisions
+- Boundary class assignment uses deterministic neighbor-direction priority.
+- Belt widths use repeated box blur passes (distance-transform-free approximation).
+- Plate-level motion vectors define local tectonic fabric orientation for anisotropic uplift.
