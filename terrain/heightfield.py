@@ -1,0 +1,1 @@
+"""Heightfield composition pipeline."""
