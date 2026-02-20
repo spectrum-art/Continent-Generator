@@ -14,6 +14,7 @@ from terrain.derive import (
     hillshade,
     land_mask_u8,
     plate_ids_u8,
+    signed_preview_u8,
 )
 from terrain.heightfield import generate_heightfield
 from terrain.io import resolve_output_dir, write_height_npy, write_json, write_png_u16, write_png_u8
@@ -70,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     uplift_8 = float_preview_u8(result.uplift, robust_percentiles=(1.0, 99.0))
     plates_8 = plate_ids_u8(result.tectonics.plate_ids, result.tectonics.plate_count)
     boundary_type_8 = boundary_type_u8(result.tectonics.boundary_type)
+    convergence_8 = signed_preview_u8(result.tectonics.convergence_field)
+    rift_8 = float_preview_u8(result.tectonics.rift_field, robust_percentiles=(0.0, 100.0))
+    transform_8 = float_preview_u8(result.tectonics.transform_field, robust_percentiles=(0.0, 100.0))
+    crust_8 = float_preview_u8(result.tectonics.crust_thickness, robust_percentiles=(0.0, 100.0))
+    orogeny_8 = float_preview_u8(result.tectonics.orogeny_field, robust_percentiles=(0.0, 100.0))
 
     out_dir = resolve_output_dir(
         args.out,
@@ -87,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     write_png_u8(out_dir / "debug_uplift.png", uplift_8)
     write_png_u8(out_dir / "debug_plates.png", plates_8)
     write_png_u8(out_dir / "debug_boundary_type.png", boundary_type_8)
+    write_png_u8(out_dir / "debug_convergence.png", convergence_8)
+    write_png_u8(out_dir / "debug_rift.png", rift_8)
+    write_png_u8(out_dir / "debug_transform.png", transform_8)
+    write_png_u8(out_dir / "debug_crust.png", crust_8)
+    write_png_u8(out_dir / "debug_orogeny.png", orogeny_8)
 
     if args.json:
         timestamp = datetime.now(timezone.utc).isoformat()

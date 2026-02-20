@@ -104,8 +104,16 @@ def generate_heightfield(
         0.0,
         1.0,
     )
+    shelf_depth = np.power(
+        np.clip(1.0 - tectonics.shelf_proximity, 0.0, 1.0),
+        cfg.height.shelf_depth_power,
+    )
+    ocean_depth_factor = (
+        ocean_factor * (1.0 - cfg.height.ocean_shelf_blend)
+        + shelf_depth * cfg.height.ocean_shelf_blend
+    )
 
-    ocean_height = -ocean_factor * cfg.height.ocean_depth_m + detail * cfg.height.detail_ocean_m
+    ocean_height = -ocean_depth_factor * cfg.height.ocean_depth_m + detail * cfg.height.detail_ocean_m
     ocean_height = np.maximum(ocean_height, -cfg.height.max_ocean_depth_m)
     ocean_height = np.minimum(ocean_height, 0.0)
 

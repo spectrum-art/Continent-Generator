@@ -43,6 +43,8 @@ class HeightConfig:
     max_land_height_m: float = 6800.0
     min_land_height_m: float = 5.0
     uplift_warp_strength_px: float = 20.0
+    ocean_shelf_blend: float = 0.55
+    shelf_depth_power: float = 1.7
 
 
 @dataclass(frozen=True)

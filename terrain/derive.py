@@ -74,3 +74,11 @@ def boundary_type_u8(boundary_type: np.ndarray) -> np.ndarray:
     lut = np.array([0, 85, 170, 255], dtype=np.uint8)
     clipped = np.clip(boundary_type.astype(np.int16), 0, 3)
     return lut[clipped]
+
+
+def signed_preview_u8(values: np.ndarray, *, clip: float = 1.0) -> np.ndarray:
+    """Map signed float values in [-clip, clip] into 8-bit [0, 255]."""
+
+    normalized = np.clip(values.astype(np.float32) / max(clip, 1e-6), -1.0, 1.0)
+    encoded = (normalized * 0.5) + 0.5
+    return np.round(encoded * 255.0).astype(np.uint8)
