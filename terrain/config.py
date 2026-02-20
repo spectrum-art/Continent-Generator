@@ -94,7 +94,7 @@ class RenderConfig:
 
     hillshade_azimuth_deg: float = 315.0
     hillshade_altitude_deg: float = 45.0
-    hillshade_z_factor: float = 8.0
+    hillshade_vertical_exaggeration: float = 6.0
 
 
 @dataclass(frozen=True)

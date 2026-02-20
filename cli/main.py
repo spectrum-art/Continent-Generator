@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         meters_per_pixel=args.mpp,
         azimuth_deg=config.render.hillshade_azimuth_deg,
         altitude_deg=config.render.hillshade_altitude_deg,
-        z_factor=config.render.hillshade_z_factor,
+        hillshade_vertical_exaggeration=config.render.hillshade_vertical_exaggeration,
     )
     height_16 = height_preview_u16(result.height_m)
     mask_8 = land_mask_u8(result.land_mask)
