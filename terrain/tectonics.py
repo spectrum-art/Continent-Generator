@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from terrain.config import TectonicsConfig
+from terrain.noise import fbm_noise
 from terrain.rng import RngStream
 
 
@@ -16,16 +17,24 @@ class TectonicsResult:
 
     plate_count: int
     plate_ids: np.ndarray
+    raw_plate_ids: np.ndarray
+    warped_plate_ids: np.ndarray
     plate_sites: np.ndarray
     plate_motion: np.ndarray
+    boundary_warp_magnitude: np.ndarray
     boundary_mask: np.ndarray
     boundary_type: np.ndarray
     convergence_field: np.ndarray
+    boundary_tangent_x: np.ndarray
+    boundary_tangent_y: np.ndarray
+    triple_junction_field: np.ndarray
+    orogeny_tangent: np.ndarray
     orogeny_field: np.ndarray
     rift_field: np.ndarray
     transform_field: np.ndarray
     crust_thickness: np.ndarray
     shelf_proximity: np.ndarray
+    interior_basin_field: np.ndarray
 
 
 def generate_tectonic_scaffold(
@@ -47,11 +56,15 @@ def generate_tectonic_scaffold(
 
     plate_count = _sample_plate_count(rng.fork("tectonics_plate_count"), cfg)
     sites = _sample_plate_sites(rng.fork("tectonics_plate_sites"), plate_count, cfg.site_min_distance)
-    plate_ids = _partition_plates(width, height, sites)
+
+    coord_x, coord_y, warp_magnitude = _warped_coordinates(width, height, rng.fork("tectonics_plate_warp"), cfg)
+    raw_x, raw_y = _normalized_grid(width, height)
+    raw_plate_ids = _partition_plates(raw_x, raw_y, sites)
+    warped_plate_ids = _partition_plates(coord_x, coord_y, sites)
     motion = _sample_plate_motion(rng.fork("tectonics_plate_motion"), plate_count)
 
-    boundary_type, convergence = _classify_boundaries(
-        plate_ids,
+    boundary_type, convergence, tangent_x, tangent_y = _classify_boundaries(
+        warped_plate_ids,
         motion,
         threshold=cfg.boundary_convergence_threshold,
     )
@@ -60,22 +73,31 @@ def generate_tectonic_scaffold(
     orogeny, rift, transform = _tectonic_intensity_fields(boundary_type, cfg)
     crust, shelf = _crust_and_shelf_fields(land_mask, cfg)
 
+    zeros = np.zeros((height, width), dtype=np.float32)
     orogeny = np.clip(orogeny * (0.2 + 0.8 * crust), 0.0, 1.0).astype(np.float32)
     rift = np.clip(rift * (0.4 + 0.6 * np.maximum(crust, 1.0 - shelf)), 0.0, 1.0).astype(np.float32)
 
     return TectonicsResult(
         plate_count=plate_count,
-        plate_ids=plate_ids,
+        plate_ids=warped_plate_ids,
+        raw_plate_ids=raw_plate_ids,
+        warped_plate_ids=warped_plate_ids,
         plate_sites=sites,
         plate_motion=motion,
+        boundary_warp_magnitude=warp_magnitude,
         boundary_mask=boundary_mask,
         boundary_type=boundary_type,
         convergence_field=convergence,
+        boundary_tangent_x=tangent_x,
+        boundary_tangent_y=tangent_y,
+        triple_junction_field=zeros,
+        orogeny_tangent=zeros,
         orogeny_field=orogeny,
         rift_field=rift,
         transform_field=transform,
         crust_thickness=crust,
         shelf_proximity=shelf,
+        interior_basin_field=zeros,
     )
 
 
@@ -136,16 +158,66 @@ def _sample_plate_sites(rng: RngStream, plate_count: int, min_distance: float) -
     return np.stack(sites[:plate_count]).astype(np.float32)
 
 
-def _partition_plates(width: int, height: int, sites: np.ndarray) -> np.ndarray:
+def _normalized_grid(width: int, height: int) -> tuple[np.ndarray, np.ndarray]:
     x_coords = (np.arange(width, dtype=np.float32) + 0.5) / float(width)
     y_coords = (np.arange(height, dtype=np.float32) + 0.5) / float(height)
+    return np.broadcast_to(x_coords[None, :], (height, width)), np.broadcast_to(y_coords[:, None], (height, width))
 
+
+def _warped_coordinates(
+    width: int,
+    height: int,
+    rng: RngStream,
+    cfg: TectonicsConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    base_x, base_y = _normalized_grid(width, height)
+
+    low_x = fbm_noise(
+        width,
+        height,
+        rng.fork("plate-warp-low-x").generator(),
+        base_res=cfg.plate_warp_base_res,
+        octaves=cfg.plate_warp_octaves,
+    )
+    low_y = fbm_noise(
+        width,
+        height,
+        rng.fork("plate-warp-low-y").generator(),
+        base_res=cfg.plate_warp_base_res,
+        octaves=cfg.plate_warp_octaves,
+    )
+    jitter_x = fbm_noise(
+        width,
+        height,
+        rng.fork("plate-warp-jitter-x").generator(),
+        base_res=cfg.boundary_jitter_base_res,
+        octaves=cfg.boundary_jitter_octaves,
+    )
+    jitter_y = fbm_noise(
+        width,
+        height,
+        rng.fork("plate-warp-jitter-y").generator(),
+        base_res=cfg.boundary_jitter_base_res,
+        octaves=cfg.boundary_jitter_octaves,
+    )
+
+    delta_x_px = low_x * cfg.plate_warp_strength_px + jitter_x * cfg.boundary_jitter_strength_px
+    delta_y_px = low_y * cfg.plate_warp_strength_px + jitter_y * cfg.boundary_jitter_strength_px
+
+    warped_x = np.clip(base_x + delta_x_px / float(max(width - 1, 1)), 0.0, 1.0)
+    warped_y = np.clip(base_y + delta_y_px / float(max(height - 1, 1)), 0.0, 1.0)
+    warp_magnitude = _normalize01(np.hypot(delta_x_px, delta_y_px))
+    return warped_x.astype(np.float32), warped_y.astype(np.float32), warp_magnitude.astype(np.float32)
+
+
+def _partition_plates(coord_x: np.ndarray, coord_y: np.ndarray, sites: np.ndarray) -> np.ndarray:
+    height, width = coord_x.shape
     plate_ids = np.zeros((height, width), dtype=np.int16)
     best_dist = np.full((height, width), np.inf, dtype=np.float32)
 
     for idx, site in enumerate(sites):
-        dx = x_coords[None, :] - site[0]
-        dy = y_coords[:, None] - site[1]
+        dx = coord_x - site[0]
+        dy = coord_y - site[1]
         dist = dx * dx + dy * dy
         closer = dist < best_dist
         plate_ids[closer] = idx
@@ -165,10 +237,12 @@ def _classify_boundaries(
     motion: np.ndarray,
     *,
     threshold: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     height, width = plate_ids.shape
     boundary_type = np.zeros((height, width), dtype=np.int8)
     convergence = np.zeros((height, width), dtype=np.float32)
+    tangent_x = np.zeros((height, width), dtype=np.float32)
+    tangent_y = np.zeros((height, width), dtype=np.float32)
     assigned = np.zeros((height, width), dtype=bool)
 
     directions = [
@@ -207,9 +281,9 @@ def _classify_boundaries(
             continue
 
         dv = motion[b] - motion[a]
-        norm = float(np.hypot(dx, dy))
-        nx = float(dx / norm)
-        ny = float(dy / norm)
+        normal_length = float(np.hypot(dx, dy))
+        nx = float(dx / normal_length)
+        ny = float(dy / normal_length)
         c = dv[..., 0] * nx + dv[..., 1] * ny
 
         cls = np.full(c.shape, 3, dtype=np.int8)
@@ -218,16 +292,22 @@ def _classify_boundaries(
 
         region_type = boundary_type[sy0:sy1, sx0:sx1]
         region_conv = convergence[sy0:sy1, sx0:sx1]
+        region_tx = tangent_x[sy0:sy1, sx0:sx1]
+        region_ty = tangent_y[sy0:sy1, sx0:sx1]
 
         region_type[take] = cls[take]
         region_conv[take] = np.clip(c[take] * 0.5, -1.0, 1.0).astype(np.float32)
+        region_tx[take] = -ny
+        region_ty[take] = nx
         region_assigned[take] = True
 
         boundary_type[sy0:sy1, sx0:sx1] = region_type
         convergence[sy0:sy1, sx0:sx1] = region_conv
+        tangent_x[sy0:sy1, sx0:sx1] = region_tx
+        tangent_y[sy0:sy1, sx0:sx1] = region_ty
         assigned[sy0:sy1, sx0:sx1] = region_assigned
 
-    return boundary_type, convergence
+    return boundary_type, convergence, tangent_x, tangent_y
 
 
 def _tectonic_intensity_fields(boundary_type: np.ndarray, cfg: TectonicsConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

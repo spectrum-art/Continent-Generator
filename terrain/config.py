@@ -59,6 +59,12 @@ class TectonicsConfig:
     min_plate_count: int = 6
     max_plate_count: int = 12
     site_min_distance: float = 0.12
+    plate_warp_base_res: int = 2
+    plate_warp_octaves: int = 3
+    plate_warp_strength_px: float = 120.0
+    boundary_jitter_base_res: int = 10
+    boundary_jitter_octaves: int = 3
+    boundary_jitter_strength_px: float = 14.0
     boundary_convergence_threshold: float = 0.25
     blur_passes: int = 3
     orogeny_radius_px: int = 10
