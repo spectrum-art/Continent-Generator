@@ -79,25 +79,41 @@ def generate_heightfield(
         base_res=1,
         octaves=3,
     )
-    uplift = warp_field(
+    background_uplift = warp_field(
         ridged,
         uplift_warp_x,
         uplift_warp_y,
         strength_px=cfg.height.uplift_warp_strength_px,
     )
-    uplift = _normalize01(uplift)
+    background_uplift = _normalize01(background_uplift)
+
+    fabric_a = fbm_noise(width, height, rng.fork("tectonic-fabric-a").generator(), base_res=7, octaves=4)
+    fabric_b = fbm_noise(width, height, rng.fork("tectonic-fabric-b").generator(), base_res=7, octaves=4)
+    fabric_signal = _plate_fabric_signal(tectonics.plate_ids, tectonics.plate_motion, fabric_a, fabric_b)
+    fabric_ridge = np.square(np.clip(1.0 - np.abs(fabric_signal), 0.0, 1.0)).astype(np.float32)
+    fabric_lineament = np.clip(np.abs(fabric_signal), 0.0, 1.0).astype(np.float32)
 
     basin = fbm_noise(width, height, rng.fork("basin").generator(), base_res=4, octaves=4)
     basin_term = np.clip(0.62 - (basin + 1.0) * 0.5, 0.0, 1.0)
 
+    rift_noise = _normalize01(fbm_noise(width, height, rng.fork("rift-noise").generator(), base_res=6, octaves=3))
+    orogeny = tectonics.orogeny_field * fabric_ridge
+    rift = tectonics.rift_field * (0.45 + 0.55 * rift_noise)
+    transform = tectonics.transform_field * fabric_lineament
+
     macro_land = (
         cfg.height.base_land_lift_m
         + continentality * cfg.height.continentality_height_m
-        + uplift * cfg.height.ridge_height_m
+        + background_uplift * cfg.height.ridge_height_m
+        + tectonics.crust_thickness * cfg.height.crust_height_m
         + basin_term * cfg.height.basin_height_m
+        + orogeny * cfg.height.orogeny_strength_m
+        + transform * cfg.height.transform_strength_m
+        - rift * cfg.height.rift_strength_m
     )
 
     detail = fbm_noise(width, height, rng.fork("detail").generator(), base_res=10, octaves=4)
+    tectonic_detail = fabric_signal * tectonics.transform_field * cfg.height.tectonic_detail_m
 
     ocean_factor = np.clip(
         (threshold - potential) / max(threshold, 1e-6),
@@ -114,11 +130,12 @@ def generate_heightfield(
     )
 
     ocean_height = -ocean_depth_factor * cfg.height.ocean_depth_m + detail * cfg.height.detail_ocean_m
+    ocean_height -= tectonics.rift_field * (1.0 - tectonics.shelf_proximity) * (cfg.height.rift_strength_m * 0.18)
     ocean_height = np.maximum(ocean_height, -cfg.height.max_ocean_depth_m)
     ocean_height = np.minimum(ocean_height, 0.0)
 
     full_height = ocean_height.astype(np.float32)
-    land_height = macro_land + detail * cfg.height.detail_land_m
+    land_height = macro_land + detail * cfg.height.detail_land_m + tectonic_detail
     land_height = np.clip(
         land_height,
         cfg.height.min_land_height_m,
@@ -132,14 +149,26 @@ def generate_heightfield(
         cfg.height.max_land_height_m,
     ).astype(np.float32)
 
+    uplift_debug = _normalize01(background_uplift * 0.35 + orogeny * 0.65)
     return HeightfieldResult(
         height_m=full_height,
         land_mask=land,
         mask_potential=potential,
-        uplift=uplift,
+        uplift=uplift_debug,
         mask_metrics=mask_result.metrics,
         tectonics=tectonics,
     )
+
+
+def _plate_fabric_signal(
+    plate_ids: np.ndarray,
+    plate_motion: np.ndarray,
+    field_a: np.ndarray,
+    field_b: np.ndarray,
+) -> np.ndarray:
+    motion = plate_motion[plate_ids]
+    signal = field_a * motion[..., 0] + field_b * motion[..., 1]
+    return np.clip(signal, -1.0, 1.0).astype(np.float32)
 
 
 def _normalize01(values: np.ndarray) -> np.ndarray:

@@ -36,6 +36,11 @@ class HeightConfig:
     continentality_height_m: float = 2300.0
     ridge_height_m: float = 3000.0
     basin_height_m: float = 900.0
+    crust_height_m: float = 460.0
+    orogeny_strength_m: float = 2600.0
+    rift_strength_m: float = 950.0
+    transform_strength_m: float = 280.0
+    tectonic_detail_m: float = 140.0
     detail_land_m: float = 180.0
     detail_ocean_m: float = 70.0
     ocean_depth_m: float = 3200.0
