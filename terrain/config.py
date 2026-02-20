@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 DEFAULT_WIDTH = 2048
@@ -28,10 +29,20 @@ class MaskConfig:
 
 
 @dataclass(frozen=True)
-class GeneratorConfig:
-    """Primary generation configuration."""
+class HeightConfig:
+    """Controls macro and detail terrain amplitudes in meters."""
 
-    mask: MaskConfig = field(default_factory=MaskConfig)
+    base_land_lift_m: float = 80.0
+    continentality_height_m: float = 2300.0
+    ridge_height_m: float = 3000.0
+    basin_height_m: float = 900.0
+    detail_land_m: float = 180.0
+    detail_ocean_m: float = 70.0
+    ocean_depth_m: float = 3200.0
+    max_ocean_depth_m: float = 5200.0
+    max_land_height_m: float = 6800.0
+    min_land_height_m: float = 5.0
+    uplift_warp_strength_px: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -40,3 +51,15 @@ class RenderConfig:
 
     hillshade_azimuth_deg: float = 315.0
     hillshade_altitude_deg: float = 45.0
+
+
+@dataclass(frozen=True)
+class GeneratorConfig:
+    """Primary generation configuration."""
+
+    mask: MaskConfig = field(default_factory=MaskConfig)
+    height: HeightConfig = field(default_factory=HeightConfig)
+    render: RenderConfig = field(default_factory=RenderConfig)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
