@@ -1,38 +1,33 @@
-# Milestone 0 Plan
+# Milestone 1 Plan
 
 ## Commit Checklist
 
-1. `milestone0: scaffold python project structure`
-- [x] Add `pyproject.toml` and `.gitignore`
-- [x] Add package/module skeleton for `terrain/` and `cli/`
-- [x] Add docs (`docs/spec.md`, `docs/plan.md`)
-- [x] Update `README.md` with setup/run expectations
-- [x] Run tests
+1. `milestone1: specs + plan + scaffolding for tectonics`
+- [x] Update docs with Milestone 1 acceptance criteria
+- [x] Add `terrain/tectonics.py` scaffolding
+- [x] Add tectonics config placeholders
 
-2. `milestone0: seed parsing + deterministic rng streams`
-- [x] Implement seed dictionaries and parser
-- [x] Implement stable seed hashing
-- [x] Implement forkable RNG stream utility
-- [x] Add/expand seed parsing tests
-- [x] Run tests
+2. `milestone1: plate partition + boundary classification`
+- [ ] Implement deterministic plate count, site sampling, and plate partition
+- [ ] Implement plate motion vectors
+- [ ] Implement boundary detection and convergent/divergent/transform classification
+- [ ] Add deterministic tectonics tests
+- [ ] Add rough debug output support for plates and boundary type
 
-3. `milestone0: land mask + metrics (dominant continent + islands)`
-- [x] Implement noise utilities sufficient for mask potential
-- [x] Implement land mask generation with smoothing and dominant-component targeting
-- [x] Implement connected components + dominant ratio metrics
-- [x] Add sanity tests for land fraction and dominant ratio
-- [x] Run tests
+3. `milestone1: tectonic intensity fields + crust thickness + shelf model`
+- [ ] Implement fast repeated box blur utility
+- [ ] Derive orogeny/rift/transform intensity fields
+- [ ] Add crust thickness and shelf proximity fields
+- [ ] Wire debug PNG outputs for tectonic float fields
 
-4. `milestone0: heightfield pipeline + hillshade + io + cli`
-- [x] Implement configurable height pipeline
-- [x] Implement hillshade and preview conversions
-- [x] Implement output writers and metadata
-- [x] Implement CLI arguments and generation flow
-- [x] Add determinism test
-- [x] Run tests and a full `2048x1024` sample generation
+4. `milestone1: integrate tectonics into heightfield + improve hillshade realism`
+- [ ] Refactor heightfield to use tectonic fields for structured uplift and rift subsidence
+- [ ] Add plate-fabric anisotropy for directional belts
+- [ ] Preserve deterministic output guarantees
 
-5. `milestone0: polish docs + tighten tests`
-- [x] Tighten docs and examples
-- [x] Stabilize tests and thresholds
-- [x] Verify deterministic metadata handling
-- [x] Re-run tests and final sample generation
+5. `milestone1: runtime logging + tighten tests + docs polish`
+- [ ] Add generation timing printout and `meta.json` runtime fields
+- [ ] Keep timing out of `deterministic_meta.json`
+- [ ] Update README for new outputs
+- [ ] Tighten tests for tectonic properties and determinism
+- [ ] Validate full `2048x1024` run with `--overwrite`

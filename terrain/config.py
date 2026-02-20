@@ -46,6 +46,27 @@ class HeightConfig:
 
 
 @dataclass(frozen=True)
+class TectonicsConfig:
+    """Controls plate-proxy tectonic scaffold generation."""
+
+    min_plate_count: int = 6
+    max_plate_count: int = 12
+    site_min_distance: float = 0.12
+    boundary_convergence_threshold: float = 0.25
+    blur_passes: int = 3
+    orogeny_radius_px: int = 10
+    rift_radius_px: int = 8
+    transform_radius_px: int = 6
+    crust_radius_px: int = 26
+    shelf_radius_px: int = 20
+    orogeny_gamma: float = 0.8
+    rift_gamma: float = 0.9
+    transform_gamma: float = 1.2
+    crust_power: float = 1.3
+    shelf_power: float = 1.8
+
+
+@dataclass(frozen=True)
 class RenderConfig:
     """Derived raster rendering configuration."""
 
@@ -59,6 +80,7 @@ class GeneratorConfig:
 
     mask: MaskConfig = field(default_factory=MaskConfig)
     height: HeightConfig = field(default_factory=HeightConfig)
+    tectonics: TectonicsConfig = field(default_factory=TectonicsConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
 
     def to_dict(self) -> dict[str, Any]:
