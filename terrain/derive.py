@@ -57,3 +57,20 @@ def land_mask_u8(mask: np.ndarray) -> np.ndarray:
     """Encode boolean land mask to 8-bit preview image."""
 
     return np.where(mask, 255, 0).astype(np.uint8)
+
+
+def plate_ids_u8(plate_ids: np.ndarray, plate_count: int) -> np.ndarray:
+    """Encode integer plate IDs into 8-bit grayscale for debugging."""
+
+    if plate_count <= 1:
+        return np.zeros_like(plate_ids, dtype=np.uint8)
+    scaled = plate_ids.astype(np.float32) / float(plate_count - 1)
+    return np.round(np.clip(scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def boundary_type_u8(boundary_type: np.ndarray) -> np.ndarray:
+    """Encode boundary types to deterministic grayscale classes."""
+
+    lut = np.array([0, 85, 170, 255], dtype=np.uint8)
+    clipped = np.clip(boundary_type.astype(np.int16), 0, 3)
+    return lut[clipped]

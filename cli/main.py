@@ -7,7 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from terrain.config import DEFAULT_HEIGHT, DEFAULT_MPP, DEFAULT_WIDTH, GeneratorConfig
-from terrain.derive import float_preview_u8, height_preview_u16, hillshade, land_mask_u8
+from terrain.derive import (
+    boundary_type_u8,
+    float_preview_u8,
+    height_preview_u16,
+    hillshade,
+    land_mask_u8,
+    plate_ids_u8,
+)
 from terrain.heightfield import generate_heightfield
 from terrain.io import resolve_output_dir, write_height_npy, write_json, write_png_u16, write_png_u8
 from terrain.rng import RngStream
@@ -61,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     mask_8 = land_mask_u8(result.land_mask)
     potential_8 = float_preview_u8(result.mask_potential, robust_percentiles=(1.0, 99.0))
     uplift_8 = float_preview_u8(result.uplift, robust_percentiles=(1.0, 99.0))
+    plates_8 = plate_ids_u8(result.tectonics.plate_ids, result.tectonics.plate_count)
+    boundary_type_8 = boundary_type_u8(result.tectonics.boundary_type)
 
     out_dir = resolve_output_dir(
         args.out,
@@ -76,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     write_png_u8(out_dir / "land_mask.png", mask_8)
     write_png_u8(out_dir / "debug_mask_potential.png", potential_8)
     write_png_u8(out_dir / "debug_uplift.png", uplift_8)
+    write_png_u8(out_dir / "debug_plates.png", plates_8)
+    write_png_u8(out_dir / "debug_boundary_type.png", boundary_type_8)
 
     if args.json:
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -92,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
                 "total_land_pixels": result.mask_metrics.total_land_pixels,
                 "largest_land_ratio": result.mask_metrics.largest_land_ratio,
                 "land_fraction": result.mask_metrics.land_fraction,
+            },
+            "tectonics": {
+                "plate_count": result.tectonics.plate_count,
+                "boundary_pixels": int(result.tectonics.boundary_mask.sum()),
             },
         }
         meta = {

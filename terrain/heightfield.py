@@ -11,6 +11,7 @@ from terrain.mask import generate_land_mask
 from terrain.metrics import ConnectivityMetrics
 from terrain.noise import fbm_noise, warp_field
 from terrain.rng import RngStream
+from terrain.tectonics import TectonicsResult, generate_tectonic_scaffold
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class HeightfieldResult:
     mask_potential: np.ndarray
     uplift: np.ndarray
     mask_metrics: ConnectivityMetrics
+    tectonics: TectonicsResult
 
 
 def generate_heightfield(
@@ -44,6 +46,13 @@ def generate_heightfield(
 
     land = mask_result.land_mask
     potential = mask_result.mask_potential
+    tectonics = generate_tectonic_scaffold(
+        width,
+        height,
+        land,
+        rng.fork("tectonics"),
+        config=cfg.tectonics,
+    )
 
     threshold = mask_result.threshold
     continentality = np.clip(
@@ -121,6 +130,7 @@ def generate_heightfield(
         mask_potential=potential,
         uplift=uplift,
         mask_metrics=mask_result.metrics,
+        tectonics=tectonics,
     )
 
 
