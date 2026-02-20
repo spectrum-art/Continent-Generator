@@ -1,38 +1,34 @@
 # Map Explorer Terrain Rewrite
 
-Milestone 1 provides a deterministic continent-scale raster terrain generator with a plate-proxy tectonic scaffold.
+Milestone 2 provides deterministic continent-scale terrain with curved plate scaffolding, tangent-aligned mountain belts, interior basins, and vertically exaggerated hillshade.
 
 ## What it generates
 Given a seed and raster settings, the CLI writes:
 - `height.npy` (`float32`, meters)
 - `height_16.png` (16-bit grayscale height preview)
 - `hillshade.png` (8-bit grayscale hillshade)
-- `land_mask.png` (8-bit land mask)
+- `land_mask.png`
 - `debug_mask_potential.png`
 - `debug_uplift.png`
 - `debug_plates.png`
+- `debug_warped_plate_ids.png`
+- `debug_boundary_warp_map.png`
 - `debug_boundary_type.png`
 - `debug_convergence.png`
+- `debug_orogeny_tangent.png`
+- `debug_orogeny.png`
 - `debug_rift.png`
 - `debug_transform.png`
 - `debug_crust.png`
-- `debug_orogeny.png`
+- `debug_interior_basin.png`
 - `meta.json` (includes timestamp + runtime)
-- `deterministic_meta.json` (stable metadata, no timestamp/runtime)
-
-## Environment
-- Python 3.11+ preferred (3.10 supported)
-- WSL Ubuntu development workflow
+- `deterministic_meta.json` (stable metadata, excludes timestamp/runtime)
 
 ## Setup
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
-```
-
-## Run tests
-```bash
 pytest
 ```
 
@@ -41,18 +37,4 @@ pytest
 python -m cli.main --seed MistyForge --out out --w 2048 --h 1024 --mpp 5000 --overwrite
 ```
 
-The CLI prints land metrics and generation runtime, and outputs to:
-- `out/<canonical_seed>/<W>x<H>/`
-
-## Seed rules
-- Seed format: adjective+noun from internal dictionaries
-- Case-insensitive
-- Canonical seed is lowercase concatenation (example: `mistyforge`)
-- Symbols/spaces are rejected
-
-Examples:
-- `MistyForge`
-- `AncientHarbor`
-- `CrimsonRidge`
-
-Heightfield remains the source of truth; debug rasters are derived views.
+Hillshade uses config default vertical exaggeration `6.0` for large-scale readability.

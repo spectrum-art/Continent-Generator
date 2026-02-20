@@ -42,6 +42,8 @@ def test_plate_partition_is_deterministic() -> None:
     assert np.array_equal(tect_a.boundary_type, tect_b.boundary_type)
     assert np.array_equal(tect_a.convergence_field, tect_b.convergence_field)
     assert np.array_equal(tect_a.orogeny_field, tect_b.orogeny_field)
+    assert np.array_equal(tect_a.warped_plate_ids, tect_b.warped_plate_ids)
+    assert np.array_equal(tect_a.boundary_warp_magnitude, tect_b.boundary_warp_magnitude)
     assert np.array_equal(tect_a.rift_field, tect_b.rift_field)
     assert _sha256_bytes(tect_a.plate_ids) == _sha256_bytes(tect_b.plate_ids)
     assert int(tect_a.boundary_mask.sum()) > 0
@@ -59,3 +61,16 @@ def test_tectonic_fields_are_structured_not_uniform() -> None:
     assert int((tect.boundary_type == 1).sum()) > 0
     assert float(np.var(land_orogeny)) > 1e-4
     assert float(np.max(tect.rift_field)) > 0.01
+    assert float(np.max(tect.orogeny_tangent)) > 0.01
+    assert float(np.max(tect.interior_basin_field)) > 0.01
+
+
+def test_warped_plate_ids_are_curved_not_identical_to_raw() -> None:
+    parsed = parse_seed("MistyForge")
+    cfg = GeneratorConfig()
+    result = generate_heightfield(256, 128, 5000.0, RngStream(parsed.seed_hash), config=cfg)
+    tect = result.tectonics
+
+    changed_fraction = float(np.mean(tect.raw_plate_ids != tect.warped_plate_ids))
+    assert changed_fraction > 0.03
+    assert float(np.max(tect.boundary_warp_magnitude)) > 0.1
