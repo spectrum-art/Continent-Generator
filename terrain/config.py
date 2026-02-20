@@ -75,6 +75,10 @@ class TectonicsConfig:
     orogeny_gamma: float = 0.8
     rift_gamma: float = 0.9
     transform_gamma: float = 1.2
+    triple_junction_radius_px: int = 7
+    triple_junction_boost: float = 0.7
+    orogeny_tangent_base_res: int = 7
+    orogeny_tangent_octaves: int = 4
     crust_power: float = 1.3
     shelf_power: float = 1.8
 

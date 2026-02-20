@@ -70,7 +70,26 @@ def generate_tectonic_scaffold(
     )
     boundary_mask = boundary_type != 0
 
-    orogeny, rift, transform = _tectonic_intensity_fields(boundary_type, cfg)
+    base_orogeny, rift, transform = _tectonic_intensity_fields(boundary_type, cfg)
+    triple_junction = _triple_junction_field(warped_plate_ids, boundary_mask, cfg)
+    orogeny_tangent = _tangent_aligned_orogeny(
+        width,
+        height,
+        boundary_type,
+        tangent_x,
+        tangent_y,
+        rng.fork("tectonics_orogeny_tangent"),
+        cfg,
+    )
+
+    # Keep continuous convergent belts but bias structure along boundary tangents.
+    orogeny = np.clip(
+        (base_orogeny * 0.35 + orogeny_tangent * 0.65)
+        * (1.0 + triple_junction * cfg.triple_junction_boost),
+        0.0,
+        1.0,
+    )
+
     crust, shelf = _crust_and_shelf_fields(land_mask, cfg)
 
     zeros = np.zeros((height, width), dtype=np.float32)
@@ -90,8 +109,8 @@ def generate_tectonic_scaffold(
         convergence_field=convergence,
         boundary_tangent_x=tangent_x,
         boundary_tangent_y=tangent_y,
-        triple_junction_field=zeros,
-        orogeny_tangent=zeros,
+        triple_junction_field=triple_junction,
+        orogeny_tangent=orogeny_tangent,
         orogeny_field=orogeny,
         rift_field=rift,
         transform_field=transform,
@@ -323,6 +342,55 @@ def _tectonic_intensity_fields(boundary_type: np.ndarray, cfg: TectonicsConfig) 
     rift = np.power(_normalize01(rift), cfg.rift_gamma)
     lineament = np.power(_normalize01(lineament), cfg.transform_gamma)
     return orogeny.astype(np.float32), rift.astype(np.float32), lineament.astype(np.float32)
+
+
+def _triple_junction_field(plate_ids: np.ndarray, boundary_mask: np.ndarray, cfg: TectonicsConfig) -> np.ndarray:
+    diffs = np.zeros_like(plate_ids, dtype=np.int16)
+    for dy, dx in [(-1, 0), (1, 0), (0, 1), (0, -1), (-1, 1), (-1, -1), (1, 1), (1, -1)]:
+        rolled = np.roll(plate_ids, shift=(dy, dx), axis=(0, 1))
+        diffs += (rolled != plate_ids).astype(np.int16)
+
+    triple = (boundary_mask & (diffs >= 3)).astype(np.float32)
+    boosted = box_blur(triple, cfg.triple_junction_radius_px, passes=max(1, cfg.blur_passes - 1))
+    return _normalize01(boosted)
+
+
+def _tangent_aligned_orogeny(
+    width: int,
+    height: int,
+    boundary_type: np.ndarray,
+    tangent_x: np.ndarray,
+    tangent_y: np.ndarray,
+    rng: RngStream,
+    cfg: TectonicsConfig,
+) -> np.ndarray:
+    convergent = (boundary_type == 1).astype(np.float32)
+    tangent_strength = box_blur(convergent, cfg.orogeny_radius_px, passes=cfg.blur_passes)
+
+    sm_tx = box_blur(tangent_x * convergent, cfg.orogeny_radius_px, passes=cfg.blur_passes)
+    sm_ty = box_blur(tangent_y * convergent, cfg.orogeny_radius_px, passes=cfg.blur_passes)
+    norm = np.maximum(np.hypot(sm_tx, sm_ty), 1e-6)
+    tx = sm_tx / norm
+    ty = sm_ty / norm
+
+    field_a = fbm_noise(
+        width,
+        height,
+        rng.fork("orogeny-tangent-a").generator(),
+        base_res=cfg.orogeny_tangent_base_res,
+        octaves=cfg.orogeny_tangent_octaves,
+    )
+    field_b = fbm_noise(
+        width,
+        height,
+        rng.fork("orogeny-tangent-b").generator(),
+        base_res=cfg.orogeny_tangent_base_res,
+        octaves=cfg.orogeny_tangent_octaves,
+    )
+
+    tangent_noise = np.abs(field_a * tx + field_b * ty)
+    tangent_noise = _normalize01(tangent_noise)
+    return _normalize01(tangent_strength * (0.35 + 0.65 * tangent_noise))
 
 
 def _crust_and_shelf_fields(land_mask: np.ndarray, cfg: TectonicsConfig) -> tuple[np.ndarray, np.ndarray]:
