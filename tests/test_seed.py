@@ -28,3 +28,8 @@ def test_parse_seed_invalid_has_friendly_error() -> None:
     message = str(exc.value)
     assert "Examples:" in message
     assert "MistyForge" in message
+
+
+def test_parse_seed_unknown_words_error() -> None:
+    with pytest.raises(SeedParseError):
+        parse_seed("UnknownThing")

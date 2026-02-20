@@ -34,7 +34,7 @@ def write_height_npy(path: str | Path, height_m: np.ndarray) -> None:
 
 
 def write_png_u16(path: str | Path, raster_u16: np.ndarray) -> None:
-    image = Image.fromarray(raster_u16.astype(np.uint16), mode="I;16")
+    image = Image.fromarray(raster_u16.astype(np.uint16))
     image.save(Path(path))
 
 

@@ -3,36 +3,36 @@
 ## Commit Checklist
 
 1. `milestone0: scaffold python project structure`
-- [ ] Add `pyproject.toml` and `.gitignore`
-- [ ] Add package/module skeleton for `terrain/` and `cli/`
-- [ ] Add docs (`docs/spec.md`, `docs/plan.md`)
-- [ ] Update `README.md` with setup/run expectations
-- [ ] Run tests
+- [x] Add `pyproject.toml` and `.gitignore`
+- [x] Add package/module skeleton for `terrain/` and `cli/`
+- [x] Add docs (`docs/spec.md`, `docs/plan.md`)
+- [x] Update `README.md` with setup/run expectations
+- [x] Run tests
 
 2. `milestone0: seed parsing + deterministic rng streams`
-- [ ] Implement seed dictionaries and parser
-- [ ] Implement stable seed hashing
-- [ ] Implement forkable RNG stream utility
-- [ ] Add/expand seed parsing tests
-- [ ] Run tests
+- [x] Implement seed dictionaries and parser
+- [x] Implement stable seed hashing
+- [x] Implement forkable RNG stream utility
+- [x] Add/expand seed parsing tests
+- [x] Run tests
 
 3. `milestone0: land mask + metrics (dominant continent + islands)`
-- [ ] Implement noise utilities sufficient for mask potential
-- [ ] Implement land mask generation with smoothing and dominant-component targeting
-- [ ] Implement connected components + dominant ratio metrics
-- [ ] Add sanity tests for land fraction and dominant ratio
-- [ ] Run tests
+- [x] Implement noise utilities sufficient for mask potential
+- [x] Implement land mask generation with smoothing and dominant-component targeting
+- [x] Implement connected components + dominant ratio metrics
+- [x] Add sanity tests for land fraction and dominant ratio
+- [x] Run tests
 
 4. `milestone0: heightfield pipeline + hillshade + io + cli`
-- [ ] Implement configurable height pipeline
-- [ ] Implement hillshade and preview conversions
-- [ ] Implement output writers and metadata
-- [ ] Implement CLI arguments and generation flow
-- [ ] Add determinism test
-- [ ] Run tests and a full `2048x1024` sample generation
+- [x] Implement configurable height pipeline
+- [x] Implement hillshade and preview conversions
+- [x] Implement output writers and metadata
+- [x] Implement CLI arguments and generation flow
+- [x] Add determinism test
+- [x] Run tests and a full `2048x1024` sample generation
 
 5. `milestone0: polish docs + tighten tests`
-- [ ] Tighten docs and examples
-- [ ] Stabilize tests and thresholds
-- [ ] Verify deterministic metadata handling
-- [ ] Re-run tests and final sample generation
+- [x] Tighten docs and examples
+- [x] Stabilize tests and thresholds
+- [x] Verify deterministic metadata handling
+- [x] Re-run tests and final sample generation
