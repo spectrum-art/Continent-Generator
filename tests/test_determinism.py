@@ -22,8 +22,8 @@ def test_height_and_hillshade_are_deterministic() -> None:
     run_a = generate_heightfield(256, 128, 5000.0, RngStream(parsed.seed_hash), config=config)
     run_b = generate_heightfield(256, 128, 5000.0, RngStream(parsed.seed_hash), config=config)
 
-    hill_a = hillshade(run_a.height_m, meters_per_pixel=5000.0)
-    hill_b = hillshade(run_b.height_m, meters_per_pixel=5000.0)
+    hill_a = hillshade(run_a.h_geomorph, meters_per_pixel=5000.0)
+    hill_b = hillshade(run_b.h_geomorph, meters_per_pixel=5000.0)
 
     assert np.array_equal(run_a.height_m, run_b.height_m)
     assert np.array_equal(hill_a, hill_b)

@@ -1,29 +1,12 @@
-# Milestone 2 Plan
+# Milestone 8 Plan
 
-## Commit Checklist
-
-1. `milestone2: warped plate coordinates + curved boundaries`
-- [x] Warp plate-space coordinates with deterministic low-frequency vector fields
-- [x] Add controlled boundary jitter/fragmentation
-- [x] Expose warped plate debug fields
-
-2. `milestone2: tangent-aligned orogeny + triple junction amplification`
-- [x] Derive boundary tangent vectors
-- [x] Align orogeny modulation to boundary tangents
-- [x] Amplify uplift in triple-junction zones
-
-3. `milestone2: interior basin field + relief modulation`
-- [x] Generate deterministic interior basin field
-- [x] Subtract basin field in macro relief composition
-- [x] Emit interior basin debug output
-
-4. `milestone2: hillshade vertical exaggeration + CLI timing`
-- [x] Add `hillshade_vertical_exaggeration` config default `6.0`
-- [x] Pass exaggeration into hillshade derivation
-- [x] Keep runtime timing in `meta.json` only
-
-5. `milestone2: docs + tests updated`
-- [x] Update spec with Milestone 2 acceptance criteria
-- [x] Add tests for warped plate curvature and new tectonic fields
-- [x] Add hillshade exaggeration behavior test
-- [x] Validate full `2048x1024` run and debug outputs
+## Checklist
+- [x] Add physical stream-power geomorph controls (`geomorph_use_physical_stream_power`, `geomorph_power_scale_percentile`)
+- [x] Compute incision from physical `A`/`S` terms and map depth by robust percentile
+- [x] Preserve blur/depth-cap/non-inversion safeguards in geomorph
+- [x] Add optional pre-routing depression conditioning controls
+- [x] Add flow-aware detail damping controls for post-geomorph detail reintroduction
+- [x] Add optional tectonic-distance noise modulation controls
+- [x] Emit new deterministic metrics: HI (land-only), basin tiers, trunk sinuosity, incision scaling stats
+- [x] Add tier-2 debug rasters for power/detail-damping/tectonic-distance diagnostics
+- [x] Validate full-resolution smoke generation and small-grid generation in both tier-0 and tier-2 modes

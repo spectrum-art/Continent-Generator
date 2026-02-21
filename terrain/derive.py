@@ -85,3 +85,12 @@ def signed_preview_u8(values: np.ndarray, *, clip: float = 1.0) -> np.ndarray:
     normalized = np.clip(values.astype(np.float32) / max(clip, 1e-6), -1.0, 1.0)
     encoded = (normalized * 0.5) + 0.5
     return np.round(encoded * 255.0).astype(np.uint8)
+
+
+def flow_dir_u8(flow_dir: np.ndarray) -> np.ndarray:
+    """Encode D8 direction map to grayscale classes."""
+
+    encoded = np.zeros_like(flow_dir, dtype=np.float32)
+    valid = flow_dir >= 0
+    encoded[valid] = np.clip(flow_dir[valid].astype(np.float32), 0.0, 7.0) / 7.0
+    return np.round(encoded * 255.0).astype(np.uint8)

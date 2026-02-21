@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 import numpy as np
@@ -27,6 +28,33 @@ def resolve_output_dir(
         )
     target.mkdir(parents=True, exist_ok=True)
     return target
+
+
+def safe_clean_output_dir(target: Path, *, out_root: Path, project_root: Path) -> None:
+    """Delete all children of target directory with strict path-safety guards."""
+
+    out_root_r = out_root.resolve()
+    project_root_r = project_root.resolve()
+    target_r = target.resolve()
+    target_r.relative_to(out_root_r)
+    out_root_r.relative_to(project_root_r)
+
+    if not target_r.exists():
+        target_r.mkdir(parents=True, exist_ok=True)
+        return
+
+    for child in target_r.iterdir():
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+
+
+def move_tree_contents(src_dir: Path, dst_dir: Path) -> None:
+    """Move all files from src_dir into dst_dir."""
+
+    for child in src_dir.iterdir():
+        shutil.move(str(child), str(dst_dir / child.name))
 
 
 def write_height_npy(path: str | Path, height_m: np.ndarray) -> None:
