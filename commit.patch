@@ -1,0 +1,637 @@
+commit 1118c665acace1807a0724cc68a46b0fa9a2f3ac
+Author: spectrum-art <spectrum@DESKTOP-IR6U6QP.>
+Date:   Sun Feb 22 00:22:12 2026 -0800
+
+    Milestone 3.4: sigmoid uplift and cartographic relief polish
+
+diff --git a/docs/MS3-4-Architectural-Core.txt b/docs/MS3-4-Architectural-Core.txt
+new file mode 100644
+index 0000000..3645217
+--- /dev/null
++++ b/docs/MS3-4-Architectural-Core.txt
+@@ -0,0 +1,107 @@
++fn fbm(p: vec2<f32>) -> f32 {
++  let rot = mat2x2<f32>(0.8, -0.6, 0.6, 0.8);
++  var p_octave = p;
++  var amplitude = 0.5;
++  var frequency = 1.0;
++  var total = 0.0;
++  var amplitude_sum = 0.0;
++
++  for (var octave: u32 = 0u; octave < 4u; octave = octave + 1u) {
++    let octave_noise = perlin_noise_2d(p_octave * frequency) * 0.5 + 0.5;
++    total = total + octave_noise * amplitude;
++    amplitude_sum = amplitude_sum + amplitude;
++    p_octave = rot * p_octave + vec2<f32>(12.3, 45.6);
++    frequency = frequency * 2.0;
++    amplitude = amplitude * 0.5;
++  }
++
++  return total / max(amplitude_sum, 0.00001);
++}
++
++@compute @workgroup_size(256, 1, 1)
++fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
++  let flat_index = gid.x;
++  let cell_count = params.width * params.height;
++  if (flat_index >= cell_count) {
++    return;
++  }
++
++  if (final_land_mask[flat_index] < 0.5) {
++    elevation[flat_index] = 0.0;
++    return;
++  }
++
++  let x = i32(flat_index % params.width);
++  let y = i32(flat_index / params.width);
++  let u_norm = f32(x) / f32(params.width);
++  let v_norm = f32(y) / f32(params.height);
++  let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);
++
++  let base_noise = fbm(sample_uv * (params.terrain_frequency * 0.35));
++  var current_elevation = 0.15 + (base_noise * 0.04);
++  let radius = max(params.mountain_radius, 1.0);
++  let radius_i = i32(ceil(radius));
++  let radius2 = radius * radius;
++  var min_dist = radius;
++  var weighted_stress = 0.0;
++  var total_weight = 0.0;
++
++  let min_x = max(0, x - radius_i);
++  let max_x = min(i32(params.width) - 1, x + radius_i);
++  let min_y = max(0, y - radius_i);
++  let max_y = min(i32(params.height) - 1, y + radius_i);
++
++  for (var ny = min_y; ny <= max_y; ny = ny + 1) {
++    for (var nx = min_x; nx <= max_x; nx = nx + 1) {
++      let n_index = u32(ny) * params.width + u32(nx);
++      let stress = fault_stress[n_index];
++      if (abs(stress) <= 0.000001) {
++        continue;
++      }
++
++      let dx = f32(nx - x);
++      let dy = f32(ny - y);
++      let dist2 = dx * dx + dy * dy;
++      if (dist2 > radius2) {
++        continue;
++      }
++
++      let distance = sqrt(dist2);
++      if (distance < min_dist) {
++        min_dist = distance;
++      }
++
++      let weight = 1.0 / (dist2 + 1.0);
++      weighted_stress = weighted_stress + stress * weight;
++      total_weight = total_weight + weight;
++    }
++  }
++
++  if (total_weight > 0.0) {
++    let avg_stress = weighted_stress / total_weight;
++    let struct_noise = fbm(sample_uv * params.terrain_frequency) * 2.0 - 1.0;
++    let warped_dist = min_dist + (struct_noise * params.terrain_roughness * (radius * 0.5));
++    let base_falloff = max(1.0 - (warped_dist / radius), 0.0);
++    let sigmoid_profile = smoothstep(0.0, 1.0, base_falloff);
++
++    let alpine_noise = fbm(sample_uv * params.terrain_frequency * 2.5);
++    let peaks = 1.0 - abs(alpine_noise * 2.0 - 1.0);
++    let valleys = abs(fbm(sample_uv * params.terrain_frequency * 1.5 + vec2<f32>(5.0, 5.0)) * 2.0 - 1.0);
++    let structure = mix(valleys, peaks, sigmoid_profile);
++
++    current_elevation =
++      current_elevation + avg_stress * sigmoid_profile * structure * params.mountain_height;
++  }
++
++  elevation[flat_index] = clamp(current_elevation, 0.0, 1.0);
++}
++
++  let left = sample_elevation(x - 1, y);
++  let right = sample_elevation(x + 1, y);
++  let top = sample_elevation(x, y - 1);
++  let bottom = sample_elevation(x, y + 1);
++
++  let relief_scale = params.elevation_scale * params.vertical_exaggeration;
++  let dx = (right - left) * relief_scale;
++  let dy = (bottom - top) * relief_scale;
++  let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
+diff --git a/index.html b/index.html
+index 6d5857b..c20d1f0 100644
+--- a/index.html
++++ b/index.html
+@@ -3,11 +3,11 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-    <title>Continent Generator Milestone 3.3</title>
++    <title>Continent Generator Milestone 3.4</title>
+   </head>
+   <body>
+     <main class="layout">
+-      <h1>Continent Generator: Milestone 3.3</h1>
++      <h1>Continent Generator: Milestone 3.4</h1>
+       <p id="status">Booting WebGPU compute pipeline...</p>
+       <section class="controls" aria-label="Continent Controls">
+         <label for="seed-input">Seed</label>
+@@ -170,6 +170,18 @@
+           />
+           <output id="elevation-scale-value" for="elevation-scale">10.0</output>
+         </div>
++        <label for="vertical-exaggeration">Vertical Exaggeration</label>
++        <div class="control-row">
++          <input
++            id="vertical-exaggeration"
++            type="range"
++            min="1"
++            max="20"
++            step="0.1"
++            value="5.0"
++          />
++          <output id="vertical-exaggeration-value" for="vertical-exaggeration">5.0</output>
++        </div>
+         <label for="render-mode">Render Mode</label>
+         <div class="control-row">
+           <select id="render-mode">
+diff --git a/public/docs/AA-Milestone-3-2-Architectural-Core.txt b/public/docs/AA-Milestone-3-2-Architectural-Core.txt
+index 0a5e29b..2cb4fc4 100644
+--- a/public/docs/AA-Milestone-3-2-Architectural-Core.txt
++++ b/public/docs/AA-Milestone-3-2-Architectural-Core.txt
+@@ -1,70 +1,31 @@
+-@compute @workgroup_size(256, 1, 1)
+-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+-  let flat_index = gid.x;
+-  let cell_count = params.width * params.height;
+-  if (flat_index >= cell_count) {
+-    return;
+-  }
+-
+-  if (final_land_mask[flat_index] < 0.5) {
+-    elevation[flat_index] = 0.0;
+-    return;
+-  }
+-
+-  let x = i32(flat_index % params.width);
+-  let y = i32(flat_index / params.width);
+-  let u_norm = f32(x) / f32(params.width);
+-  let v_norm = f32(y) / f32(params.height);
+-  let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);
+-
+-  let base_noise = fbm(sample_uv * params.terrain_frequency);
+-  var current_elevation = 0.15 + (base_noise * 0.1);
+-  let radius = max(params.mountain_radius, 1.0);
+-  let radius_i = i32(ceil(radius));
+-  let radius2 = radius * radius;
+-  var min_dist = radius;
+-  var weighted_stress = 0.0;
+-  var total_weight = 0.0;
+-
+-  let min_x = max(0, x - radius_i);
+-  let max_x = min(i32(params.width) - 1, x + radius_i);
+-  let min_y = max(0, y - radius_i);
+-  let max_y = min(i32(params.height) - 1, y + radius_i);
+-
+-  for (var ny = min_y; ny <= max_y; ny = ny + 1) {
+-    for (var nx = min_x; nx <= max_x; nx = nx + 1) {
+-      let n_index = u32(ny) * params.width + u32(nx);
+-      let stress = fault_stress[n_index];
+-      if (abs(stress) <= 0.000001) {
+-        continue;
+-      }
++let x = i32(flat_index % params.width);
++let y = i32(flat_index / params.width);
++let center = sample_elevation(x, y);
++
++if (center <= 0.0) {
++  let ocean = vec4<f32>(0.03, 0.16, 0.32, 1.0);
++  shaded_rgba[flat_index] = pack_rgba8(ocean);
++  return;
++}
+ 
+-      let dx = f32(nx - x);
+-      let dy = f32(ny - y);
+-      let dist2 = dx * dx + dy * dy;
+-      if (dist2 > radius2) {
+-        continue;
+-      }
++let left = sample_elevation(x - 1, y);
++let right = sample_elevation(x + 1, y);
++let top = sample_elevation(x, y - 1);
++let bottom = sample_elevation(x, y + 1);
+ 
+-      let distance = sqrt(dist2);
+-      if (distance < min_dist) {
+-        min_dist = distance;
+-      }
++let dx = (right - left) * params.elevation_scale;
++let dy = (bottom - top) * params.elevation_scale;
++let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
+ 
+-      let weight = 1.0 / (dist2 + 1.0);
+-      weighted_stress = weighted_stress + stress * weight;
+-      total_weight = total_weight + weight;
+-    }
+-  }
++let sun_rad = radians(params.sun_angle);
++let light_dir = normalize(vec3<f32>(cos(sun_rad), sin(sun_rad), 1.0));
++let diffuse = max(dot(normal, light_dir), 0.0);
++let ambient = 0.2;
++let light = ambient + diffuse * (1.0 - ambient);
+ 
+-  if (total_weight > 0.0) {
+-    let avg_stress = weighted_stress / total_weight;
+-    let struct_noise = fbm(sample_uv * params.terrain_frequency) * 2.0 - 1.0;
+-    let warped_dist = min_dist + (struct_noise * params.terrain_roughness * (radius * 0.5));
+-    let falloff = max(1.0 - (warped_dist / radius), 0.0);
+-    let ridge = smoothstep(0.2, 1.0, falloff);
+-    current_elevation = current_elevation + avg_stress * ridge * params.mountain_height;
+-  }
++let lowland = vec3<f32>(0.56, 0.60, 0.45);
++let highland = vec3<f32>(0.79, 0.74, 0.62);
++let base_land = mix(lowland, highland, clamp(center, 0.0, 1.0));
++let lit = base_land * light;
+ 
+-  elevation[flat_index] = clamp(current_elevation, 0.0, 1.0);
+-}
++shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(lit, 1.0));
+\ No newline at end of file
+diff --git a/public/docs/milestone-3-4-shaded-relief-seed-1337.png b/public/docs/milestone-3-4-shaded-relief-seed-1337.png
+new file mode 100644
+index 0000000..fce6665
+Binary files /dev/null and b/public/docs/milestone-3-4-shaded-relief-seed-1337.png differ
+diff --git a/public/docs/milestone-3-4-shaded-relief-seed-2417177426.png b/public/docs/milestone-3-4-shaded-relief-seed-2417177426.png
+new file mode 100644
+index 0000000..f6e8f0f
+Binary files /dev/null and b/public/docs/milestone-3-4-shaded-relief-seed-2417177426.png differ
+diff --git a/public/docs/milestone-3-4-shaded-relief-seed-987654321.png b/public/docs/milestone-3-4-shaded-relief-seed-987654321.png
+new file mode 100644
+index 0000000..54cfa69
+Binary files /dev/null and b/public/docs/milestone-3-4-shaded-relief-seed-987654321.png differ
+diff --git a/shaders/pass6_generate_elevation.wgsl b/shaders/pass6_generate_elevation.wgsl
+index 37606af..a8b9f6f 100644
+--- a/shaders/pass6_generate_elevation.wgsl
++++ b/shaders/pass6_generate_elevation.wgsl
+@@ -35,15 +35,23 @@ fn fade2(t: vec2<f32>) -> vec2<f32> {
+ }
+ 
+ fn gradient_from_hash(h: u32) -> vec2<f32> {
+-  switch (h & 7u) {
++  switch (h & 15u) {
+     case 0u: { return vec2<f32>(1.0, 0.0); }
+-    case 1u: { return vec2<f32>(-1.0, 0.0); }
+-    case 2u: { return vec2<f32>(0.0, 1.0); }
+-    case 3u: { return vec2<f32>(0.0, -1.0); }
+-    case 4u: { return vec2<f32>(0.70710677, 0.70710677); }
+-    case 5u: { return vec2<f32>(-0.70710677, 0.70710677); }
+-    case 6u: { return vec2<f32>(0.70710677, -0.70710677); }
+-    default: { return vec2<f32>(-0.70710677, -0.70710677); }
++    case 1u: { return vec2<f32>(0.9238795, 0.3826834); }
++    case 2u: { return vec2<f32>(0.70710677, 0.70710677); }
++    case 3u: { return vec2<f32>(0.3826834, 0.9238795); }
++    case 4u: { return vec2<f32>(0.0, 1.0); }
++    case 5u: { return vec2<f32>(-0.3826834, 0.9238795); }
++    case 6u: { return vec2<f32>(-0.70710677, 0.70710677); }
++    case 7u: { return vec2<f32>(-0.9238795, 0.3826834); }
++    case 8u: { return vec2<f32>(-1.0, 0.0); }
++    case 9u: { return vec2<f32>(-0.9238795, -0.3826834); }
++    case 10u: { return vec2<f32>(-0.70710677, -0.70710677); }
++    case 11u: { return vec2<f32>(-0.3826834, -0.9238795); }
++    case 12u: { return vec2<f32>(0.0, -1.0); }
++    case 13u: { return vec2<f32>(0.3826834, -0.9238795); }
++    case 14u: { return vec2<f32>(0.70710677, -0.70710677); }
++    default: { return vec2<f32>(0.9238795, -0.3826834); }
+   }
+ }
+ 
+@@ -78,15 +86,18 @@ fn perlin_noise_2d(p: vec2<f32>) -> f32 {
+ }
+ 
+ fn fbm(p: vec2<f32>) -> f32 {
++  let rot = mat2x2<f32>(0.8, -0.6, 0.6, 0.8);
++  var p_octave = p;
+   var amplitude = 0.5;
+   var frequency = 1.0;
+   var total = 0.0;
+   var amplitude_sum = 0.0;
+ 
+   for (var octave: u32 = 0u; octave < 4u; octave = octave + 1u) {
+-    let octave_noise = perlin_noise_2d(p * frequency) * 0.5 + 0.5;
++    let octave_noise = perlin_noise_2d(p_octave * frequency) * 0.5 + 0.5;
+     total = total + octave_noise * amplitude;
+     amplitude_sum = amplitude_sum + amplitude;
++    p_octave = rot * p_octave + vec2<f32>(12.3, 45.6);
+     frequency = frequency * 2.0;
+     amplitude = amplitude * 0.5;
+   }
+@@ -113,8 +124,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+   let v_norm = f32(y) / f32(params.height);
+   let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);
+ 
+-  let base_noise = fbm(sample_uv * params.terrain_frequency);
+-  var current_elevation = 0.15 + (base_noise * 0.1);
++  let base_noise = fbm(sample_uv * (params.terrain_frequency * 0.35));
++  var current_elevation = 0.15 + (base_noise * 0.04);
+   let radius = max(params.mountain_radius, 1.0);
+   let radius_i = i32(ceil(radius));
+   let radius2 = radius * radius;
+@@ -157,9 +168,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+     let avg_stress = weighted_stress / total_weight;
+     let struct_noise = fbm(sample_uv * params.terrain_frequency) * 2.0 - 1.0;
+     let warped_dist = min_dist + (struct_noise * params.terrain_roughness * (radius * 0.5));
+-    let falloff = max(1.0 - (warped_dist / radius), 0.0);
+-    let ridge = smoothstep(0.2, 1.0, falloff);
+-    current_elevation = current_elevation + avg_stress * ridge * params.mountain_height;
++    let base_falloff = max(1.0 - (warped_dist / radius), 0.0);
++    let sigmoid_profile = smoothstep(0.0, 1.0, base_falloff);
++
++    let alpine_noise = fbm(sample_uv * params.terrain_frequency * 2.5);
++    let peaks = 1.0 - abs(alpine_noise * 2.0 - 1.0);
++    let valleys = abs(fbm(sample_uv * params.terrain_frequency * 1.5 + vec2<f32>(5.0, 5.0)) * 2.0 - 1.0);
++    let structure = mix(valleys, peaks, sigmoid_profile);
++
++    current_elevation =
++      current_elevation + avg_stress * sigmoid_profile * structure * params.mountain_height;
+   }
+ 
+   elevation[flat_index] = clamp(current_elevation, 0.0, 1.0);
+diff --git a/shaders/pass7_shaded_relief.wgsl b/shaders/pass7_shaded_relief.wgsl
+index 822df42..4df8991 100644
+--- a/shaders/pass7_shaded_relief.wgsl
++++ b/shaders/pass7_shaded_relief.wgsl
+@@ -3,6 +3,10 @@ struct RenderParams {
+   height: u32,
+   sun_angle: f32,
+   elevation_scale: f32,
++  vertical_exaggeration: f32,
++  _pad0: f32,
++  _pad1: f32,
++  _pad2: f32,
+ }
+ 
+ @group(0) @binding(0) var<storage, read> elevation: array<f32>;
+@@ -48,8 +52,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+   let top = sample_elevation(x, y - 1);
+   let bottom = sample_elevation(x, y + 1);
+ 
+-  let dx = (right - left) * params.elevation_scale;
+-  let dy = (bottom - top) * params.elevation_scale;
++  let relief_scale = params.elevation_scale * params.vertical_exaggeration;
++  let dx = (right - left) * relief_scale;
++  let dy = (bottom - top) * relief_scale;
+   let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
+ 
+   let sun_rad = radians(params.sun_angle);
+diff --git a/src/main.js b/src/main.js
+index 2f43f81..113ee14 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -41,6 +41,8 @@ import initWasm, {
+   normalized_terrain_frequency_from_slider,
+   normalized_terrain_roughness,
+   normalized_terrain_roughness_from_slider,
++  normalized_vertical_exaggeration,
++  normalized_vertical_exaggeration_from_slider,
+ } from './wasm/wasm_core.js'
+ 
+ const statusNode = document.querySelector('#status')
+@@ -72,6 +74,8 @@ const sunAngleSlider = document.querySelector('#sun-angle')
+ const sunAngleValueNode = document.querySelector('#sun-angle-value')
+ const elevationScaleSlider = document.querySelector('#elevation-scale')
+ const elevationScaleValueNode = document.querySelector('#elevation-scale-value')
++const verticalExaggerationSlider = document.querySelector('#vertical-exaggeration')
++const verticalExaggerationValueNode = document.querySelector('#vertical-exaggeration-value')
+ const renderModeSelect = document.querySelector('#render-mode')
+ const landFractionNode = document.querySelector('#land-fraction')
+ 
+@@ -281,12 +285,16 @@ function writeTopographyParams(
+   view.setFloat32(28, terrainFrequency, true)
+ }
+ 
+-function writeRenderParams(buffer, width, height, sunAngle, elevationScale) {
++function writeRenderParams(buffer, width, height, sunAngle, elevationScale, verticalExaggeration) {
+   const view = new DataView(buffer)
+   view.setUint32(0, width, true)
+   view.setUint32(4, height, true)
+   view.setFloat32(8, sunAngle, true)
+   view.setFloat32(12, elevationScale, true)
++  view.setFloat32(16, verticalExaggeration, true)
++  view.setFloat32(20, 0, true)
++  view.setFloat32(24, 0, true)
++  view.setFloat32(28, 0, true)
+ }
+ 
+ async function runPipeline() {
+@@ -322,6 +330,8 @@ async function runPipeline() {
+     !sunAngleValueNode ||
+     !elevationScaleSlider ||
+     !elevationScaleValueNode ||
++    !verticalExaggerationSlider ||
++    !verticalExaggerationValueNode ||
+     !renderModeSelect ||
+     !landFractionNode
+   ) {
+@@ -432,7 +442,7 @@ async function runPipeline() {
+     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+   })
+   const renderParamsBuffer = device.createBuffer({
+-    size: 16,
++    size: 32,
+     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+   })
+ 
+@@ -441,7 +451,7 @@ async function runPipeline() {
+   const plateParamsBytes = new ArrayBuffer(48)
+   const faultParamsBytes = new ArrayBuffer(16)
+   const topographyParamsBytes = new ArrayBuffer(32)
+-  const renderParamsBytes = new ArrayBuffer(16)
++  const renderParamsBytes = new ArrayBuffer(32)
+   writeGridParams(gridParamsBytes, width, height)
+   device.queue.writeBuffer(gridParamsBuffer, 0, gridParamsBytes)
+ 
+@@ -577,7 +587,8 @@ async function runPipeline() {
+     terrainRoughness,
+     terrainFrequency,
+     sunAngle,
+-    elevationScale
++    elevationScale,
++    verticalExaggeration
+   ) => {
+     writeGenerateParams(
+       generateParamsBytes,
+@@ -611,7 +622,14 @@ async function runPipeline() {
+       terrainRoughness,
+       terrainFrequency
+     )
+-    writeRenderParams(renderParamsBytes, width, height, sunAngle, elevationScale)
++    writeRenderParams(
++      renderParamsBytes,
++      width,
++      height,
++      sunAngle,
++      elevationScale,
++      verticalExaggeration
++    )
+     device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
+     device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
+     device.queue.writeBuffer(faultParamsBuffer, 0, faultParamsBytes)
+@@ -737,7 +755,7 @@ async function runPipeline() {
+     )
+ 
+     statusNode.textContent =
+-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
++      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
+     landFractionNode.textContent =
+       `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
+ 
+@@ -762,6 +780,9 @@ async function runPipeline() {
+   let queuedTerrainFrequency = normalized_terrain_frequency_from_slider(normalized_terrain_frequency())
+   let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
+   let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
++  let queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
++    normalized_vertical_exaggeration()
++  )
+   let queuedRenderMode = 'land_mask'
+   let renderQueued = false
+   let renderInFlight = false
+@@ -789,7 +810,8 @@ async function runPipeline() {
+           queuedTerrainRoughness,
+           queuedTerrainFrequency,
+           queuedSunAngle,
+-          queuedElevationScale
++          queuedElevationScale,
++          queuedVerticalExaggeration
+         )
+       }
+     } finally {
+@@ -812,7 +834,8 @@ async function runPipeline() {
+     rawTerrainRoughness,
+     rawTerrainFrequency,
+     rawSunAngle,
+-    rawElevationScale
++    rawElevationScale,
++    rawVerticalExaggeration
+   ) => {
+     const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
+     const parsedFalloff = Number.isFinite(rawFalloff) ? rawFalloff : queuedFalloff
+@@ -842,6 +865,9 @@ async function runPipeline() {
+     const parsedElevationScale = Number.isFinite(rawElevationScale)
+       ? rawElevationScale
+       : queuedElevationScale
++    const parsedVerticalExaggeration = Number.isFinite(rawVerticalExaggeration)
++      ? rawVerticalExaggeration
++      : queuedVerticalExaggeration
+ 
+     const parsedRenderMode =
+       rawRenderMode === 'plate_id' ||
+@@ -865,6 +891,9 @@ async function runPipeline() {
+     queuedTerrainFrequency = normalized_terrain_frequency_from_slider(parsedTerrainFrequency)
+     queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
+     queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
++    queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
++      parsedVerticalExaggeration
++    )
+     queuedRenderMode = parsedRenderMode
+ 
+     thresholdSlider.value = queuedThreshold.toFixed(2)
+@@ -892,6 +921,8 @@ async function runPipeline() {
+     sunAngleValueNode.textContent = queuedSunAngle.toFixed(0)
+     elevationScaleSlider.value = queuedElevationScale.toFixed(1)
+     elevationScaleValueNode.textContent = queuedElevationScale.toFixed(1)
++    verticalExaggerationSlider.value = queuedVerticalExaggeration.toFixed(1)
++    verticalExaggerationValueNode.textContent = queuedVerticalExaggeration.toFixed(1)
+     seedInput.value = String(queuedSeed >>> 0)
+     renderModeSelect.value = queuedRenderMode
+ 
+@@ -1118,6 +1149,28 @@ async function runPipeline() {
+       queuedTerrainRoughness,
+       queuedTerrainFrequency,
+       queuedSunAngle,
++      Number.parseFloat(event.target.value),
++      queuedVerticalExaggeration
++    )
++  })
++
++  verticalExaggerationSlider.addEventListener('input', (event) => {
++    queueRender(
++      queuedThreshold,
++      queuedFalloff,
++      queuedNoise,
++      queuedEdgeWarp,
++      queuedSeed,
++      queuedPlateCount,
++      queuedPlateWarpAmplitude,
++      queuedPlateWarpRoughness,
++      queuedMountainRadius,
++      queuedMountainHeight,
++      queuedRenderMode,
++      queuedTerrainRoughness,
++      queuedTerrainFrequency,
++      queuedSunAngle,
++      queuedElevationScale,
+       Number.parseFloat(event.target.value)
+     )
+   })
+@@ -1186,7 +1239,8 @@ async function runPipeline() {
+     queuedTerrainRoughness,
+     queuedTerrainFrequency,
+     queuedSunAngle,
+-    queuedElevationScale
++    queuedElevationScale,
++    queuedVerticalExaggeration
+   )
+ }
+ 
+diff --git a/src/style.css b/src/style.css
+index 558d244..641c92a 100644
+--- a/src/style.css
++++ b/src/style.css
+@@ -91,7 +91,8 @@ h1 {
+ #terrain-roughness,
+ #terrain-frequency,
+ #sun-angle,
+-#elevation-scale {
++#elevation-scale,
++#vertical-exaggeration {
+   width: min(520px, 100%);
+ }
+ 
+@@ -106,7 +107,8 @@ h1 {
+ #terrain-roughness-value,
+ #terrain-frequency-value,
+ #sun-angle-value,
+-#elevation-scale-value {
++#elevation-scale-value,
++#vertical-exaggeration-value {
+   min-width: 3ch;
+   font-variant-numeric: tabular-nums;
+   font-weight: 600;
+diff --git a/wasm-core/src/lib.rs b/wasm-core/src/lib.rs
+index deef6d4..f1d958e 100644
+--- a/wasm-core/src/lib.rs
++++ b/wasm-core/src/lib.rs
+@@ -18,6 +18,7 @@ const DEFAULT_TERRAIN_ROUGHNESS_NORM: f32 = 0.50;
+ const DEFAULT_TERRAIN_FREQUENCY_NORM: f32 = 8.0;
+ const DEFAULT_SUN_ANGLE_NORM: f32 = 315.0;
+ const DEFAULT_ELEVATION_SCALE_NORM: f32 = 10.0;
++const DEFAULT_VERTICAL_EXAGGERATION_NORM: f32 = 5.0;
+ const DEFAULT_SEED: u32 = 1337;
+ 
+ fn compute_dispatch(flat_cell_count: u32, coverage_norm: f32) -> Result<(u32, u32), JsValue> {
+@@ -203,6 +204,16 @@ pub fn normalized_elevation_scale_from_slider(raw: f32) -> f32 {
+     raw.clamp(1.0, 20.0)
+ }
+ 
++#[wasm_bindgen]
++pub fn normalized_vertical_exaggeration() -> f32 {
++    DEFAULT_VERTICAL_EXAGGERATION_NORM
++}
++
++#[wasm_bindgen]
++pub fn normalized_vertical_exaggeration_from_slider(raw: f32) -> f32 {
++    raw.clamp(1.0, 20.0)
++}
++
+ #[wasm_bindgen]
+ pub fn deterministic_seed_from_input(raw: f64) -> u32 {
+     if !raw.is_finite() || raw.is_sign_negative() {

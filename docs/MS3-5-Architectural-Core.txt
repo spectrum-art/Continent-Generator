@@ -1,6 +1,6 @@
 fn fbm(p: vec2<f32>) -> f32 {
   let rot = mat2x2<f32>(0.8, -0.6, 0.6, 0.8);
-  var p_octave = p;
+  var p_octave = rot * p + vec2<f32>(12.3, 45.6);
   var amplitude = 0.5;
   var frequency = 1.0;
   var total = 0.0;
@@ -83,25 +83,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let warped_dist = min_dist + (struct_noise * params.terrain_roughness * (radius * 0.5));
     let base_falloff = max(1.0 - (warped_dist / radius), 0.0);
     let sigmoid_profile = smoothstep(0.0, 1.0, base_falloff);
+    let base_uplift = avg_stress * sigmoid_profile * params.mountain_height;
 
     let alpine_noise = fbm(sample_uv * params.terrain_frequency * 2.5);
     let peaks = 1.0 - abs(alpine_noise * 2.0 - 1.0);
     let valleys = abs(fbm(sample_uv * params.terrain_frequency * 1.5 + vec2<f32>(5.0, 5.0)) * 2.0 - 1.0);
     let structure = mix(valleys, peaks, sigmoid_profile);
+    let displacement =
+      (structure - 0.5) *
+      params.terrain_roughness *
+      sigmoid_profile *
+      params.mountain_height;
 
     current_elevation =
-      current_elevation + avg_stress * sigmoid_profile * structure * params.mountain_height;
+      current_elevation + base_uplift + displacement;
   }
 
   elevation[flat_index] = clamp(current_elevation, 0.0, 1.0);
 }
-
-  let left = sample_elevation(x - 1, y);
-  let right = sample_elevation(x + 1, y);
-  let top = sample_elevation(x, y - 1);
-  let bottom = sample_elevation(x, y + 1);
-
-  let relief_scale = params.elevation_scale * params.vertical_exaggeration;
-  let dx = (right - left) * relief_scale;
-  let dy = (bottom - top) * relief_scale;
-  let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
