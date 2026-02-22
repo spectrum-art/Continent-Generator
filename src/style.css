@@ -1,0 +1,123 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #112018;
+  background: #dde9de;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: linear-gradient(145deg, #eef5ef 0%, #c9dccc 100%);
+}
+
+.layout {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.25rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.2rem, 3vw, 2rem);
+  letter-spacing: 0.02em;
+}
+
+#status {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.controls {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid #5e7d6b;
+  border-radius: 0.35rem;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.controls label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+#seed-input {
+  width: min(280px, 100%);
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #4b6756;
+  border-radius: 0.3rem;
+  background: #f8fbf8;
+  color: #112018;
+}
+
+#randomize-seed {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #4b6756;
+  border-radius: 0.3rem;
+  background: #f2f7f3;
+  color: #112018;
+  cursor: pointer;
+}
+
+#edge-warp,
+#render-mode {
+  width: min(280px, 100%);
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #4b6756;
+  border-radius: 0.3rem;
+  background: #f8fbf8;
+  color: #112018;
+}
+
+#land-threshold,
+#falloff-strength,
+#noise-amplitude,
+#plate-count,
+#plate-warp-amplitude,
+#plate-warp-roughness,
+#mountain-radius,
+#mountain-height,
+#terrain-roughness,
+#terrain-frequency {
+  width: min(520px, 100%);
+}
+
+#land-threshold-value,
+#falloff-strength-value,
+#noise-amplitude-value,
+#plate-count-value,
+#plate-warp-amplitude-value,
+#plate-warp-roughness-value,
+#mountain-radius-value,
+#mountain-height-value,
+#terrain-roughness-value,
+#terrain-frequency-value {
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#land-fraction {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+#heightmap {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #4b6756;
+  box-shadow: 0 6px 20px rgba(17, 32, 24, 0.18);
+  image-rendering: pixelated;
+}

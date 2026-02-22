@@ -1,0 +1,16 @@
+{
+  "name": "continent-generator",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "wasm:build": "PATH=$HOME/.cargo/bin:$PATH $HOME/.cargo/bin/wasm-pack build wasm-core --target web --out-dir ../src/wasm --release",
+    "dev": "npm run wasm:build && vite",
+    "build": "npm run wasm:build && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2",
+    "vite": "^7.3.1"
+  }
+}
