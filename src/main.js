@@ -5,6 +5,7 @@ import pass3Source from '../shaders/pass3_shift_land_mask.wgsl?raw'
 import pass4Source from '../shaders/pass4_generate_plate_ids.wgsl?raw'
 import pass5Source from '../shaders/pass5_compute_fault_stress.wgsl?raw'
 import pass6Source from '../shaders/pass6_generate_elevation.wgsl?raw'
+import pass7Source from '../shaders/pass7_shaded_relief.wgsl?raw'
 import initWasm, {
   deterministic_seed,
   deterministic_seed_from_input,
@@ -15,6 +16,8 @@ import initWasm, {
   map_flat_1d_to_gpu,
   normalized_edge_warp,
   normalized_edge_warp_from_input,
+  normalized_elevation_scale,
+  normalized_elevation_scale_from_slider,
   normalized_falloff_strength,
   normalized_falloff_strength_from_slider,
   normalized_fbm_base_frequency,
@@ -32,6 +35,8 @@ import initWasm, {
   normalized_plate_warp_amplitude_from_slider,
   normalized_plate_warp_roughness,
   normalized_plate_warp_roughness_from_slider,
+  normalized_sun_angle,
+  normalized_sun_angle_from_slider,
   normalized_terrain_frequency,
   normalized_terrain_frequency_from_slider,
   normalized_terrain_roughness,
@@ -63,6 +68,10 @@ const terrainRoughnessSlider = document.querySelector('#terrain-roughness')
 const terrainRoughnessValueNode = document.querySelector('#terrain-roughness-value')
 const terrainFrequencySlider = document.querySelector('#terrain-frequency')
 const terrainFrequencyValueNode = document.querySelector('#terrain-frequency-value')
+const sunAngleSlider = document.querySelector('#sun-angle')
+const sunAngleValueNode = document.querySelector('#sun-angle-value')
+const elevationScaleSlider = document.querySelector('#elevation-scale')
+const elevationScaleValueNode = document.querySelector('#elevation-scale-value')
 const renderModeSelect = document.querySelector('#render-mode')
 const landFractionNode = document.querySelector('#land-fraction')
 
@@ -156,6 +165,20 @@ function renderElevation(ctx, flatElevation, width, height) {
     pixels[offset + 1] = gray
     pixels[offset + 2] = gray
     pixels[offset + 3] = 255
+  }
+  ctx.putImageData(image, 0, 0)
+}
+
+function renderShadedRelief(ctx, packedColor, width, height) {
+  const image = ctx.createImageData(width, height)
+  const pixels = image.data
+  for (let i = 0; i < packedColor.length; i += 1) {
+    const rgba = packedColor[i] >>> 0
+    const offset = i * 4
+    pixels[offset] = rgba & 0xff
+    pixels[offset + 1] = (rgba >>> 8) & 0xff
+    pixels[offset + 2] = (rgba >>> 16) & 0xff
+    pixels[offset + 3] = (rgba >>> 24) & 0xff
   }
   ctx.putImageData(image, 0, 0)
 }
@@ -258,6 +281,14 @@ function writeTopographyParams(
   view.setFloat32(28, terrainFrequency, true)
 }
 
+function writeRenderParams(buffer, width, height, sunAngle, elevationScale) {
+  const view = new DataView(buffer)
+  view.setUint32(0, width, true)
+  view.setUint32(4, height, true)
+  view.setFloat32(8, sunAngle, true)
+  view.setFloat32(12, elevationScale, true)
+}
+
 async function runPipeline() {
   await initWasm()
 
@@ -287,6 +318,10 @@ async function runPipeline() {
     !terrainRoughnessValueNode ||
     !terrainFrequencySlider ||
     !terrainFrequencyValueNode ||
+    !sunAngleSlider ||
+    !sunAngleValueNode ||
+    !elevationScaleSlider ||
+    !elevationScaleValueNode ||
     !renderModeSelect ||
     !landFractionNode
   ) {
@@ -316,6 +351,7 @@ async function runPipeline() {
   const dispatchPlate = dispatches[3]
   const dispatchStress = dispatches[4]
   const dispatchTopo = dispatches[5]
+  const dispatchShade = dispatchTopo
   const dataByteLength = activeCells * Float32Array.BYTES_PER_ELEMENT
   const plateByteLength = activeCells * Uint32Array.BYTES_PER_ELEMENT
 
@@ -346,6 +382,10 @@ async function runPipeline() {
     size: dataByteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
+  const shadedReliefBuffer = device.createBuffer({
+    size: plateByteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  })
   const bboxBuffer = device.createBuffer({
     size: 16,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -364,6 +404,10 @@ async function runPipeline() {
   })
   const elevationReadback = device.createBuffer({
     size: dataByteLength,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  })
+  const shadedReliefReadback = device.createBuffer({
+    size: plateByteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   })
 
@@ -387,12 +431,17 @@ async function runPipeline() {
     size: 32,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
+  const renderParamsBuffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  })
 
   const generateParamsBytes = new ArrayBuffer(48)
   const gridParamsBytes = new ArrayBuffer(16)
   const plateParamsBytes = new ArrayBuffer(48)
   const faultParamsBytes = new ArrayBuffer(16)
   const topographyParamsBytes = new ArrayBuffer(32)
+  const renderParamsBytes = new ArrayBuffer(16)
   writeGridParams(gridParamsBytes, width, height)
   device.queue.writeBuffer(gridParamsBuffer, 0, gridParamsBytes)
 
@@ -435,6 +484,13 @@ async function runPipeline() {
     layout: 'auto',
     compute: {
       module: device.createShaderModule({ code: pass6Source }),
+      entryPoint: 'main',
+    },
+  })
+  const pass7Pipeline = device.createComputePipeline({
+    layout: 'auto',
+    compute: {
+      module: device.createShaderModule({ code: pass7Source }),
       entryPoint: 'main',
     },
   })
@@ -492,6 +548,14 @@ async function runPipeline() {
       { binding: 3, resource: { buffer: topographyParamsBuffer } },
     ],
   })
+  const pass7BindGroup = device.createBindGroup({
+    layout: pass7Pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: elevationBuffer } },
+      { binding: 1, resource: { buffer: shadedReliefBuffer } },
+      { binding: 2, resource: { buffer: renderParamsBuffer } },
+    ],
+  })
 
   const bboxInit = new Uint32Array([width, 0, height, 0])
   const fbmBaseFrequency = normalized_fbm_base_frequency()
@@ -511,7 +575,9 @@ async function runPipeline() {
     mountainHeight,
     renderMode,
     terrainRoughness,
-    terrainFrequency
+    terrainFrequency,
+    sunAngle,
+    elevationScale
   ) => {
     writeGenerateParams(
       generateParamsBytes,
@@ -545,10 +611,12 @@ async function runPipeline() {
       terrainRoughness,
       terrainFrequency
     )
+    writeRenderParams(renderParamsBytes, width, height, sunAngle, elevationScale)
     device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
     device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
     device.queue.writeBuffer(faultParamsBuffer, 0, faultParamsBytes)
     device.queue.writeBuffer(topographyParamsBuffer, 0, topographyParamsBytes)
+    device.queue.writeBuffer(renderParamsBuffer, 0, renderParamsBytes)
     device.queue.writeBuffer(bboxBuffer, 0, bboxInit)
 
     const pass1Encoder = device.createCommandEncoder()
@@ -607,6 +675,17 @@ async function runPipeline() {
     device.queue.submit([pass6Encoder.finish()])
     await device.queue.onSubmittedWorkDone()
 
+    if (renderMode === 'shaded_relief') {
+      const pass7Encoder = device.createCommandEncoder()
+      const pass7 = pass7Encoder.beginComputePass()
+      pass7.setPipeline(pass7Pipeline)
+      pass7.setBindGroup(0, pass7BindGroup)
+      pass7.dispatchWorkgroups(dispatchShade)
+      pass7.end()
+      device.queue.submit([pass7Encoder.finish()])
+      await device.queue.onSubmittedWorkDone()
+    }
+
     const copyEncoder = device.createCommandEncoder()
     copyEncoder.copyBufferToBuffer(finalLandMaskBuffer, 0, pass3Readback, 0, dataByteLength)
     if (renderMode === 'plate_id') {
@@ -615,6 +694,8 @@ async function runPipeline() {
       copyEncoder.copyBufferToBuffer(faultStressBuffer, 0, faultReadback, 0, dataByteLength)
     } else if (renderMode === 'elevation') {
       copyEncoder.copyBufferToBuffer(elevationBuffer, 0, elevationReadback, 0, dataByteLength)
+    } else if (renderMode === 'shaded_relief') {
+      copyEncoder.copyBufferToBuffer(shadedReliefBuffer, 0, shadedReliefReadback, 0, plateByteLength)
     }
     device.queue.submit([copyEncoder.finish()])
     await device.queue.onSubmittedWorkDone()
@@ -638,6 +719,11 @@ async function runPipeline() {
       const elevationFlat = new Float32Array(elevationReadback.getMappedRange())
       renderElevation(context, elevationFlat, width, height)
       elevationReadback.unmap()
+    } else if (renderMode === 'shaded_relief') {
+      await shadedReliefReadback.mapAsync(GPUMapMode.READ)
+      const shadedFlat = new Uint32Array(shadedReliefReadback.getMappedRange())
+      renderShadedRelief(context, shadedFlat, width, height)
+      shadedReliefReadback.unmap()
     } else {
       renderLandMask(context, pass3Flat, width, height)
     }
@@ -651,7 +737,7 @@ async function runPipeline() {
     )
 
     statusNode.textContent =
-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
+      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
     landFractionNode.textContent =
       `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
 
@@ -674,6 +760,8 @@ async function runPipeline() {
   let queuedMountainHeight = normalized_mountain_height_from_slider(normalized_mountain_height())
   let queuedTerrainRoughness = normalized_terrain_roughness_from_slider(normalized_terrain_roughness())
   let queuedTerrainFrequency = normalized_terrain_frequency_from_slider(normalized_terrain_frequency())
+  let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
+  let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
   let queuedRenderMode = 'land_mask'
   let renderQueued = false
   let renderInFlight = false
@@ -699,7 +787,9 @@ async function runPipeline() {
           queuedMountainHeight,
           queuedRenderMode,
           queuedTerrainRoughness,
-          queuedTerrainFrequency
+          queuedTerrainFrequency,
+          queuedSunAngle,
+          queuedElevationScale
         )
       }
     } finally {
@@ -720,7 +810,9 @@ async function runPipeline() {
     rawMountainHeight,
     rawRenderMode,
     rawTerrainRoughness,
-    rawTerrainFrequency
+    rawTerrainFrequency,
+    rawSunAngle,
+    rawElevationScale
   ) => {
     const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
     const parsedFalloff = Number.isFinite(rawFalloff) ? rawFalloff : queuedFalloff
@@ -746,9 +838,16 @@ async function runPipeline() {
     const parsedTerrainFrequency = Number.isFinite(rawTerrainFrequency)
       ? rawTerrainFrequency
       : queuedTerrainFrequency
+    const parsedSunAngle = Number.isFinite(rawSunAngle) ? rawSunAngle : queuedSunAngle
+    const parsedElevationScale = Number.isFinite(rawElevationScale)
+      ? rawElevationScale
+      : queuedElevationScale
 
     const parsedRenderMode =
-      rawRenderMode === 'plate_id' || rawRenderMode === 'fault_stress' || rawRenderMode === 'elevation'
+      rawRenderMode === 'plate_id' ||
+      rawRenderMode === 'fault_stress' ||
+      rawRenderMode === 'elevation' ||
+      rawRenderMode === 'shaded_relief'
         ? rawRenderMode
         : 'land_mask'
 
@@ -764,6 +863,8 @@ async function runPipeline() {
     queuedMountainHeight = normalized_mountain_height_from_slider(parsedMountainHeight)
     queuedTerrainRoughness = normalized_terrain_roughness_from_slider(parsedTerrainRoughness)
     queuedTerrainFrequency = normalized_terrain_frequency_from_slider(parsedTerrainFrequency)
+    queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
+    queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
     queuedRenderMode = parsedRenderMode
 
     thresholdSlider.value = queuedThreshold.toFixed(2)
@@ -787,6 +888,10 @@ async function runPipeline() {
     terrainRoughnessValueNode.textContent = queuedTerrainRoughness.toFixed(2)
     terrainFrequencySlider.value = queuedTerrainFrequency.toFixed(1)
     terrainFrequencyValueNode.textContent = queuedTerrainFrequency.toFixed(1)
+    sunAngleSlider.value = queuedSunAngle.toFixed(0)
+    sunAngleValueNode.textContent = queuedSunAngle.toFixed(0)
+    elevationScaleSlider.value = queuedElevationScale.toFixed(1)
+    elevationScaleValueNode.textContent = queuedElevationScale.toFixed(1)
     seedInput.value = String(queuedSeed >>> 0)
     renderModeSelect.value = queuedRenderMode
 
@@ -977,6 +1082,46 @@ async function runPipeline() {
     )
   })
 
+  sunAngleSlider.addEventListener('input', (event) => {
+    queueRender(
+      queuedThreshold,
+      queuedFalloff,
+      queuedNoise,
+      queuedEdgeWarp,
+      queuedSeed,
+      queuedPlateCount,
+      queuedPlateWarpAmplitude,
+      queuedPlateWarpRoughness,
+      queuedMountainRadius,
+      queuedMountainHeight,
+      queuedRenderMode,
+      queuedTerrainRoughness,
+      queuedTerrainFrequency,
+      Number.parseFloat(event.target.value),
+      queuedElevationScale
+    )
+  })
+
+  elevationScaleSlider.addEventListener('input', (event) => {
+    queueRender(
+      queuedThreshold,
+      queuedFalloff,
+      queuedNoise,
+      queuedEdgeWarp,
+      queuedSeed,
+      queuedPlateCount,
+      queuedPlateWarpAmplitude,
+      queuedPlateWarpRoughness,
+      queuedMountainRadius,
+      queuedMountainHeight,
+      queuedRenderMode,
+      queuedTerrainRoughness,
+      queuedTerrainFrequency,
+      queuedSunAngle,
+      Number.parseFloat(event.target.value)
+    )
+  })
+
   renderModeSelect.addEventListener('change', (event) => {
     queueRender(
       queuedThreshold,
@@ -1039,7 +1184,9 @@ async function runPipeline() {
     queuedMountainHeight,
     queuedRenderMode,
     queuedTerrainRoughness,
-    queuedTerrainFrequency
+    queuedTerrainFrequency,
+    queuedSunAngle,
+    queuedElevationScale
   )
 }
 

@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Continent Generator Milestone 3.2</title>
+    <title>Continent Generator Milestone 3.3</title>
   </head>
   <body>
     <main class="layout">
-      <h1>Continent Generator: Milestone 3.2</h1>
+      <h1>Continent Generator: Milestone 3.3</h1>
       <p id="status">Booting WebGPU compute pipeline...</p>
       <section class="controls" aria-label="Continent Controls">
         <label for="seed-input">Seed</label>
@@ -146,6 +146,30 @@
           />
           <output id="terrain-frequency-value" for="terrain-frequency">8.0</output>
         </div>
+        <label for="sun-angle">Sun Angle</label>
+        <div class="control-row">
+          <input
+            id="sun-angle"
+            type="range"
+            min="0"
+            max="360"
+            step="1"
+            value="315"
+          />
+          <output id="sun-angle-value" for="sun-angle">315</output>
+        </div>
+        <label for="elevation-scale">Elevation Scale</label>
+        <div class="control-row">
+          <input
+            id="elevation-scale"
+            type="range"
+            min="1"
+            max="20"
+            step="0.1"
+            value="10.0"
+          />
+          <output id="elevation-scale-value" for="elevation-scale">10.0</output>
+        </div>
         <label for="render-mode">Render Mode</label>
         <div class="control-row">
           <select id="render-mode">
@@ -153,6 +177,7 @@
             <option value="plate_id">Plate IDs</option>
             <option value="fault_stress">Fault Stress</option>
             <option value="elevation">Elevation</option>
+            <option value="shaded_relief">Shaded Relief</option>
           </select>
         </div>
         <p id="land-fraction">Land fraction: --%</p>

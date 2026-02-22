@@ -89,7 +89,9 @@ h1 {
 #mountain-radius,
 #mountain-height,
 #terrain-roughness,
-#terrain-frequency {
+#terrain-frequency,
+#sun-angle,
+#elevation-scale {
   width: min(520px, 100%);
 }
 
@@ -102,7 +104,9 @@ h1 {
 #mountain-radius-value,
 #mountain-height-value,
 #terrain-roughness-value,
-#terrain-frequency-value {
+#terrain-frequency-value,
+#sun-angle-value,
+#elevation-scale-value {
   min-width: 3ch;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
