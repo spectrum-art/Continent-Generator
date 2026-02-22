@@ -134,31 +134,6 @@ function renderPlateIds(ctx, flatPlateIds, width, height, colorCache) {
   ctx.putImageData(image, 0, 0)
 }
 
-function renderFaultStress(ctx, flatStress, width, height) {
-  const image = ctx.createImageData(width, height)
-  const pixels = image.data
-  for (let i = 0; i < flatStress.length; i += 1) {
-    const s = flatStress[i]
-    const mag = Math.min(Math.abs(s) * 2.0, 1.0)
-    let r = 0
-    let g = 0
-    let b = 0
-    if (s < 0.0) {
-      const intensity = 0.15 + 0.85 * mag
-      r = Math.round(255 * intensity)
-    } else if (s > 0.0) {
-      const intensity = 0.15 + 0.85 * mag
-      b = Math.round(255 * intensity)
-    }
-    const offset = i * 4
-    pixels[offset] = r
-    pixels[offset + 1] = g
-    pixels[offset + 2] = b
-    pixels[offset + 3] = 255
-  }
-  ctx.putImageData(image, 0, 0)
-}
-
 function renderElevation(ctx, flatElevation, width, height) {
   const image = ctx.createImageData(width, height)
   const pixels = image.data
@@ -256,7 +231,7 @@ function writeGridParams(buffer, width, height) {
   view.setUint32(12, 0, true)
 }
 
-function writeFaultParams(buffer, width, height, seed) {
+function writeKinematicParams(buffer, width, height, seed) {
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
   view.setUint32(4, height, true)
@@ -285,15 +260,24 @@ function writeTopographyParams(
   view.setFloat32(28, terrainFrequency, true)
 }
 
-function writeRenderParams(buffer, width, height, sunAngle, elevationScale, verticalExaggeration) {
+function writeRenderParams(
+  buffer,
+  width,
+  height,
+  renderMode,
+  sunAngle,
+  elevationScale,
+  verticalExaggeration
+) {
+  const renderModeCode = renderMode === 'kinematics' ? 1 : 0
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
   view.setUint32(4, height, true)
-  view.setFloat32(8, sunAngle, true)
-  view.setFloat32(12, elevationScale, true)
-  view.setFloat32(16, verticalExaggeration, true)
-  view.setFloat32(20, 0, true)
-  view.setFloat32(24, 0, true)
+  view.setUint32(8, renderModeCode, true)
+  view.setUint32(12, 0, true)
+  view.setFloat32(16, sunAngle, true)
+  view.setFloat32(20, elevationScale, true)
+  view.setFloat32(24, verticalExaggeration, true)
   view.setFloat32(28, 0, true)
 }
 
@@ -359,7 +343,7 @@ async function runPipeline() {
   const dispatchReduce = dispatches[1]
   const dispatchShift = dispatches[2]
   const dispatchPlate = dispatches[3]
-  const dispatchStress = dispatches[4]
+  const dispatchKinematics = dispatches[4]
   const dispatchTopo = dispatches[5]
   const dispatchShade = dispatchTopo
   const dataByteLength = activeCells * Float32Array.BYTES_PER_ELEMENT
@@ -384,8 +368,8 @@ async function runPipeline() {
     size: plateByteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
-  const faultStressBuffer = device.createBuffer({
-    size: dataByteLength,
+  const kinematicDataBuffer = device.createBuffer({
+    size: dataByteLength * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
   const elevationBuffer = device.createBuffer({
@@ -406,10 +390,6 @@ async function runPipeline() {
   })
   const plateReadback = device.createBuffer({
     size: plateByteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-  const faultReadback = device.createBuffer({
-    size: dataByteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   })
   const elevationReadback = device.createBuffer({
@@ -433,7 +413,7 @@ async function runPipeline() {
     size: 48,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
-  const faultParamsBuffer = device.createBuffer({
+  const kinematicParamsBuffer = device.createBuffer({
     size: 16,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
@@ -449,7 +429,7 @@ async function runPipeline() {
   const generateParamsBytes = new ArrayBuffer(48)
   const gridParamsBytes = new ArrayBuffer(16)
   const plateParamsBytes = new ArrayBuffer(48)
-  const faultParamsBytes = new ArrayBuffer(16)
+  const kinematicParamsBytes = new ArrayBuffer(16)
   const topographyParamsBytes = new ArrayBuffer(32)
   const renderParamsBytes = new ArrayBuffer(32)
   writeGridParams(gridParamsBytes, width, height)
@@ -544,8 +524,9 @@ async function runPipeline() {
     layout: pass5Pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: plateIdBuffer } },
-      { binding: 1, resource: { buffer: faultStressBuffer } },
-      { binding: 2, resource: { buffer: faultParamsBuffer } },
+      { binding: 1, resource: { buffer: finalLandMaskBuffer } },
+      { binding: 2, resource: { buffer: kinematicDataBuffer } },
+      { binding: 3, resource: { buffer: kinematicParamsBuffer } },
     ],
   })
 
@@ -553,7 +534,7 @@ async function runPipeline() {
     layout: pass6Pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 1, resource: { buffer: faultStressBuffer } },
+      { binding: 1, resource: { buffer: kinematicDataBuffer } },
       { binding: 2, resource: { buffer: elevationBuffer } },
       { binding: 3, resource: { buffer: topographyParamsBuffer } },
     ],
@@ -562,8 +543,9 @@ async function runPipeline() {
     layout: pass7Pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: elevationBuffer } },
-      { binding: 1, resource: { buffer: shadedReliefBuffer } },
-      { binding: 2, resource: { buffer: renderParamsBuffer } },
+      { binding: 1, resource: { buffer: kinematicDataBuffer } },
+      { binding: 2, resource: { buffer: shadedReliefBuffer } },
+      { binding: 3, resource: { buffer: renderParamsBuffer } },
     ],
   })
 
@@ -611,7 +593,7 @@ async function runPipeline() {
       plateWarpFrequency,
       seed
     )
-    writeFaultParams(faultParamsBytes, width, height, seed)
+    writeKinematicParams(kinematicParamsBytes, width, height, seed)
     writeTopographyParams(
       topographyParamsBytes,
       width,
@@ -626,13 +608,14 @@ async function runPipeline() {
       renderParamsBytes,
       width,
       height,
+      renderMode,
       sunAngle,
       elevationScale,
       verticalExaggeration
     )
     device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
     device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
-    device.queue.writeBuffer(faultParamsBuffer, 0, faultParamsBytes)
+    device.queue.writeBuffer(kinematicParamsBuffer, 0, kinematicParamsBytes)
     device.queue.writeBuffer(topographyParamsBuffer, 0, topographyParamsBytes)
     device.queue.writeBuffer(renderParamsBuffer, 0, renderParamsBytes)
     device.queue.writeBuffer(bboxBuffer, 0, bboxInit)
@@ -679,7 +662,7 @@ async function runPipeline() {
     const pass5 = pass5Encoder.beginComputePass()
     pass5.setPipeline(pass5Pipeline)
     pass5.setBindGroup(0, pass5BindGroup)
-    pass5.dispatchWorkgroups(dispatchStress)
+    pass5.dispatchWorkgroups(dispatchKinematics)
     pass5.end()
     device.queue.submit([pass5Encoder.finish()])
     await device.queue.onSubmittedWorkDone()
@@ -693,7 +676,7 @@ async function runPipeline() {
     device.queue.submit([pass6Encoder.finish()])
     await device.queue.onSubmittedWorkDone()
 
-    if (renderMode === 'shaded_relief') {
+    if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
       const pass7Encoder = device.createCommandEncoder()
       const pass7 = pass7Encoder.beginComputePass()
       pass7.setPipeline(pass7Pipeline)
@@ -708,11 +691,9 @@ async function runPipeline() {
     copyEncoder.copyBufferToBuffer(finalLandMaskBuffer, 0, pass3Readback, 0, dataByteLength)
     if (renderMode === 'plate_id') {
       copyEncoder.copyBufferToBuffer(plateIdBuffer, 0, plateReadback, 0, plateByteLength)
-    } else if (renderMode === 'fault_stress') {
-      copyEncoder.copyBufferToBuffer(faultStressBuffer, 0, faultReadback, 0, dataByteLength)
     } else if (renderMode === 'elevation') {
       copyEncoder.copyBufferToBuffer(elevationBuffer, 0, elevationReadback, 0, dataByteLength)
-    } else if (renderMode === 'shaded_relief') {
+    } else if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
       copyEncoder.copyBufferToBuffer(shadedReliefBuffer, 0, shadedReliefReadback, 0, plateByteLength)
     }
     device.queue.submit([copyEncoder.finish()])
@@ -727,17 +708,12 @@ async function runPipeline() {
       const plateFlat = new Uint32Array(plateReadback.getMappedRange())
       renderPlateIds(context, plateFlat, width, height, plateColorCache)
       plateReadback.unmap()
-    } else if (renderMode === 'fault_stress') {
-      await faultReadback.mapAsync(GPUMapMode.READ)
-      const faultFlat = new Float32Array(faultReadback.getMappedRange())
-      renderFaultStress(context, faultFlat, width, height)
-      faultReadback.unmap()
     } else if (renderMode === 'elevation') {
       await elevationReadback.mapAsync(GPUMapMode.READ)
       const elevationFlat = new Float32Array(elevationReadback.getMappedRange())
       renderElevation(context, elevationFlat, width, height)
       elevationReadback.unmap()
-    } else if (renderMode === 'shaded_relief') {
+    } else if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
       await shadedReliefReadback.mapAsync(GPUMapMode.READ)
       const shadedFlat = new Uint32Array(shadedReliefReadback.getMappedRange())
       renderShadedRelief(context, shadedFlat, width, height)
@@ -871,7 +847,7 @@ async function runPipeline() {
 
     const parsedRenderMode =
       rawRenderMode === 'plate_id' ||
-      rawRenderMode === 'fault_stress' ||
+      rawRenderMode === 'kinematics' ||
       rawRenderMode === 'elevation' ||
       rawRenderMode === 'shaded_relief'
         ? rawRenderMode

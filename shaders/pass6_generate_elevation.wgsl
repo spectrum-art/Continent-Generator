@@ -10,7 +10,7 @@ struct TopographyParams {
 }
 
 @group(0) @binding(0) var<storage, read> final_land_mask: array<f32>;
-@group(0) @binding(1) var<storage, read> fault_stress: array<f32>;
+@group(0) @binding(1) var<storage, read> kinematic_data: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> elevation: array<f32>;
 @group(0) @binding(3) var<uniform> params: TopographyParams;
 
@@ -141,7 +141,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var ny = min_y; ny <= max_y; ny = ny + 1) {
     for (var nx = min_x; nx <= max_x; nx = nx + 1) {
       let n_index = u32(ny) * params.width + u32(nx);
-      let stress = fault_stress[n_index];
+      let kin = kinematic_data[n_index];
+      let stress = select(0.0, kin.x, kin.w > 0.5);
       if (abs(stress) <= 0.000001) {
         continue;
       }
