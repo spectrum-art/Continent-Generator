@@ -18,6 +18,7 @@ const DEFAULT_TERRAIN_ROUGHNESS_NORM: f32 = 0.50;
 const DEFAULT_TERRAIN_FREQUENCY_NORM: f32 = 8.0;
 const DEFAULT_SUN_ANGLE_NORM: f32 = 315.0;
 const DEFAULT_ELEVATION_SCALE_NORM: f32 = 10.0;
+const DEFAULT_VERTICAL_EXAGGERATION_NORM: f32 = 5.0;
 const DEFAULT_SEED: u32 = 1337;
 
 fn compute_dispatch(flat_cell_count: u32, coverage_norm: f32) -> Result<(u32, u32), JsValue> {
@@ -200,6 +201,16 @@ pub fn normalized_elevation_scale() -> f32 {
 
 #[wasm_bindgen]
 pub fn normalized_elevation_scale_from_slider(raw: f32) -> f32 {
+    raw.clamp(1.0, 20.0)
+}
+
+#[wasm_bindgen]
+pub fn normalized_vertical_exaggeration() -> f32 {
+    DEFAULT_VERTICAL_EXAGGERATION_NORM
+}
+
+#[wasm_bindgen]
+pub fn normalized_vertical_exaggeration_from_slider(raw: f32) -> f32 {
     raw.clamp(1.0, 20.0)
 }
 

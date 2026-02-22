@@ -3,6 +3,10 @@ struct RenderParams {
   height: u32,
   sun_angle: f32,
   elevation_scale: f32,
+  vertical_exaggeration: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
 }
 
 @group(0) @binding(0) var<storage, read> elevation: array<f32>;
@@ -48,8 +52,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let top = sample_elevation(x, y - 1);
   let bottom = sample_elevation(x, y + 1);
 
-  let dx = (right - left) * params.elevation_scale;
-  let dy = (bottom - top) * params.elevation_scale;
+  let relief_scale = params.elevation_scale * params.vertical_exaggeration;
+  let dx = (right - left) * relief_scale;
+  let dy = (bottom - top) * relief_scale;
   let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
 
   let sun_rad = radians(params.sun_angle);

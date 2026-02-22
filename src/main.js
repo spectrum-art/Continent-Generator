@@ -41,6 +41,8 @@ import initWasm, {
   normalized_terrain_frequency_from_slider,
   normalized_terrain_roughness,
   normalized_terrain_roughness_from_slider,
+  normalized_vertical_exaggeration,
+  normalized_vertical_exaggeration_from_slider,
 } from './wasm/wasm_core.js'
 
 const statusNode = document.querySelector('#status')
@@ -72,6 +74,8 @@ const sunAngleSlider = document.querySelector('#sun-angle')
 const sunAngleValueNode = document.querySelector('#sun-angle-value')
 const elevationScaleSlider = document.querySelector('#elevation-scale')
 const elevationScaleValueNode = document.querySelector('#elevation-scale-value')
+const verticalExaggerationSlider = document.querySelector('#vertical-exaggeration')
+const verticalExaggerationValueNode = document.querySelector('#vertical-exaggeration-value')
 const renderModeSelect = document.querySelector('#render-mode')
 const landFractionNode = document.querySelector('#land-fraction')
 
@@ -281,12 +285,16 @@ function writeTopographyParams(
   view.setFloat32(28, terrainFrequency, true)
 }
 
-function writeRenderParams(buffer, width, height, sunAngle, elevationScale) {
+function writeRenderParams(buffer, width, height, sunAngle, elevationScale, verticalExaggeration) {
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
   view.setUint32(4, height, true)
   view.setFloat32(8, sunAngle, true)
   view.setFloat32(12, elevationScale, true)
+  view.setFloat32(16, verticalExaggeration, true)
+  view.setFloat32(20, 0, true)
+  view.setFloat32(24, 0, true)
+  view.setFloat32(28, 0, true)
 }
 
 async function runPipeline() {
@@ -322,6 +330,8 @@ async function runPipeline() {
     !sunAngleValueNode ||
     !elevationScaleSlider ||
     !elevationScaleValueNode ||
+    !verticalExaggerationSlider ||
+    !verticalExaggerationValueNode ||
     !renderModeSelect ||
     !landFractionNode
   ) {
@@ -432,7 +442,7 @@ async function runPipeline() {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
   const renderParamsBuffer = device.createBuffer({
-    size: 16,
+    size: 32,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
 
@@ -441,7 +451,7 @@ async function runPipeline() {
   const plateParamsBytes = new ArrayBuffer(48)
   const faultParamsBytes = new ArrayBuffer(16)
   const topographyParamsBytes = new ArrayBuffer(32)
-  const renderParamsBytes = new ArrayBuffer(16)
+  const renderParamsBytes = new ArrayBuffer(32)
   writeGridParams(gridParamsBytes, width, height)
   device.queue.writeBuffer(gridParamsBuffer, 0, gridParamsBytes)
 
@@ -577,7 +587,8 @@ async function runPipeline() {
     terrainRoughness,
     terrainFrequency,
     sunAngle,
-    elevationScale
+    elevationScale,
+    verticalExaggeration
   ) => {
     writeGenerateParams(
       generateParamsBytes,
@@ -611,7 +622,14 @@ async function runPipeline() {
       terrainRoughness,
       terrainFrequency
     )
-    writeRenderParams(renderParamsBytes, width, height, sunAngle, elevationScale)
+    writeRenderParams(
+      renderParamsBytes,
+      width,
+      height,
+      sunAngle,
+      elevationScale,
+      verticalExaggeration
+    )
     device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
     device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
     device.queue.writeBuffer(faultParamsBuffer, 0, faultParamsBytes)
@@ -737,7 +755,7 @@ async function runPipeline() {
     )
 
     statusNode.textContent =
-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
+      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
     landFractionNode.textContent =
       `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
 
@@ -762,6 +780,9 @@ async function runPipeline() {
   let queuedTerrainFrequency = normalized_terrain_frequency_from_slider(normalized_terrain_frequency())
   let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
   let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
+  let queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
+    normalized_vertical_exaggeration()
+  )
   let queuedRenderMode = 'land_mask'
   let renderQueued = false
   let renderInFlight = false
@@ -789,7 +810,8 @@ async function runPipeline() {
           queuedTerrainRoughness,
           queuedTerrainFrequency,
           queuedSunAngle,
-          queuedElevationScale
+          queuedElevationScale,
+          queuedVerticalExaggeration
         )
       }
     } finally {
@@ -812,7 +834,8 @@ async function runPipeline() {
     rawTerrainRoughness,
     rawTerrainFrequency,
     rawSunAngle,
-    rawElevationScale
+    rawElevationScale,
+    rawVerticalExaggeration
   ) => {
     const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
     const parsedFalloff = Number.isFinite(rawFalloff) ? rawFalloff : queuedFalloff
@@ -842,6 +865,9 @@ async function runPipeline() {
     const parsedElevationScale = Number.isFinite(rawElevationScale)
       ? rawElevationScale
       : queuedElevationScale
+    const parsedVerticalExaggeration = Number.isFinite(rawVerticalExaggeration)
+      ? rawVerticalExaggeration
+      : queuedVerticalExaggeration
 
     const parsedRenderMode =
       rawRenderMode === 'plate_id' ||
@@ -865,6 +891,9 @@ async function runPipeline() {
     queuedTerrainFrequency = normalized_terrain_frequency_from_slider(parsedTerrainFrequency)
     queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
     queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
+    queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
+      parsedVerticalExaggeration
+    )
     queuedRenderMode = parsedRenderMode
 
     thresholdSlider.value = queuedThreshold.toFixed(2)
@@ -892,6 +921,8 @@ async function runPipeline() {
     sunAngleValueNode.textContent = queuedSunAngle.toFixed(0)
     elevationScaleSlider.value = queuedElevationScale.toFixed(1)
     elevationScaleValueNode.textContent = queuedElevationScale.toFixed(1)
+    verticalExaggerationSlider.value = queuedVerticalExaggeration.toFixed(1)
+    verticalExaggerationValueNode.textContent = queuedVerticalExaggeration.toFixed(1)
     seedInput.value = String(queuedSeed >>> 0)
     renderModeSelect.value = queuedRenderMode
 
@@ -1118,6 +1149,28 @@ async function runPipeline() {
       queuedTerrainRoughness,
       queuedTerrainFrequency,
       queuedSunAngle,
+      Number.parseFloat(event.target.value),
+      queuedVerticalExaggeration
+    )
+  })
+
+  verticalExaggerationSlider.addEventListener('input', (event) => {
+    queueRender(
+      queuedThreshold,
+      queuedFalloff,
+      queuedNoise,
+      queuedEdgeWarp,
+      queuedSeed,
+      queuedPlateCount,
+      queuedPlateWarpAmplitude,
+      queuedPlateWarpRoughness,
+      queuedMountainRadius,
+      queuedMountainHeight,
+      queuedRenderMode,
+      queuedTerrainRoughness,
+      queuedTerrainFrequency,
+      queuedSunAngle,
+      queuedElevationScale,
       Number.parseFloat(event.target.value)
     )
   })
@@ -1186,7 +1239,8 @@ async function runPipeline() {
     queuedTerrainRoughness,
     queuedTerrainFrequency,
     queuedSunAngle,
-    queuedElevationScale
+    queuedElevationScale,
+    queuedVerticalExaggeration
   )
 }
 

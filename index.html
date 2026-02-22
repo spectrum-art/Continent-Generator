@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Continent Generator Milestone 3.3</title>
+    <title>Continent Generator Milestone 3.4</title>
   </head>
   <body>
     <main class="layout">
-      <h1>Continent Generator: Milestone 3.3</h1>
+      <h1>Continent Generator: Milestone 3.4</h1>
       <p id="status">Booting WebGPU compute pipeline...</p>
       <section class="controls" aria-label="Continent Controls">
         <label for="seed-input">Seed</label>
@@ -169,6 +169,18 @@
             value="10.0"
           />
           <output id="elevation-scale-value" for="elevation-scale">10.0</output>
+        </div>
+        <label for="vertical-exaggeration">Vertical Exaggeration</label>
+        <div class="control-row">
+          <input
+            id="vertical-exaggeration"
+            type="range"
+            min="1"
+            max="20"
+            step="0.1"
+            value="5.0"
+          />
+          <output id="vertical-exaggeration-value" for="vertical-exaggeration">5.0</output>
         </div>
         <label for="render-mode">Render Mode</label>
         <div class="control-row">

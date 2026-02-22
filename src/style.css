@@ -91,7 +91,8 @@ h1 {
 #terrain-roughness,
 #terrain-frequency,
 #sun-angle,
-#elevation-scale {
+#elevation-scale,
+#vertical-exaggeration {
   width: min(520px, 100%);
 }
 
@@ -106,7 +107,8 @@ h1 {
 #terrain-roughness-value,
 #terrain-frequency-value,
 #sun-angle-value,
-#elevation-scale-value {
+#elevation-scale-value,
+#vertical-exaggeration-value {
   min-width: 3ch;
   font-variant-numeric: tabular-nums;
   font-weight: 600;

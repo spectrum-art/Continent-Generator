@@ -1,70 +1,31 @@
-@compute @workgroup_size(256, 1, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let flat_index = gid.x;
-  let cell_count = params.width * params.height;
-  if (flat_index >= cell_count) {
-    return;
-  }
+let x = i32(flat_index % params.width);
+let y = i32(flat_index / params.width);
+let center = sample_elevation(x, y);
 
-  if (final_land_mask[flat_index] < 0.5) {
-    elevation[flat_index] = 0.0;
-    return;
-  }
-
-  let x = i32(flat_index % params.width);
-  let y = i32(flat_index / params.width);
-  let u_norm = f32(x) / f32(params.width);
-  let v_norm = f32(y) / f32(params.height);
-  let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);
-
-  let base_noise = fbm(sample_uv * params.terrain_frequency);
-  var current_elevation = 0.15 + (base_noise * 0.1);
-  let radius = max(params.mountain_radius, 1.0);
-  let radius_i = i32(ceil(radius));
-  let radius2 = radius * radius;
-  var min_dist = radius;
-  var weighted_stress = 0.0;
-  var total_weight = 0.0;
-
-  let min_x = max(0, x - radius_i);
-  let max_x = min(i32(params.width) - 1, x + radius_i);
-  let min_y = max(0, y - radius_i);
-  let max_y = min(i32(params.height) - 1, y + radius_i);
-
-  for (var ny = min_y; ny <= max_y; ny = ny + 1) {
-    for (var nx = min_x; nx <= max_x; nx = nx + 1) {
-      let n_index = u32(ny) * params.width + u32(nx);
-      let stress = fault_stress[n_index];
-      if (abs(stress) <= 0.000001) {
-        continue;
-      }
-
-      let dx = f32(nx - x);
-      let dy = f32(ny - y);
-      let dist2 = dx * dx + dy * dy;
-      if (dist2 > radius2) {
-        continue;
-      }
-
-      let distance = sqrt(dist2);
-      if (distance < min_dist) {
-        min_dist = distance;
-      }
-
-      let weight = 1.0 / (dist2 + 1.0);
-      weighted_stress = weighted_stress + stress * weight;
-      total_weight = total_weight + weight;
-    }
-  }
-
-  if (total_weight > 0.0) {
-    let avg_stress = weighted_stress / total_weight;
-    let struct_noise = fbm(sample_uv * params.terrain_frequency) * 2.0 - 1.0;
-    let warped_dist = min_dist + (struct_noise * params.terrain_roughness * (radius * 0.5));
-    let falloff = max(1.0 - (warped_dist / radius), 0.0);
-    let ridge = smoothstep(0.2, 1.0, falloff);
-    current_elevation = current_elevation + avg_stress * ridge * params.mountain_height;
-  }
-
-  elevation[flat_index] = clamp(current_elevation, 0.0, 1.0);
+if (center <= 0.0) {
+  let ocean = vec4<f32>(0.03, 0.16, 0.32, 1.0);
+  shaded_rgba[flat_index] = pack_rgba8(ocean);
+  return;
 }
+
+let left = sample_elevation(x - 1, y);
+let right = sample_elevation(x + 1, y);
+let top = sample_elevation(x, y - 1);
+let bottom = sample_elevation(x, y + 1);
+
+let dx = (right - left) * params.elevation_scale;
+let dy = (bottom - top) * params.elevation_scale;
+let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
+
+let sun_rad = radians(params.sun_angle);
+let light_dir = normalize(vec3<f32>(cos(sun_rad), sin(sun_rad), 1.0));
+let diffuse = max(dot(normal, light_dir), 0.0);
+let ambient = 0.2;
+let light = ambient + diffuse * (1.0 - ambient);
+
+let lowland = vec3<f32>(0.56, 0.60, 0.45);
+let highland = vec3<f32>(0.79, 0.74, 0.62);
+let base_land = mix(lowland, highland, clamp(center, 0.0, 1.0));
+let lit = base_land * light;
+
+shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(lit, 1.0));
