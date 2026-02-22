@@ -1,0 +1,190 @@
+// JFA Init Shader (Pass 6)
+struct GridParams {
+  width: u32,
+  height: u32,
+  _pad0: u32,
+  _pad1: u32,
+}
+
+@group(0) @binding(0) var<storage, read> kinematic_data: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read_write> jfa_seed: array<vec2<f32>>;
+@group(0) @binding(2) var<uniform> params: GridParams;
+
+@compute @workgroup_size(256, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let flat_index = gid.x;
+  let cell_count = params.width * params.height;
+  if (flat_index >= cell_count) {
+    return;
+  }
+
+  let x = i32(flat_index % params.width);
+  let y = i32(flat_index / params.width);
+  let kin = kinematic_data[flat_index];
+
+  if (kin.w > 0.5) {
+    jfa_seed[flat_index] = vec2<f32>(f32(x), f32(y));
+  } else {
+    jfa_seed[flat_index] = vec2<f32>(-10000.0, -10000.0);
+  }
+}
+
+// JFA Step Shader
+struct JfaStepParams {
+  width: u32,
+  height: u32,
+  step_size: f32,
+  _pad0: f32,
+}
+
+@group(0) @binding(0) var<storage, read> jfa_read: array<vec2<f32>>;
+@group(0) @binding(1) var<storage, read_write> jfa_write: array<vec2<f32>>;
+@group(0) @binding(2) var<uniform> params: JfaStepParams;
+
+fn is_valid_candidate(p: vec2<f32>) -> bool {
+  return p.x > -9999.0 && p.y > -9999.0;
+}
+
+@compute @workgroup_size(256, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let flat_index = gid.x;
+  let cell_count = params.width * params.height;
+  if (flat_index >= cell_count) {
+    return;
+  }
+
+  let x = i32(flat_index % params.width);
+  let y = i32(flat_index / params.width);
+  let center = vec2<f32>(f32(x), f32(y));
+  let step_i = max(1, i32(round(params.step_size)));
+
+  var best_coord = vec2<f32>(-10000.0, -10000.0);
+  var best_dist2 = 1e30;
+
+  for (var oy = -1; oy <= 1; oy = oy + 1) {
+    for (var ox = -1; ox <= 1; ox = ox + 1) {
+      let nx = x + ox * step_i;
+      let ny = y + oy * step_i;
+      if (nx < 0 || nx >= i32(params.width) || ny < 0 || ny >= i32(params.height)) {
+        continue;
+      }
+
+      let n_index = u32(ny) * params.width + u32(nx);
+      let candidate = jfa_read[n_index];
+      if (!is_valid_candidate(candidate)) {
+        continue;
+      }
+
+      let d = candidate - center;
+      let dist2 = dot(d, d);
+      if (dist2 < best_dist2) {
+        best_dist2 = dist2;
+        best_coord = candidate;
+      }
+    }
+  }
+
+  jfa_write[flat_index] = best_coord;
+}
+
+// Updated Render Pass (Kinematics + SDF Distance)
+struct RenderParams {
+  width: u32,
+  height: u32,
+  render_mode: u32,
+  _pad0: u32,
+  sun_angle: f32,
+  elevation_scale: f32,
+  vertical_exaggeration: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<storage, read> kinematic_data: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read> jfa_nearest: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> shaded_rgba: array<u32>;
+@group(0) @binding(3) var<uniform> params: RenderParams;
+
+@compute @workgroup_size(256, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let flat_index = gid.x;
+  let cell_count = params.width * params.height;
+  if (flat_index >= cell_count) {
+    return;
+  }
+
+  let x = i32(flat_index % params.width);
+  let y = i32(flat_index / params.width);
+
+  if (params.render_mode == 1u) {
+    let kin = kinematic_data[flat_index];
+    let is_even = f32((x + y) % 2 == 0);
+    let error_color = vec4<f32>(is_even, 0.0, 1.0 - is_even, 1.0);
+
+    if (kin.y < 0.0) {
+      shaded_rgba[flat_index] = pack_rgba8(error_color);
+      return;
+    }
+
+    let c = kin.z;
+    if (c != 0.0 && c != 1.0 && c != 2.0) {
+      shaded_rgba[flat_index] = pack_rgba8(error_color);
+      return;
+    }
+
+    if (kin.w == 0.0 && (kin.x != 0.0 || kin.y != 0.0 || kin.z != 0.0)) {
+      shaded_rgba[flat_index] = pack_rgba8(error_color);
+      return;
+    }
+
+    if (kin.w == 0.0) {
+      shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(0.0, 0.0, 0.0, 1.0));
+      return;
+    }
+
+    let kinematics_color = vec4<f32>(
+      clamp(abs(kin.x), 0.0, 1.0),
+      clamp(kin.y, 0.0, 1.0),
+      clamp(kin.z * 0.5, 0.0, 1.0),
+      1.0
+    );
+    shaded_rgba[flat_index] = pack_rgba8(kinematics_color);
+    return;
+  }
+
+  if (params.render_mode == 2u) {
+    let nearest = jfa_nearest[flat_index];
+    if (nearest.x < -9999.0 || nearest.y < -9999.0) {
+      shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(0.0, 0.0, 0.0, 1.0));
+      return;
+    }
+
+    let p = vec2<f32>(f32(x), f32(y));
+    let d = nearest - p;
+    let distance = length(d);
+    let col = 1.0 - clamp(distance / 200.0, 0.0, 1.0);
+    shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(col, col, col, 1.0));
+    return;
+  }
+
+  shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(0.0, 0.0, 0.0, 1.0));
+}
+
+// JavaScript Ping-Pong Loop Logic
+let readFromA = true
+for (let i = 0; i < jfaPasses; i += 1) {
+  const stepSize = 2 ** (jfaPasses - i - 1)
+  writeJfaStepParams(jfaStepParamsBytes, width, height, stepSize)
+  device.queue.writeBuffer(jfaStepParamsBuffer, 0, jfaStepParamsBytes)
+
+  const pass8Encoder = device.createCommandEncoder()
+  const pass8 = pass8Encoder.beginComputePass()
+  pass8.setPipeline(pass8Pipeline)
+  pass8.setBindGroup(0, readFromA ? pass8BindGroupAB : pass8BindGroupBA)
+  pass8.dispatchWorkgroups(dispatchJfa)
+  pass8.end()
+  device.queue.submit([pass8Encoder.finish()])
+  await device.queue.onSubmittedWorkDone()
+  readFromA = !readFromA
+}
+
+const finalJfaIsA = readFromA

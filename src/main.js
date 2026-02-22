@@ -5,6 +5,7 @@ import pass3Source from '../shaders/pass3_shift_land_mask.wgsl?raw'
 import pass4Source from '../shaders/pass4_generate_plate_ids.wgsl?raw'
 import pass5Source from '../shaders/pass5_compute_fault_stress.wgsl?raw'
 import pass6Source from '../shaders/pass6_generate_elevation.wgsl?raw'
+import pass8Source from '../shaders/pass8_jfa_step.wgsl?raw'
 import pass7Source from '../shaders/pass7_shaded_relief.wgsl?raw'
 import initWasm, {
   deterministic_seed,
@@ -134,20 +135,6 @@ function renderPlateIds(ctx, flatPlateIds, width, height, colorCache) {
   ctx.putImageData(image, 0, 0)
 }
 
-function renderElevation(ctx, flatElevation, width, height) {
-  const image = ctx.createImageData(width, height)
-  const pixels = image.data
-  for (let i = 0; i < flatElevation.length; i += 1) {
-    const gray = Math.round(Math.min(Math.max(flatElevation[i], 0.0), 1.0) * 255)
-    const offset = i * 4
-    pixels[offset] = gray
-    pixels[offset + 1] = gray
-    pixels[offset + 2] = gray
-    pixels[offset + 3] = 255
-  }
-  ctx.putImageData(image, 0, 0)
-}
-
 function renderShadedRelief(ctx, packedColor, width, height) {
   const image = ctx.createImageData(width, height)
   const pixels = image.data
@@ -239,25 +226,12 @@ function writeKinematicParams(buffer, width, height, seed) {
   view.setUint32(12, 0, true)
 }
 
-function writeTopographyParams(
-  buffer,
-  width,
-  height,
-  seed,
-  mountainRadius,
-  mountainHeight,
-  terrainRoughness,
-  terrainFrequency
-) {
+function writeJfaStepParams(buffer, width, height, stepSize) {
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
   view.setUint32(4, height, true)
-  view.setUint32(8, seed >>> 0, true)
-  view.setUint32(12, 0, true)
-  view.setFloat32(16, mountainRadius, true)
-  view.setFloat32(20, mountainHeight, true)
-  view.setFloat32(24, terrainRoughness, true)
-  view.setFloat32(28, terrainFrequency, true)
+  view.setFloat32(8, stepSize, true)
+  view.setFloat32(12, 0, true)
 }
 
 function writeRenderParams(
@@ -269,7 +243,12 @@ function writeRenderParams(
   elevationScale,
   verticalExaggeration
 ) {
-  const renderModeCode = renderMode === 'kinematics' ? 1 : 0
+  let renderModeCode = 0
+  if (renderMode === 'kinematics') {
+    renderModeCode = 1
+  } else if (renderMode === 'sdf_distance') {
+    renderModeCode = 2
+  }
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
   view.setUint32(4, height, true)
@@ -344,10 +323,12 @@ async function runPipeline() {
   const dispatchShift = dispatches[2]
   const dispatchPlate = dispatches[3]
   const dispatchKinematics = dispatches[4]
-  const dispatchTopo = dispatches[5]
-  const dispatchShade = dispatchTopo
+  const dispatchJfa = dispatches[5]
+  const dispatchShade = dispatchJfa
+  const jfaPasses = Math.ceil(Math.log2(Math.max(width, height)))
   const dataByteLength = activeCells * Float32Array.BYTES_PER_ELEMENT
   const plateByteLength = activeCells * Uint32Array.BYTES_PER_ELEMENT
+  const jfaByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
 
   canvas.width = width
   canvas.height = height
@@ -372,11 +353,15 @@ async function runPipeline() {
     size: dataByteLength * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
-  const elevationBuffer = device.createBuffer({
-    size: dataByteLength,
+  const jfaBufferA = device.createBuffer({
+    size: jfaByteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
-  const shadedReliefBuffer = device.createBuffer({
+  const jfaBufferB = device.createBuffer({
+    size: jfaByteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  })
+  const shadedOutputBuffer = device.createBuffer({
     size: plateByteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
@@ -392,11 +377,7 @@ async function runPipeline() {
     size: plateByteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   })
-  const elevationReadback = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-  const shadedReliefReadback = device.createBuffer({
+  const shadedOutputReadback = device.createBuffer({
     size: plateByteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   })
@@ -417,8 +398,8 @@ async function runPipeline() {
     size: 16,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
-  const topographyParamsBuffer = device.createBuffer({
-    size: 32,
+  const jfaStepParamsBuffer = device.createBuffer({
+    size: 16,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
   const renderParamsBuffer = device.createBuffer({
@@ -430,7 +411,7 @@ async function runPipeline() {
   const gridParamsBytes = new ArrayBuffer(16)
   const plateParamsBytes = new ArrayBuffer(48)
   const kinematicParamsBytes = new ArrayBuffer(16)
-  const topographyParamsBytes = new ArrayBuffer(32)
+  const jfaStepParamsBytes = new ArrayBuffer(16)
   const renderParamsBytes = new ArrayBuffer(32)
   writeGridParams(gridParamsBytes, width, height)
   device.queue.writeBuffer(gridParamsBuffer, 0, gridParamsBytes)
@@ -484,6 +465,13 @@ async function runPipeline() {
       entryPoint: 'main',
     },
   })
+  const pass8Pipeline = device.createComputePipeline({
+    layout: 'auto',
+    compute: {
+      module: device.createShaderModule({ code: pass8Source }),
+      entryPoint: 'main',
+    },
+  })
 
   const pass1BindGroup = device.createBindGroup({
     layout: pass1Pipeline.getBindGroupLayout(0),
@@ -533,18 +521,42 @@ async function runPipeline() {
   const pass6BindGroup = device.createBindGroup({
     layout: pass6Pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 1, resource: { buffer: kinematicDataBuffer } },
-      { binding: 2, resource: { buffer: elevationBuffer } },
-      { binding: 3, resource: { buffer: topographyParamsBuffer } },
+      { binding: 0, resource: { buffer: kinematicDataBuffer } },
+      { binding: 1, resource: { buffer: jfaBufferA } },
+      { binding: 2, resource: { buffer: gridParamsBuffer } },
     ],
   })
-  const pass7BindGroup = device.createBindGroup({
+  const pass8BindGroupAB = device.createBindGroup({
+    layout: pass8Pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: jfaBufferA } },
+      { binding: 1, resource: { buffer: jfaBufferB } },
+      { binding: 2, resource: { buffer: jfaStepParamsBuffer } },
+    ],
+  })
+  const pass8BindGroupBA = device.createBindGroup({
+    layout: pass8Pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: jfaBufferB } },
+      { binding: 1, resource: { buffer: jfaBufferA } },
+      { binding: 2, resource: { buffer: jfaStepParamsBuffer } },
+    ],
+  })
+  const pass7BindGroupA = device.createBindGroup({
     layout: pass7Pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: elevationBuffer } },
-      { binding: 1, resource: { buffer: kinematicDataBuffer } },
-      { binding: 2, resource: { buffer: shadedReliefBuffer } },
+      { binding: 0, resource: { buffer: kinematicDataBuffer } },
+      { binding: 1, resource: { buffer: jfaBufferA } },
+      { binding: 2, resource: { buffer: shadedOutputBuffer } },
+      { binding: 3, resource: { buffer: renderParamsBuffer } },
+    ],
+  })
+  const pass7BindGroupB = device.createBindGroup({
+    layout: pass7Pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: kinematicDataBuffer } },
+      { binding: 1, resource: { buffer: jfaBufferB } },
+      { binding: 2, resource: { buffer: shadedOutputBuffer } },
       { binding: 3, resource: { buffer: renderParamsBuffer } },
     ],
   })
@@ -594,16 +606,6 @@ async function runPipeline() {
       seed
     )
     writeKinematicParams(kinematicParamsBytes, width, height, seed)
-    writeTopographyParams(
-      topographyParamsBytes,
-      width,
-      height,
-      seed,
-      mountainRadius,
-      mountainHeight,
-      terrainRoughness,
-      terrainFrequency
-    )
     writeRenderParams(
       renderParamsBytes,
       width,
@@ -616,7 +618,6 @@ async function runPipeline() {
     device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
     device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
     device.queue.writeBuffer(kinematicParamsBuffer, 0, kinematicParamsBytes)
-    device.queue.writeBuffer(topographyParamsBuffer, 0, topographyParamsBytes)
     device.queue.writeBuffer(renderParamsBuffer, 0, renderParamsBytes)
     device.queue.writeBuffer(bboxBuffer, 0, bboxInit)
 
@@ -671,16 +672,35 @@ async function runPipeline() {
     const pass6 = pass6Encoder.beginComputePass()
     pass6.setPipeline(pass6Pipeline)
     pass6.setBindGroup(0, pass6BindGroup)
-    pass6.dispatchWorkgroups(dispatchTopo)
+    pass6.dispatchWorkgroups(dispatchJfa)
     pass6.end()
     device.queue.submit([pass6Encoder.finish()])
     await device.queue.onSubmittedWorkDone()
 
-    if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
+    let readFromA = true
+    for (let i = 0; i < jfaPasses; i += 1) {
+      const stepSize = 2 ** (jfaPasses - i - 1)
+      writeJfaStepParams(jfaStepParamsBytes, width, height, stepSize)
+      device.queue.writeBuffer(jfaStepParamsBuffer, 0, jfaStepParamsBytes)
+
+      const pass8Encoder = device.createCommandEncoder()
+      const pass8 = pass8Encoder.beginComputePass()
+      pass8.setPipeline(pass8Pipeline)
+      pass8.setBindGroup(0, readFromA ? pass8BindGroupAB : pass8BindGroupBA)
+      pass8.dispatchWorkgroups(dispatchJfa)
+      pass8.end()
+      device.queue.submit([pass8Encoder.finish()])
+      await device.queue.onSubmittedWorkDone()
+      readFromA = !readFromA
+    }
+
+    const finalJfaIsA = readFromA
+
+    if (renderMode === 'kinematics' || renderMode === 'sdf_distance') {
       const pass7Encoder = device.createCommandEncoder()
       const pass7 = pass7Encoder.beginComputePass()
       pass7.setPipeline(pass7Pipeline)
-      pass7.setBindGroup(0, pass7BindGroup)
+      pass7.setBindGroup(0, finalJfaIsA ? pass7BindGroupA : pass7BindGroupB)
       pass7.dispatchWorkgroups(dispatchShade)
       pass7.end()
       device.queue.submit([pass7Encoder.finish()])
@@ -691,10 +711,8 @@ async function runPipeline() {
     copyEncoder.copyBufferToBuffer(finalLandMaskBuffer, 0, pass3Readback, 0, dataByteLength)
     if (renderMode === 'plate_id') {
       copyEncoder.copyBufferToBuffer(plateIdBuffer, 0, plateReadback, 0, plateByteLength)
-    } else if (renderMode === 'elevation') {
-      copyEncoder.copyBufferToBuffer(elevationBuffer, 0, elevationReadback, 0, dataByteLength)
-    } else if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
-      copyEncoder.copyBufferToBuffer(shadedReliefBuffer, 0, shadedReliefReadback, 0, plateByteLength)
+    } else if (renderMode === 'kinematics' || renderMode === 'sdf_distance') {
+      copyEncoder.copyBufferToBuffer(shadedOutputBuffer, 0, shadedOutputReadback, 0, plateByteLength)
     }
     device.queue.submit([copyEncoder.finish()])
     await device.queue.onSubmittedWorkDone()
@@ -708,16 +726,11 @@ async function runPipeline() {
       const plateFlat = new Uint32Array(plateReadback.getMappedRange())
       renderPlateIds(context, plateFlat, width, height, plateColorCache)
       plateReadback.unmap()
-    } else if (renderMode === 'elevation') {
-      await elevationReadback.mapAsync(GPUMapMode.READ)
-      const elevationFlat = new Float32Array(elevationReadback.getMappedRange())
-      renderElevation(context, elevationFlat, width, height)
-      elevationReadback.unmap()
-    } else if (renderMode === 'shaded_relief' || renderMode === 'kinematics') {
-      await shadedReliefReadback.mapAsync(GPUMapMode.READ)
-      const shadedFlat = new Uint32Array(shadedReliefReadback.getMappedRange())
+    } else if (renderMode === 'kinematics' || renderMode === 'sdf_distance') {
+      await shadedOutputReadback.mapAsync(GPUMapMode.READ)
+      const shadedFlat = new Uint32Array(shadedOutputReadback.getMappedRange())
       renderShadedRelief(context, shadedFlat, width, height)
-      shadedReliefReadback.unmap()
+      shadedOutputReadback.unmap()
     } else {
       renderLandMask(context, pass3Flat, width, height)
     }
@@ -848,8 +861,7 @@ async function runPipeline() {
     const parsedRenderMode =
       rawRenderMode === 'plate_id' ||
       rawRenderMode === 'kinematics' ||
-      rawRenderMode === 'elevation' ||
-      rawRenderMode === 'shaded_relief'
+      rawRenderMode === 'sdf_distance'
         ? rawRenderMode
         : 'land_mask'
 
