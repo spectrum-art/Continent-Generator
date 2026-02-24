@@ -27,10 +27,9 @@ struct WeightedSeed {
   _pad_weight: f32,
 }
 
-const ACTIVE_COUNT: u32 = 15u;
+const ACTIVE_MAX_COUNT: u32 = 100u;
 const FOSSIL_COUNT: u32 = 30u;
 const PLUME_COUNT: u32 = 5u;
-const PI2: f32 = 6.28318530718;
 const ACTIVE_MAX_WEIGHT: f32 = 0.65;
 const FOSSIL_MAX_WEIGHT: f32 = 0.32;
 
@@ -39,8 +38,8 @@ const FOSSIL_MAX_WEIGHT: f32 = 0.32;
 @group(0) @binding(2) var<storage, read_write> fossil_id: array<u32>;
 @group(0) @binding(3) var<storage, read_write> plume_mask: array<f32>;
 @group(0) @binding(4) var<uniform> params: PlateParams;
+@group(0) @binding(5) var<storage, read> active_plates: array<ActivePlate>;
 
-var<private> active_plates: array<ActivePlate, ACTIVE_COUNT>;
 var<private> fossil_plates: array<WeightedSeed, FOSSIL_COUNT>;
 var<private> plume_points: array<vec2<f32>, PLUME_COUNT>;
 
@@ -143,25 +142,6 @@ fn make_weight(v: f32, max_weight: f32) -> f32 {
   return pow(v, 4.0) * max_weight;
 }
 
-fn make_active_plate(id: u32) -> ActivePlate {
-  let base = hash_u32(params.seed ^ (id * 747796405u + 2891336453u));
-  let hx = hash_to_unit(base ^ 0x9e3779b9u);
-  let hy = hash_to_unit(base ^ 0x85ebca6bu);
-  let hw = hash_to_unit(base ^ 0xc2b2ae35u);
-  let hs = hash_to_unit(base ^ 0x27d4eb2fu);
-  let ha = hash_to_unit(base ^ 0x165667b1u);
-
-  let speed = mix(1.0, 10.0, pow(hs, 3.0));
-  let angle = ha * PI2;
-  let direction = vec2<f32>(cos(angle), sin(angle));
-
-  var plate: ActivePlate;
-  plate.pos = vec2<f32>(hx * 2.0, hy);
-  plate.weight = make_weight(hw, ACTIVE_MAX_WEIGHT);
-  plate.velocity = direction * speed;
-  return plate;
-}
-
 fn make_fossil_plate(id: u32) -> WeightedSeed {
   let fossil_seed = params.seed ^ 0x9E3779B9u;
   let base = hash_u32(fossil_seed ^ (id * 3266489917u + 668265263u));
@@ -184,10 +164,6 @@ fn make_plume_point(id: u32) -> vec2<f32> {
 }
 
 fn init_seed_arrays() {
-  for (var i = 0u; i < ACTIVE_COUNT; i = i + 1u) {
-    active_plates[i] = make_active_plate(i);
-  }
-
   for (var i = 0u; i < FOSSIL_COUNT; i = i + 1u) {
     fossil_plates[i] = make_fossil_plate(i);
   }
@@ -251,10 +227,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let warped_pos = original_pos + macro_warp + micro_warp;
 
   // Layer A: active plates.
+  let active_count = clamp(params.plate_count, 1u, ACTIVE_MAX_COUNT);
   var best_id = 0u;
   var best_score = 1e20;
   var best_velocity = vec2<f32>(0.0, 0.0);
-  for (var plate_idx = 0u; plate_idx < ACTIVE_COUNT; plate_idx = plate_idx + 1u) {
+  for (var plate_idx = 0u; plate_idx < active_count; plate_idx = plate_idx + 1u) {
     let candidate = active_plates[plate_idx];
     let diff = warped_pos - candidate.pos;
     let score = dot(diff, diff) - candidate.weight;

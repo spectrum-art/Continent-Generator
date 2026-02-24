@@ -106,6 +106,44 @@ function hash32(x) {
   return h >>> 0
 }
 
+const ACTIVE_MAX_PLATES = 100
+const ACTIVE_PLATE_FLOATS = 8
+const ACTIVE_PLATE_STRIDE_BYTES = ACTIVE_PLATE_FLOATS * Float32Array.BYTES_PER_ELEMENT
+const ACTIVE_MAX_SPEED = 22.0
+
+function hashToUnit(v) {
+  return (hash32(v >>> 0) >>> 0) / 4294967295
+}
+
+function buildActivePlateSeedData(plateCount, seed) {
+  const activeCount = Math.min(Math.max(Math.floor(plateCount), 1), ACTIVE_MAX_PLATES)
+  const plateFloats = new Float32Array(ACTIVE_MAX_PLATES * ACTIVE_PLATE_FLOATS)
+
+  for (let i = 0; i < activeCount; i += 1) {
+    const mix = (Math.imul((i + 1) >>> 0, 747796405) + 2891336453) >>> 0
+    const base = hash32((seed ^ mix) >>> 0)
+    const hx = hashToUnit(base ^ 0x9e3779b9)
+    const hy = hashToUnit(base ^ 0x85ebca6b)
+    const hw = hashToUnit(base ^ 0xc2b2ae35)
+    const hs = hashToUnit(base ^ 0x27d4eb2f)
+    const ha = hashToUnit(base ^ 0x165667b1)
+    const speed = Math.pow(hs, 2.0) * ACTIVE_MAX_SPEED
+    const angle = ha * Math.PI * 2.0
+
+    const offset = i * ACTIVE_PLATE_FLOATS
+    plateFloats[offset] = hx * 2.0
+    plateFloats[offset + 1] = hy
+    plateFloats[offset + 2] = Math.pow(hw, 4.0) * 0.65
+    plateFloats[offset + 3] = 0.0
+    plateFloats[offset + 4] = Math.cos(angle) * speed
+    plateFloats[offset + 5] = Math.sin(angle) * speed
+    plateFloats[offset + 6] = 0.0
+    plateFloats[offset + 7] = 0.0
+  }
+
+  return plateFloats
+}
+
 function plateColor(id, cache) {
   const cached = cache.get(id)
   if (cached) {
@@ -357,6 +395,7 @@ async function runPipeline() {
   const plateByteLength = activeCells * Uint32Array.BYTES_PER_ELEMENT
   const plateVelocityByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
   const jfaByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
+  const activePlateSeedByteLength = ACTIVE_MAX_PLATES * ACTIVE_PLATE_STRIDE_BYTES
 
   canvas.width = width
   canvas.height = height
@@ -380,6 +419,10 @@ async function runPipeline() {
   const plateVelocityBuffer = device.createBuffer({
     size: plateVelocityByteLength,
     usage: GPUBufferUsage.STORAGE,
+  })
+  const activePlateSeedBuffer = device.createBuffer({
+    size: activePlateSeedByteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   })
   const fossilIdBuffer = device.createBuffer({
     size: plateByteLength,
@@ -564,6 +607,7 @@ async function runPipeline() {
       { binding: 2, resource: { buffer: fossilIdBuffer } },
       { binding: 3, resource: { buffer: plumeMaskBuffer } },
       { binding: 4, resource: { buffer: plateParamsBuffer } },
+      { binding: 5, resource: { buffer: activePlateSeedBuffer } },
     ],
   })
 
@@ -715,6 +759,8 @@ async function runPipeline() {
     device.queue.writeBuffer(kinematicParamsBuffer, 0, kinematicParamsBytes)
     device.queue.writeBuffer(topographyParamsBuffer, 0, topographyParamsBytes)
     device.queue.writeBuffer(renderParamsBuffer, 0, renderParamsBytes)
+    const activePlateSeedData = buildActivePlateSeedData(plateCount, seed >>> 0)
+    device.queue.writeBuffer(activePlateSeedBuffer, 0, activePlateSeedData)
     device.queue.writeBuffer(bboxBuffer, 0, bboxInit)
 
     const pass1Encoder = device.createCommandEncoder()
