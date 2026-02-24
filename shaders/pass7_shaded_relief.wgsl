@@ -125,5 +125,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
 
+  if (params.render_mode == 4u) {
+    let h = clamp(sample_elevation(x, y), 0.0, 1.0);
+    shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(h, h, h, 1.0));
+    return;
+  }
+
   shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(0.0, 0.0, 0.0, 1.0));
 }

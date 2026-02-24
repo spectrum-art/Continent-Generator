@@ -272,6 +272,8 @@ function writeRenderParams(
     renderModeCode = 2
   } else if (renderMode === 'shaded_relief') {
     renderModeCode = 3
+  } else if (renderMode === 'elevation') {
+    renderModeCode = 4
   }
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
@@ -591,8 +593,10 @@ async function runPipeline() {
       { binding: 0, resource: { buffer: kinematicDataBuffer } },
       { binding: 1, resource: { buffer: jfaBufferA } },
       { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: elevationBuffer } },
-      { binding: 4, resource: { buffer: topographyParamsBuffer } },
+      { binding: 3, resource: { buffer: fossilIdBuffer } },
+      { binding: 4, resource: { buffer: plumeMaskBuffer } },
+      { binding: 5, resource: { buffer: elevationBuffer } },
+      { binding: 6, resource: { buffer: topographyParamsBuffer } },
     ],
   })
   const pass6BindGroupB = device.createBindGroup({
@@ -601,8 +605,10 @@ async function runPipeline() {
       { binding: 0, resource: { buffer: kinematicDataBuffer } },
       { binding: 1, resource: { buffer: jfaBufferB } },
       { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: elevationBuffer } },
-      { binding: 4, resource: { buffer: topographyParamsBuffer } },
+      { binding: 3, resource: { buffer: fossilIdBuffer } },
+      { binding: 4, resource: { buffer: plumeMaskBuffer } },
+      { binding: 5, resource: { buffer: elevationBuffer } },
+      { binding: 6, resource: { buffer: topographyParamsBuffer } },
     ],
   })
   const pass8BindGroupAB = device.createBindGroup({
@@ -800,7 +806,8 @@ async function runPipeline() {
     if (
       renderMode === 'kinematics' ||
       renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief'
+      renderMode === 'shaded_relief' ||
+      renderMode === 'elevation'
     ) {
       const pass7Encoder = device.createCommandEncoder()
       const pass7 = pass7Encoder.beginComputePass()
@@ -819,7 +826,8 @@ async function runPipeline() {
     } else if (
       renderMode === 'kinematics' ||
       renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief'
+      renderMode === 'shaded_relief' ||
+      renderMode === 'elevation'
     ) {
       copyEncoder.copyBufferToBuffer(shadedOutputBuffer, 0, shadedOutputReadback, 0, plateByteLength)
     }
@@ -838,7 +846,8 @@ async function runPipeline() {
     } else if (
       renderMode === 'kinematics' ||
       renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief'
+      renderMode === 'shaded_relief' ||
+      renderMode === 'elevation'
     ) {
       await shadedOutputReadback.mapAsync(GPUMapMode.READ)
       const shadedFlat = new Uint32Array(shadedOutputReadback.getMappedRange())
@@ -975,7 +984,8 @@ async function runPipeline() {
       rawRenderMode === 'plate_id' ||
       rawRenderMode === 'kinematics' ||
       rawRenderMode === 'sdf_distance' ||
-      rawRenderMode === 'shaded_relief'
+      rawRenderMode === 'shaded_relief' ||
+      rawRenderMode === 'elevation'
         ? rawRenderMode
         : 'land_mask'
 
