@@ -379,6 +379,14 @@ async function runPipeline() {
     size: plateVelocityByteLength,
     usage: GPUBufferUsage.STORAGE,
   })
+  const fossilIdBuffer = device.createBuffer({
+    size: plateByteLength,
+    usage: GPUBufferUsage.STORAGE,
+  })
+  const plumeMaskBuffer = device.createBuffer({
+    size: dataByteLength,
+    usage: GPUBufferUsage.STORAGE,
+  })
   const kinematicDataBuffer = device.createBuffer({
     size: dataByteLength * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
@@ -551,7 +559,9 @@ async function runPipeline() {
     entries: [
       { binding: 0, resource: { buffer: plateIdBuffer } },
       { binding: 1, resource: { buffer: plateVelocityBuffer } },
-      { binding: 2, resource: { buffer: plateParamsBuffer } },
+      { binding: 2, resource: { buffer: fossilIdBuffer } },
+      { binding: 3, resource: { buffer: plumeMaskBuffer } },
+      { binding: 4, resource: { buffer: plateParamsBuffer } },
     ],
   })
 
