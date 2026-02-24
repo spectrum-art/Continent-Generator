@@ -593,10 +593,9 @@ async function runPipeline() {
       { binding: 0, resource: { buffer: kinematicDataBuffer } },
       { binding: 1, resource: { buffer: jfaBufferA } },
       { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: fossilIdBuffer } },
-      { binding: 4, resource: { buffer: plumeMaskBuffer } },
-      { binding: 5, resource: { buffer: elevationBuffer } },
-      { binding: 6, resource: { buffer: topographyParamsBuffer } },
+      { binding: 3, resource: { buffer: plumeMaskBuffer } },
+      { binding: 4, resource: { buffer: elevationBuffer } },
+      { binding: 5, resource: { buffer: topographyParamsBuffer } },
     ],
   })
   const pass6BindGroupB = device.createBindGroup({
@@ -605,10 +604,9 @@ async function runPipeline() {
       { binding: 0, resource: { buffer: kinematicDataBuffer } },
       { binding: 1, resource: { buffer: jfaBufferB } },
       { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: fossilIdBuffer } },
-      { binding: 4, resource: { buffer: plumeMaskBuffer } },
-      { binding: 5, resource: { buffer: elevationBuffer } },
-      { binding: 6, resource: { buffer: topographyParamsBuffer } },
+      { binding: 3, resource: { buffer: plumeMaskBuffer } },
+      { binding: 4, resource: { buffer: elevationBuffer } },
+      { binding: 5, resource: { buffer: topographyParamsBuffer } },
     ],
   })
   const pass8BindGroupAB = device.createBindGroup({
