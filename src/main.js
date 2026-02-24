@@ -72,6 +72,8 @@ const terrainRoughnessSlider = document.querySelector('#terrain-roughness')
 const terrainRoughnessValueNode = document.querySelector('#terrain-roughness-value')
 const terrainFrequencySlider = document.querySelector('#terrain-frequency')
 const terrainFrequencyValueNode = document.querySelector('#terrain-frequency-value')
+const fossilScaleSlider = document.querySelector('#fossil-scale')
+const fossilScaleValueNode = document.querySelector('#fossil-scale-value')
 const sunAngleSlider = document.querySelector('#sun-angle')
 const sunAngleValueNode = document.querySelector('#sun-angle-value')
 const elevationScaleSlider = document.querySelector('#elevation-scale')
@@ -281,7 +283,8 @@ function writeTopographyParams(
   mountainRadius,
   mountainHeight,
   terrainRoughness,
-  terrainFrequency
+  terrainFrequency,
+  fossilScale
 ) {
   const view = new DataView(buffer)
   view.setUint32(0, width, true)
@@ -292,6 +295,10 @@ function writeTopographyParams(
   view.setFloat32(20, mountainHeight, true)
   view.setFloat32(24, terrainRoughness, true)
   view.setFloat32(28, terrainFrequency, true)
+  view.setFloat32(32, fossilScale, true)
+  view.setFloat32(36, 1 / width, true)
+  view.setFloat32(40, 0, true)
+  view.setFloat32(44, 0, true)
 }
 
 function writeRenderParams(
@@ -353,6 +360,8 @@ async function runPipeline() {
     !terrainRoughnessValueNode ||
     !terrainFrequencySlider ||
     !terrainFrequencyValueNode ||
+    !fossilScaleSlider ||
+    !fossilScaleValueNode ||
     !sunAngleSlider ||
     !sunAngleValueNode ||
     !elevationScaleSlider ||
@@ -486,7 +495,7 @@ async function runPipeline() {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
   const topographyParamsBuffer = device.createBuffer({
-    size: 32,
+    size: 48,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
   const jfaStepParamsBuffer = device.createBuffer({
@@ -502,7 +511,7 @@ async function runPipeline() {
   const gridParamsBytes = new ArrayBuffer(16)
   const plateParamsBytes = new ArrayBuffer(48)
   const kinematicParamsBytes = new ArrayBuffer(16)
-  const topographyParamsBytes = new ArrayBuffer(32)
+  const topographyParamsBytes = new ArrayBuffer(48)
   const jfaStepParamsBytes = new ArrayBuffer(16)
   const renderParamsBytes = new ArrayBuffer(32)
   writeGridParams(gridParamsBytes, width, height)
@@ -711,7 +720,8 @@ async function runPipeline() {
     terrainFrequency,
     sunAngle,
     elevationScale,
-    verticalExaggeration
+    verticalExaggeration,
+    fossilScale
   ) => {
     writeGenerateParams(
       generateParamsBytes,
@@ -743,7 +753,8 @@ async function runPipeline() {
       mountainRadius,
       mountainHeight,
       terrainRoughness,
-      terrainFrequency
+      terrainFrequency,
+      fossilScale
     )
     writeRenderParams(
       renderParamsBytes,
@@ -910,7 +921,7 @@ async function runPipeline() {
     )
 
     statusNode.textContent =
-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
+      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / fossil_scale ${fossilScale.toFixed(2)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
     landFractionNode.textContent =
       `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
 
@@ -933,6 +944,10 @@ async function runPipeline() {
   let queuedMountainHeight = normalized_mountain_height_from_slider(normalized_mountain_height())
   let queuedTerrainRoughness = normalized_terrain_roughness_from_slider(normalized_terrain_roughness())
   let queuedTerrainFrequency = normalized_terrain_frequency_from_slider(normalized_terrain_frequency())
+  let queuedFossilScale = Number.parseFloat(fossilScaleSlider.value)
+  if (!Number.isFinite(queuedFossilScale)) {
+    queuedFossilScale = 1.0
+  }
   let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
   let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
   let queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
@@ -966,7 +981,8 @@ async function runPipeline() {
           queuedTerrainFrequency,
           queuedSunAngle,
           queuedElevationScale,
-          queuedVerticalExaggeration
+          queuedVerticalExaggeration,
+          queuedFossilScale
         )
       }
     } finally {
@@ -990,7 +1006,8 @@ async function runPipeline() {
     rawTerrainFrequency,
     rawSunAngle,
     rawElevationScale,
-    rawVerticalExaggeration
+    rawVerticalExaggeration,
+    rawFossilScale
   ) => {
     const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
     const parsedFalloff = Number.isFinite(rawFalloff) ? rawFalloff : queuedFalloff
@@ -1016,6 +1033,7 @@ async function runPipeline() {
     const parsedTerrainFrequency = Number.isFinite(rawTerrainFrequency)
       ? rawTerrainFrequency
       : queuedTerrainFrequency
+    const parsedFossilScale = Number.isFinite(rawFossilScale) ? rawFossilScale : queuedFossilScale
     const parsedSunAngle = Number.isFinite(rawSunAngle) ? rawSunAngle : queuedSunAngle
     const parsedElevationScale = Number.isFinite(rawElevationScale)
       ? rawElevationScale
@@ -1045,6 +1063,7 @@ async function runPipeline() {
     queuedMountainHeight = normalized_mountain_height_from_slider(parsedMountainHeight)
     queuedTerrainRoughness = normalized_terrain_roughness_from_slider(parsedTerrainRoughness)
     queuedTerrainFrequency = normalized_terrain_frequency_from_slider(parsedTerrainFrequency)
+    queuedFossilScale = Math.min(Math.max(parsedFossilScale, 0), 3)
     queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
     queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
     queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
@@ -1073,6 +1092,8 @@ async function runPipeline() {
     terrainRoughnessValueNode.textContent = queuedTerrainRoughness.toFixed(2)
     terrainFrequencySlider.value = queuedTerrainFrequency.toFixed(1)
     terrainFrequencyValueNode.textContent = queuedTerrainFrequency.toFixed(1)
+    fossilScaleSlider.value = queuedFossilScale.toFixed(2)
+    fossilScaleValueNode.textContent = queuedFossilScale.toFixed(2)
     sunAngleSlider.value = queuedSunAngle.toFixed(0)
     sunAngleValueNode.textContent = queuedSunAngle.toFixed(0)
     elevationScaleSlider.value = queuedElevationScale.toFixed(1)
@@ -1269,6 +1290,28 @@ async function runPipeline() {
     )
   })
 
+  fossilScaleSlider.addEventListener('input', (event) => {
+    queueRender(
+      queuedThreshold,
+      queuedFalloff,
+      queuedNoise,
+      queuedEdgeWarp,
+      queuedSeed,
+      queuedPlateCount,
+      queuedPlateWarpAmplitude,
+      queuedPlateWarpRoughness,
+      queuedMountainRadius,
+      queuedMountainHeight,
+      queuedRenderMode,
+      queuedTerrainRoughness,
+      queuedTerrainFrequency,
+      queuedSunAngle,
+      queuedElevationScale,
+      queuedVerticalExaggeration,
+      Number.parseFloat(event.target.value)
+    )
+  })
+
   sunAngleSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
@@ -1396,7 +1439,8 @@ async function runPipeline() {
     queuedTerrainFrequency,
     queuedSunAngle,
     queuedElevationScale,
-    queuedVerticalExaggeration
+    queuedVerticalExaggeration,
+    queuedFossilScale
   )
 }
 
