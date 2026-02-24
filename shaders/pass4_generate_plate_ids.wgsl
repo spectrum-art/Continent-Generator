@@ -226,18 +226,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let v_norm = y * params.inv_height;
   let original_pos = vec2<f32>(u_norm * 2.0, v_norm);
 
-  // Confetti fix: only low-frequency curl warps the coordinate.
-  let macro_freq = max(params.plate_warp_frequency * 0.30, 0.08);
+  let macro_freq = max(params.plate_warp_frequency, 0.0001);
+  let micro_freq = max(params.plate_warp_frequency * 10.0, 0.0001);
+  let safe_macro_amp = min(params.plate_warp_amplitude, 0.8 / macro_freq);
+  let safe_micro_amp = min(params.plate_warp_amplitude * 0.1, 0.4 / micro_freq);
+
   let macro_warp = curl_noise(
     original_pos + vec2<f32>(17.3, -9.1),
     macro_freq,
     params.plate_warp_roughness,
     params.seed ^ 0x243f6a88u
-  ) * (params.plate_warp_amplitude * 0.55);
-  let warped_pos = original_pos + macro_warp;
-
-  let micro_freq = max(params.plate_warp_frequency * 12.0, 4.0);
-  let micro_amp = min(params.plate_warp_amplitude * 0.18, 0.40);
+  ) * safe_macro_amp;
+  let micro_warp_x = (fbm(
+    original_pos + vec2<f32>(63.7, 11.4),
+    micro_freq,
+    params.plate_warp_roughness,
+    3u,
+    params.seed ^ 0xb7e15162u
+  ) * 2.0 - 1.0) * safe_micro_amp;
+  let micro_warp_y = (fbm(
+    original_pos - vec2<f32>(19.2, 37.8),
+    micro_freq,
+    params.plate_warp_roughness,
+    3u,
+    params.seed ^ 0x8aed2a6bu
+  ) * 2.0 - 1.0) * safe_micro_amp;
+  let micro_warp = vec2<f32>(micro_warp_x, micro_warp_y);
+  let warped_pos = original_pos + macro_warp + micro_warp;
 
   // Layer A: active plates.
   var best_id = 0u;
@@ -245,14 +260,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var best_velocity = vec2<f32>(0.0, 0.0);
   for (var plate_idx = 0u; plate_idx < ACTIVE_COUNT; plate_idx = plate_idx + 1u) {
     let candidate = active_plates[plate_idx];
-    let micro_jitter = (fbm(
-      original_pos * micro_freq + candidate.pos * 2.9,
-      1.0,
-      params.plate_warp_roughness,
-      3u,
-      params.seed ^ (plate_idx * 0x9e3779b9u)
-    ) * 2.0 - 1.0) * micro_amp;
-    let score = length(warped_pos - candidate.pos) - candidate.weight + micro_jitter;
+    let score = length(warped_pos - candidate.pos) - candidate.weight;
     if (score < best_score) {
       best_score = score;
       best_id = plate_idx;
@@ -265,14 +273,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var best_fossil_score = 1e20;
   for (var fossil_idx = 0u; fossil_idx < FOSSIL_COUNT; fossil_idx = fossil_idx + 1u) {
     let candidate = fossil_plates[fossil_idx];
-    let micro_jitter = (fbm(
-      original_pos * micro_freq + candidate.pos * 3.7,
-      1.0,
-      params.plate_warp_roughness,
-      3u,
-      (params.seed ^ 0x9E3779B9u) + fossil_idx * 0x85ebca6bu
-    ) * 2.0 - 1.0) * (micro_amp * 0.75);
-    let score = length(warped_pos - candidate.pos) - candidate.weight + micro_jitter;
+    let score = length(warped_pos - candidate.pos) - candidate.weight;
     if (score < best_fossil_score) {
       best_fossil_score = score;
       best_fossil_id = fossil_idx;
