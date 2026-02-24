@@ -6,35 +6,10 @@ struct KinematicParams {
 }
 
 @group(0) @binding(0) var<storage, read> plate_id: array<u32>;
-@group(0) @binding(1) var<storage, read> final_land_mask: array<f32>;
-@group(0) @binding(2) var<storage, read_write> kinematic_data: array<vec4<f32>>;
-@group(0) @binding(3) var<uniform> params: KinematicParams;
-
-fn hash_u32(x: u32) -> u32 {
-  var h = x;
-  h = h ^ (h >> 16u);
-  h = h * 0x7feb352du;
-  h = h ^ (h >> 15u);
-  h = h * 0x846ca68bu;
-  h = h ^ (h >> 16u);
-  return h;
-}
-
-fn hash_to_unit(x: u32) -> f32 {
-  return f32(hash_u32(x)) * (1.0 / 4294967295.0);
-}
-
-fn plate_velocity(id: u32, seed: u32) -> vec2<f32> {
-  let base = seed ^ (id * 747796405u + 2891336453u);
-  let vx = hash_to_unit(base ^ 0x9e3779b9u) * 2.0 - 1.0;
-  let vy = hash_to_unit(base ^ 0x85ebca6bu) * 2.0 - 1.0;
-  let v = vec2<f32>(vx, vy);
-  let len = length(v);
-  if (len > 0.00001) {
-    return v / len;
-  }
-  return vec2<f32>(1.0, 0.0);
-}
+@group(0) @binding(1) var<storage, read> plate_velocity: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read> final_land_mask: array<f32>;
+@group(0) @binding(3) var<storage, read_write> kinematic_data: array<vec4<f32>>;
+@group(0) @binding(4) var<uniform> params: KinematicParams;
 
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -49,7 +24,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let self_id = plate_id[flat_index];
   let self_mask = final_land_mask[flat_index];
   let self_is_land = f32(self_mask >= 0.5);
-  let self_v = plate_velocity(self_id, params.seed);
+  let self_v = plate_velocity[flat_index];
 
   var max_v_mag = 0.0;
   var best_kinematics = vec4<f32>(0.0);
@@ -81,7 +56,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let neighbor_is_land = f32(neighbor_mask >= 0.5);
     let crust_type = self_is_land + neighbor_is_land;
     let dir = normalize(vec2<f32>(f32(nx - x), f32(ny - y)));
-    let neighbor_v = plate_velocity(n_id, params.seed);
+    let neighbor_v = plate_velocity[n_index];
     let v_rel = neighbor_v - self_v;
     let normal_stress = dot(v_rel, dir);
     let shear_stress = abs(v_rel.x * dir.y - v_rel.y * dir.x);

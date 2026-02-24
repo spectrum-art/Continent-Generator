@@ -353,6 +353,7 @@ async function runPipeline() {
   const jfaPasses = Math.ceil(Math.log2(Math.max(width, height)))
   const dataByteLength = activeCells * Float32Array.BYTES_PER_ELEMENT
   const plateByteLength = activeCells * Uint32Array.BYTES_PER_ELEMENT
+  const plateVelocityByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
   const jfaByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
 
   canvas.width = width
@@ -373,6 +374,10 @@ async function runPipeline() {
   const plateIdBuffer = device.createBuffer({
     size: plateByteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  })
+  const plateVelocityBuffer = device.createBuffer({
+    size: plateVelocityByteLength,
+    usage: GPUBufferUsage.STORAGE,
   })
   const kinematicDataBuffer = device.createBuffer({
     size: dataByteLength * 4,
@@ -545,7 +550,8 @@ async function runPipeline() {
     layout: pass4Pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: plateIdBuffer } },
-      { binding: 1, resource: { buffer: plateParamsBuffer } },
+      { binding: 1, resource: { buffer: plateVelocityBuffer } },
+      { binding: 2, resource: { buffer: plateParamsBuffer } },
     ],
   })
 
@@ -553,9 +559,10 @@ async function runPipeline() {
     layout: pass5Pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: plateIdBuffer } },
-      { binding: 1, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 2, resource: { buffer: kinematicDataBuffer } },
-      { binding: 3, resource: { buffer: kinematicParamsBuffer } },
+      { binding: 1, resource: { buffer: plateVelocityBuffer } },
+      { binding: 2, resource: { buffer: finalLandMaskBuffer } },
+      { binding: 3, resource: { buffer: kinematicDataBuffer } },
+      { binding: 4, resource: { buffer: kinematicParamsBuffer } },
     ],
   })
 
