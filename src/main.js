@@ -92,7 +92,11 @@ async function main() {
     statusNode.textContent = `GPU device lost: ${info.message}`
   })
 
-  statusNode.textContent = 'Ready.'
+  // Surface WebGPU validation errors (including silent shader compilation failures)
+  device.addEventListener('uncapturederror', event => {
+    console.error('WebGPU uncaptured error:', event.error.message)
+    statusNode.textContent = `GPU Error: ${event.error.message}`
+  })
 
   // ── Buffer allocation ───────────────────────────────────────────────────────
   const PLATE_FLOATS_PER_ENTRY = 8           // see buildPlateStory layout
@@ -141,22 +145,39 @@ async function main() {
   const renderUniformBuf  = makeUniformBuffer(32, 'renderUniform')   // RenderParams
 
   // ── Pipelines ────────────────────────────────────────────────────────────────
+  // Use async variant so WGSL compilation errors surface as rejected promises
+  // instead of silent error pipelines that produce a blank canvas.
   function makePipeline(src, label) {
     const mod = device.createShaderModule({ label, code: src })
-    return device.createComputePipeline({
+    return device.createComputePipelineAsync({
       label,
       layout: 'auto',
       compute: { module: mod, entryPoint: 'main' },
     })
   }
 
-  const pass1Pipeline = makePipeline(pass1Src, 'pass1_generate_plates')
-  const pass2Pipeline = makePipeline(pass2Src, 'pass2_derive_land_mask')
-  const pass3Pipeline = makePipeline(pass3Src, 'pass3_boundary_stress')
-  const pass6Pipeline = makePipeline(pass6Src, 'pass6_elevation')
-  const pass7Pipeline = makePipeline(pass7Src, 'pass7_shaded_relief')
-  const pass8Pipeline = makePipeline(pass8Src, 'pass8_jfa_step')
-  const pass9Pipeline = makePipeline(pass9Src, 'pass9_jfa_init')
+  statusNode.textContent = 'Compiling shaders...'
+  let pass1Pipeline, pass2Pipeline, pass3Pipeline,
+      pass6Pipeline, pass7Pipeline, pass8Pipeline, pass9Pipeline
+  try {
+    ;[pass1Pipeline, pass2Pipeline, pass3Pipeline,
+      pass6Pipeline, pass7Pipeline, pass8Pipeline, pass9Pipeline] =
+      await Promise.all([
+        makePipeline(pass1Src, 'pass1_generate_plates'),
+        makePipeline(pass2Src, 'pass2_derive_land_mask'),
+        makePipeline(pass3Src, 'pass3_boundary_stress'),
+        makePipeline(pass6Src, 'pass6_elevation'),
+        makePipeline(pass7Src, 'pass7_shaded_relief'),
+        makePipeline(pass8Src, 'pass8_jfa_step'),
+        makePipeline(pass9Src, 'pass9_jfa_init'),
+      ])
+  } catch (err) {
+    statusNode.textContent = `Shader compilation failed: ${err.message}`
+    console.error('Shader compilation error:', err)
+    return
+  }
+
+  statusNode.textContent = 'Ready.'
 
   // ── Bind groups (created once, reused across generates) ─────────────────────
   function bg(pipeline, ...entries) {
@@ -205,11 +226,11 @@ async function main() {
   })
 
   const pass6BG = bg(pass6Pipeline,
-    buf(plateTypeBuf), buf(landMaskBuf), buf(kinematicBuf),
+    buf(plateTypeBuf), buf(kinematicBuf),
     buf(jfaPingBuf), buf(elevationBuf), buf(elevUniformBuf))
 
   const pass7BG = bg(pass7Pipeline,
-    buf(kinematicBuf), buf(jfaPingBuf), buf(elevationBuf),
+    buf(jfaPingBuf), buf(elevationBuf),
     buf(shadedRgbaBuf), buf(renderUniformBuf))
 
   // Dispatch size for full grid
@@ -463,6 +484,12 @@ async function main() {
     await readbackBuf.mapAsync(GPUMapMode.READ)
     const raw = new Uint32Array(readbackBuf.getMappedRange().slice(0))
     readbackBuf.unmap()
+
+    if (!raw.some(v => v !== 0)) {
+      console.error('shaded_rgba is all zeros — GPU pipeline produced no output. Check console for WebGPU errors.')
+      statusNode.textContent = 'GPU pipeline produced no output — check console for errors'
+      return
+    }
 
     renderPackedRgba(ctx, raw, WIDTH, HEIGHT)
 

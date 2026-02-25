@@ -13,11 +13,10 @@ struct RenderParams {
   seed:                 f32,
 }
 
-@group(0) @binding(0) var<storage, read>       kinematic_data: array<vec4<f32>>;
-@group(0) @binding(1) var<storage, read>       jfa_nearest:    array<vec2<f32>>;
-@group(0) @binding(2) var<storage, read>       elevation:      array<f32>;
-@group(0) @binding(3) var<storage, read_write> shaded_rgba:    array<u32>;
-@group(0) @binding(4) var<uniform>             params:         RenderParams;
+@group(0) @binding(0) var<storage, read>       jfa_nearest:    array<vec2<f32>>;
+@group(0) @binding(1) var<storage, read>       elevation:      array<f32>;
+@group(0) @binding(2) var<storage, read_write> shaded_rgba:    array<u32>;
+@group(0) @binding(3) var<uniform>             params:         RenderParams;
 
 fn pack_rgba8(c: vec4<f32>) -> u32 {
   let b = vec4<u32>(round(clamp(c, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0));
