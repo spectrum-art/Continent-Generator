@@ -27,6 +27,29 @@ struct ElevParams {
 @group(0) @binding(3) var<storage, read_write> elevation:      array<f32>;
 @group(0) @binding(4) var<uniform>             params:         ElevParams;
 
+// ── Ancient suture zones (Phase 3) ───────────────────────────────────────────
+// Old eroded mountain belts in continental interiors, independent of the active
+// boundary map.  Each suture is a broad smooth ridge — geological memory.
+
+struct AncientSuture {
+  center:      vec2<f32>,  // UV centre (x∈[0,2], y∈[0,1])
+  dir:         vec2<f32>,  // unit direction along suture axis
+  half_length: f32,        // half-extent along axis in UV units
+  amplitude:   f32,        // peak elevation contribution
+  erosion:     f32,        // 0=rugged remnant, 1=fully worn smooth
+  _pad:        f32,
+}
+
+struct AncientSutureParams {
+  count:   u32,
+  _pad0:   u32,
+  _pad1:   u32,
+  _pad2:   u32,
+  sutures: array<AncientSuture, 6>,
+}
+
+@group(0) @binding(5) var<uniform> suture_params: AncientSutureParams;
+
 // ── Noise ────────────────────────────────────────────────────────────────────
 
 fn hash_u32(x: u32) -> u32 {
@@ -110,6 +133,45 @@ fn ridge_fbm(p: vec2<f32>, freq: f32, roughness: f32, octaves: u32, seed: u32) -
   return sum / max(div, 0.00001);
 }
 
+// ── Ancient suture elevation ─────────────────────────────────────────────────
+// Broad smooth ridges from old orogenic belts. Profile: Gaussian bell across the
+// suture axis, smooth FBM texture (less ridged than fresh mountains).
+// Reactivation: convergent stress near an active boundary boosts the old ridge.
+
+fn ancient_suture_elevation(uv: vec2<f32>, kin_x: f32, seed: u32) -> f32 {
+  var total = 0.0;
+  let n = min(suture_params.count, 6u);
+  for (var i = 0u; i < n; i += 1u) {
+    let s      = suture_params.sutures[i];
+    let offset = uv - s.center;
+    let along  = dot(offset, s.dir);
+    let perp   = dot(offset, vec2<f32>(-s.dir.y, s.dir.x));
+
+    // Length: smooth taper at ends of the suture arc
+    let len_t    = abs(along) / s.half_length;
+    let len_fade = smoothstep(1.0, 0.65, len_t);
+    if (len_fade <= 0.001) { continue; }
+
+    // Cross-section: wide smooth bell (~66 UV pixels at half-max)
+    let suture_width = 0.065;
+    let cross_t      = abs(perp) / suture_width;
+    let cross_fade   = smoothstep(1.3, 0.0, cross_t);
+    if (cross_fade <= 0.001) { continue; }
+
+    // Texture: smooth FBM (lower roughness = more eroded)
+    let rough       = 0.55 - s.erosion * 0.22;
+    let seed_s      = seed ^ (i * 0x6c62272eu + 0xb4d9a9d3u);
+    let noise_coord = vec2<f32>(along * 3.5 + uv.x * 0.35, perp * 2.0 + uv.y * 0.35);
+    let terrain     = fbm(noise_coord, 1.0, rough, 3u, seed_s);
+
+    // Reactivation: convergent stress bumps the old suture slightly
+    let react = select(1.0, 1.0 + 0.55 * smoothstep(0.3, 1.8, kin_x), kin_x > 0.3);
+
+    total += s.amplitude * len_fade * cross_fade * (0.55 + terrain * 0.45) * react;
+  }
+  return total;
+}
+
 // ── Smoothed kinematic sampling (5×5 neighbourhood around JFA nearest point) ─
 // Returns (approach_speed, boundary_type) smoothed from nearest boundary region.
 
@@ -154,13 +216,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let is_continental = plate_type[idx] < 0.5;
 
+  // ── JFA nearest + craton distance (used for both base and sutures) ──────────
+  let nearest      = jfa_nearest[idx];
+  let has_boundary = nearest.x > -9999.0;
+  // craton_factor: 0.0 right at a plate boundary, 1.0 deep in stable interior.
+  // Used to flatten ancient shields and let margins retain texture.
+  let raw_dist_px   = select(999999.0, length(p - nearest), has_boundary);
+  let craton_factor = smoothstep(0.0, 180.0, raw_dist_px);
+
   // ── Base elevation ──────────────────────────────────────────────────────────
   var base: f32;
   if (is_continental) {
-    // Continental crust: flat interior with gentle craton swell
-    let craton = fbm(uv * 3.0, 1.0, 0.55, 4u, params.seed ^ 0xb7e15162u);
-    let swell  = (fbm(uv * 1.2, 1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu) * 2.0 - 1.0) * 0.06;
-    base = CONT_ELEV_BASE + (craton - 0.5) * 0.10 + swell;
+    // Continental crust: textured margins, flatter ancient craton cores
+    let craton     = fbm(uv * 3.0, 1.0, 0.55, 4u, params.seed ^ 0xb7e15162u);
+    let swell      = (fbm(uv * 1.2, 1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu) * 2.0 - 1.0) * 0.06;
+    let craton_amp = mix(0.12, 0.03, craton_factor);
+    base = CONT_ELEV_BASE + (craton - 0.5) * craton_amp
+           + swell * mix(1.0, 0.35, craton_factor);
   } else {
     // Oceanic crust: low and slightly varied
     let abyssal = fbm(uv * 4.0, 1.0, 0.50, 3u, params.seed ^ 0x4d2a7f3eu);
@@ -169,13 +241,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // ── Boundary-driven elevation ───────────────────────────────────────────────
   var boundary_elev = 0.0;
-
-  let nearest = jfa_nearest[idx];
-  let has_boundary = nearest.x > -9999.0;
+  var kin_x         = 0.0;   // hoisted so ancient sutures can read it
 
   if (has_boundary) {
     let kin_sample = sample_kinematic(nearest);
-    let kin_x      = kin_sample.x;
+    kin_x          = kin_sample.x;
     let btype      = kin_sample.y;  // 0=cont-cont, 1=mixed, 2=ocean-ocean
 
     // --- Boundary frame ---
@@ -206,10 +276,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dist_warp = along_px * dw_along + across_px * dw_across * 0.25;
     let bdist = length((p + dist_warp) - nearest);
 
-    // Mountain gate: breaks continuous ranges into distinct segments
+    // Mountain gate: breaks continuous ranges into distinct segments.
+    // Floor of 0.28 ensures no section goes completely flat.
     let gap_a = perlin(nearest * params.inv_width * 1.8, params.seed ^ 0x3c6ef372u);
     let gap_b = perlin(nearest * params.inv_width * 0.6, params.seed ^ 0x9e3779b9u);
-    let mountain_gate = smoothstep(-0.05, 0.40, gap_a * 0.55 + gap_b * 0.45);
+    let mountain_gate = max(0.28, smoothstep(-0.05, 0.40, gap_a * 0.55 + gap_b * 0.45));
 
     // Width modulation along boundary arc
     let arc_coord  = dot(nearest * params.inv_width, along_uv);
@@ -229,18 +300,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       // Only cont-cont (0) or mixed (1) boundaries build mountains on land
       let land_here = is_continental;
       if (land_here) {
-        let range_uv  = along_uv * bn_along * 0.06 + across_uv * bn_across * 0.7;
+        // range_uv: sub-ranges parallel to boundary.  Along 0.06×14=0.84, across 0.38×14=5.3 → ~6:1 ratio.
+        let range_uv    = along_uv * bn_along * 0.06 + across_uv * bn_across * 0.38;
         let range_ridge = ridge_fbm(range_uv, 1.0, 0.58, 3u, params.seed ^ 0xf53a7c1eu);
-        let crest_uv    = along_uv * bn_along * 0.18 + across_uv * bn_across * 0.5;
+        // crest_uv: tighter ridgelines within sub-ranges.  ~2.5:1 ratio.
+        let crest_uv    = along_uv * bn_along * 0.18 + across_uv * bn_across * 0.45;
         let crest_ridge = ridge_fbm(crest_uv, 1.0, 0.55, 3u, params.seed ^ 0x7c3b9a4fu);
-        let fine_ridge  = ridge_fbm(aniso_uv, 1.0, 0.55 + params.terrain_roughness * 0.35,
-                                    4u, params.seed ^ 0x243f6a88u);
+        // fine_uv: coarse detail, less distorted than the old aniso_uv (was 14:1, now ~3:1).
+        let fine_uv     = along_uv * bn_along * 0.22 + across_uv * bn_across * 0.32;
+        let fine_ridge  = ridge_fbm(fine_uv, 1.5, 0.50 + params.terrain_roughness * 0.25,
+                                    3u, params.seed ^ 0x243f6a88u);
 
-        boundary_elev = kin_x * mountain_gate * params.mountain_height * (
-          pow(falloff, 0.7)                          * 0.30  // massif envelope
-          + range_ridge * pow(falloff, 0.85)          * 0.30  // sub-ranges
+        // Non-linear kin_x boost: compresses dynamic range so low-convergence
+        // boundaries (single_continent) produce visible mountains without
+        // making high-convergence (collision) runaway tall.
+        let boosted_kin = pow(kin_x, 0.80);
+        boundary_elev = boosted_kin * mountain_gate * params.mountain_height * (
+          pow(falloff, 0.7)                          * 0.32  // massif envelope
+          + range_ridge * pow(falloff, 0.85)          * 0.35  // sub-ranges
           + crest_ridge * range_ridge * pow(falloff, 1.8) * 0.25 // ridgelines
-          + fine_ridge  * pow(falloff, 2.5)           * 0.15  // peak detail
+          + fine_ridge  * pow(falloff, 2.5)           * 0.08  // peak detail (reduced to soften spikes)
         );
       }
     }
@@ -258,6 +337,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                         * (0.6 + rift_noise * 0.4);
       }
     }
+  }
+
+  // ── Ancient suture zones ────────────────────────────────────────────────────
+  // Old eroded mountain belts, independent of the active boundary map.
+  // Reactivation near convergent stress is handled inside the function.
+  if (is_continental) {
+    base += ancient_suture_elevation(uv, kin_x, params.seed);
   }
 
   let final_elev = clamp(base + boundary_elev, 0.0, 1.0);

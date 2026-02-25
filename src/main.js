@@ -143,6 +143,10 @@ async function main() {
   // jfaStepUniform buffers are created per-step below
   const elevUniformBuf    = makeUniformBuffer(48, 'elevUniform')     // ElevationParams
   const renderUniformBuf  = makeUniformBuffer(32, 'renderUniform')   // RenderParams
+  // Ancient sutures: 16-byte header + 6×32-byte suture entries = 208 bytes
+  const MAX_SUTURES       = 6
+  const SUTURE_FLOATS     = 8
+  const ancientSutureBuf  = makeUniformBuffer(208, 'ancientSuture')
 
   // ── Pipelines ────────────────────────────────────────────────────────────────
   // Use async variant so WGSL compilation errors surface as rejected promises
@@ -227,7 +231,8 @@ async function main() {
 
   const pass6BG = bg(pass6Pipeline,
     buf(plateTypeBuf), buf(kinematicBuf),
-    buf(jfaPingBuf), buf(elevationBuf), buf(elevUniformBuf))
+    buf(jfaPingBuf), buf(elevationBuf), buf(elevUniformBuf),
+    buf(ancientSutureBuf))
 
   const pass7BG = bg(pass7Pipeline,
     buf(jfaPingBuf), buf(elevationBuf),
@@ -280,8 +285,8 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 1 / WIDTH, true)
     v.setFloat32(20, 1 / HEIGHT, true)
-    v.setFloat32(24, 0.42, true)  // mountain_height
-    v.setFloat32(28, 72.0, true)  // mountain_radius (pixels)
+    v.setFloat32(24, 0.62, true)  // mountain_height
+    v.setFloat32(28, 90.0, true)  // mountain_radius (pixels)
     v.setFloat32(32, 0.7, true)   // terrain_roughness
     v.setFloat32(36, 0.0, true)
     v.setFloat32(40, 0.0, true)
@@ -298,7 +303,7 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 315.0, true)   // sun_angle
     v.setFloat32(20, 10.0, true)    // elevation_scale
-    v.setFloat32(24, 3.5, true)     // vertical_exaggeration
+    v.setFloat32(24, 4.0, true)     // vertical_exaggeration
     v.setFloat32(28, seed >>> 0, true)
     device.queue.writeBuffer(renderUniformBuf, 0, a)
   }
@@ -318,7 +323,8 @@ async function main() {
   const MAX_SPEED = 12.0
 
   function buildPlateStory(seed) {
-    const plates = []
+    const plates  = []
+    const sutures = []
     const storyType = STORY_TYPES[hash32(seed) % 4]
 
     // Deterministic random helpers scoped to this seed
@@ -330,44 +336,71 @@ async function main() {
     function addPlate(x, y, type, vx, vy, weight) {
       plates.push({ x, y, type, vx, vy, weight: weight ?? 0.0 })
     }
+    // Ancient suture: a broad eroded mountain belt independent of active boundaries.
+    // cx,cy = UV centre; angle = axis direction; halfLen = half-length (UV);
+    // amplitude = peak elevation boost; erosion = 0 (rugged) … 1 (worn smooth).
+    function addSuture(cx, cy, angle, halfLen, amplitude, erosion) {
+      sutures.push({ cx, cy, cosA: Math.cos(angle), sinA: Math.sin(angle),
+                     halfLen, amplitude, erosion })
+    }
 
     // Place continental plates with some positional jitter in center region
     function jitter(base, range) { return base + (rng() - 0.5) * 2 * range }
 
     switch (storyType) {
       case 'single_continent': {
-        // One dominant cluster of 3–4 continental plates near center
-        const cx = jitter(1.0, 0.15)
-        const cy = jitter(0.5, 0.10)
-        addPlate(cx,              cy,              0, rngRange(-2,2), rngRange(-2,2), 0.20)
-        addPlate(cx - 0.35, jitter(cy, 0.12), 0, rngRange(-2,2), rngRange(-2,2), 0.12)
-        addPlate(cx + 0.35, jitter(cy, 0.12), 0, rngRange(-2,2), rngRange(-2,2), 0.12)
-        addPlate(jitter(cx, 0.2), cy + 0.25, 0, rngRange(-1,1), rngRange(-1,1), 0.08)
+        // One dominant cluster of 3–4 continental plates near center.
+        const cx = jitter(1.0, 0.12)
+        const cy = jitter(0.5, 0.08)
+        addPlate(cx,                    cy,            0, rngRange(-4,4), rngRange(-4,4), 0.16)
+        addPlate(cx - 0.28,  jitter(cy, 0.10),         0, rngRange(-4,4), rngRange(-4,4), 0.09)
+        addPlate(cx + 0.28,  jitter(cy, 0.10),         0, rngRange(-4,4), rngRange(-4,4), 0.09)
+        addPlate(jitter(cx, 0.15), cy + 0.18,          0, rngRange(-2,2), rngRange(-2,2), 0.06)
+        // 2 ancient sutures: old orogenic belts from continent assembly
+        const a1 = rng() * Math.PI
+        addSuture(jitter(cx, 0.14), jitter(cy, 0.10), a1,
+                  rngRange(0.24, 0.38), rngRange(0.050, 0.068), rngRange(0.75, 0.90))
+        addSuture(jitter(cx, 0.18), jitter(cy, 0.14), a1 + rngRange(0.5, 1.1),
+                  rngRange(0.18, 0.30), rngRange(0.040, 0.058), rngRange(0.80, 0.93))
         break
       }
       case 'collision': {
-        // Two continental masses converging — guaranteed central orogen
+        // Two continental masses converging — guaranteed central orogen.
         const speed = rngRange(6, 10)
-        const leftCx  = jitter(0.60, 0.10)
-        const rightCx = jitter(1.40, 0.10)
-        const cy = jitter(0.5, 0.12)
-        // Left group moves right, right group moves left → convergent
-        addPlate(leftCx,        jitter(cy, 0.08), 0, +speed, rngRange(-1,1), 0.18)
-        addPlate(leftCx - 0.28, jitter(cy, 0.10), 0, +speed * 0.8, rngRange(-1,1), 0.10)
-        addPlate(rightCx,       jitter(cy, 0.08), 0, -speed, rngRange(-1,1), 0.18)
-        addPlate(rightCx + 0.28,jitter(cy, 0.10), 0, -speed * 0.8, rngRange(-1,1), 0.10)
+        const midX  = jitter(1.0, 0.20)
+        const sep   = rngRange(0.52, 0.68)
+        const leftCx  = midX - sep * 0.5
+        const rightCx = midX + sep * 0.5
+        const cy  = jitter(0.5, 0.05)
+        const cyL = cy + rngRange(-0.04, 0.04)
+        const cyR = cy + rngRange(-0.04, 0.04)
+        const vy = rngRange(-speed * 0.25, speed * 0.25)
+        addPlate(leftCx,                             jitter(cyL, 0.06), 0, +speed,       vy + rngRange(-0.5,0.5), 0.12)
+        addPlate(Math.max(leftCx  - 0.20, 0.35),    jitter(cyL, 0.08), 0, +speed * 0.8, vy + rngRange(-0.5,0.5), 0.05)
+        addPlate(rightCx,                            jitter(cyR, 0.06), 0, -speed,       vy + rngRange(-0.5,0.5), 0.12)
+        addPlate(Math.min(rightCx + 0.20, 1.65),    jitter(cyR, 0.08), 0, -speed * 0.8, vy + rngRange(-0.5,0.5), 0.05)
+        // 1 ancient suture per continental block (old internal scars, not at active collision)
+        const perpA = Math.PI * 0.5 + rngRange(-0.4, 0.4)
+        addSuture(jitter(leftCx - 0.10, 0.08), jitter(cyL, 0.10), perpA,
+                  rngRange(0.16, 0.26), rngRange(0.042, 0.060), rngRange(0.78, 0.92))
+        const perpB = Math.PI * 0.5 + rngRange(-0.4, 0.4)
+        addSuture(jitter(rightCx + 0.10, 0.08), jitter(cyR, 0.10), perpB,
+                  rngRange(0.16, 0.26), rngRange(0.042, 0.060), rngRange(0.78, 0.92))
         break
       }
       case 'rift': {
-        // One continent pulling apart — central divergent rift
+        // One continent pulling apart — central divergent rift.
         const speed = rngRange(4, 8)
         const cx = jitter(1.0, 0.10)
         const cy = jitter(0.5, 0.10)
-        // Left half moves left, right half moves right → divergent rift
-        addPlate(cx - 0.22, jitter(cy, 0.08), 0, -speed, rngRange(-1,1), 0.15)
-        addPlate(cx + 0.22, jitter(cy, 0.08), 0, +speed, rngRange(-1,1), 0.15)
-        addPlate(cx - 0.45, jitter(cy, 0.12), 0, -speed * 0.6, rngRange(-1,1), 0.10)
-        addPlate(cx + 0.45, jitter(cy, 0.12), 0, +speed * 0.6, rngRange(-1,1), 0.10)
+        addPlate(cx - 0.22, jitter(cy, 0.08), 0, -speed,       rngRange(-1,1), 0.12)
+        addPlate(cx + 0.22, jitter(cy, 0.08), 0, +speed,       rngRange(-1,1), 0.12)
+        addPlate(cx - 0.38, jitter(cy, 0.12), 0, -speed * 0.6, rngRange(-1,1), 0.08)
+        addPlate(cx + 0.38, jitter(cy, 0.12), 0, +speed * 0.6, rngRange(-1,1), 0.08)
+        // 1 ancient suture roughly parallel to rift axis (rifts often follow old scars)
+        const riftA = Math.PI * 0.5 + rngRange(-0.25, 0.25)
+        addSuture(jitter(cx, 0.14), jitter(cy - 0.12, 0.08), riftA,
+                  rngRange(0.22, 0.34), rngRange(0.045, 0.062), rngRange(0.80, 0.93))
         break
       }
       case 'archipelago': {
@@ -384,8 +417,36 @@ async function main() {
           const a = rngAngle()
           addPlate(px, py, 0, Math.cos(a) * rngRange(2,7), Math.sin(a) * rngRange(2,7), 0.06)
         }
+        // Small ancient sutures on 1–2 islands (islands lack thick cratons)
+        addSuture(positions[0][0], positions[0][1], rng() * Math.PI,
+                  rngRange(0.07, 0.13), rngRange(0.025, 0.038), rngRange(0.85, 0.95))
+        if (rng() > 0.45) {
+          addSuture(positions[3][0], positions[3][1], rng() * Math.PI,
+                    rngRange(0.06, 0.11), rngRange(0.020, 0.033), rngRange(0.86, 0.95))
+        }
         break
       }
+    }
+
+    // Border anchor plates — 8 guaranteed oceanic plates near canvas edges.
+    // Voronoi score = dist² − weight, so continental plates with weight > 0
+    // have a guaranteed claim radius of √weight UV around their seed.
+    // To reliably block them at the margins:
+    //   • Left/right anchors (weight 0.02) push the ocean margin ~15% inward on
+    //     the x-axis even for off-centre collision plates.
+    //   • Top/bottom anchors (weight 0.04) sit at y=0.12/0.88 — close enough
+    //     to the continental band that they win against the central main plate,
+    //     creating an ~18% ocean band on each vertical margin.  This biases the
+    //     landmass into the 2:1 landscape aspect ratio of the canvas.
+    const borderAnchors = [
+      { x: 0.05, y: 0.30, w: 0.02 }, { x: 0.05, y: 0.70, w: 0.02 },  // left
+      { x: 1.95, y: 0.30, w: 0.02 }, { x: 1.95, y: 0.70, w: 0.02 },  // right
+      { x: 0.55, y: 0.12, w: 0.04 }, { x: 1.45, y: 0.12, w: 0.04 },  // top
+      { x: 0.55, y: 0.88, w: 0.04 }, { x: 1.45, y: 0.88, w: 0.04 },  // bottom
+    ]
+    for (const { x: ax, y: ay, w: aw } of borderAnchors) {
+      const a = rngAngle()
+      addPlate(ax, ay, 1, Math.cos(a) * rngRange(1, 6), Math.sin(a) * rngRange(1, 6), aw)
     }
 
     // Fill remaining slots with oceanic plates spread across canvas
@@ -399,7 +460,29 @@ async function main() {
       addPlate(px, py, 1, Math.cos(a) * spd, Math.sin(a) * spd, 0.0)
     }
 
-    return { storyType, plates }
+    return { storyType, plates, sutures }
+  }
+
+  function uploadAncientSutures(sutures) {
+    const byteLen = 16 + MAX_SUTURES * SUTURE_FLOATS * F32  // 208 bytes
+    const a = new ArrayBuffer(byteLen)
+    const v = new DataView(a)
+    const count = Math.min(sutures.length, MAX_SUTURES)
+    v.setUint32(0, count, true)
+    v.setUint32(4, 0, true); v.setUint32(8, 0, true); v.setUint32(12, 0, true)
+    for (let i = 0; i < count; i++) {
+      const s    = sutures[i]
+      const base = 16 + i * SUTURE_FLOATS * F32
+      v.setFloat32(base +  0, s.cx,        true)
+      v.setFloat32(base +  4, s.cy,        true)
+      v.setFloat32(base +  8, s.cosA,      true)
+      v.setFloat32(base + 12, s.sinA,      true)
+      v.setFloat32(base + 16, s.halfLen,   true)
+      v.setFloat32(base + 20, s.amplitude, true)
+      v.setFloat32(base + 24, s.erosion,   true)
+      v.setFloat32(base + 28, 0.0,         true)
+    }
+    device.queue.writeBuffer(ancientSutureBuf, 0, a)
   }
 
   function uploadPlateStory(story, seed) {
@@ -424,9 +507,10 @@ async function main() {
     statusNode.textContent = 'Generating...'
     const t0 = performance.now()
 
-    // Build and upload plate story
+    // Build and upload plate story + ancient sutures
     const story = buildPlateStory(seed)
     uploadPlateStory(story, seed)
+    uploadAncientSutures(story.sutures)
 
     // Write uniforms
     writePlateUniform(story.plates.length, seed)
