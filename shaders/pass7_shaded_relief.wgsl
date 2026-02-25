@@ -96,8 +96,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (params.render_mode == 3u) {
     let center = sample_elevation(x, y);
     if (center <= 0.08) {
-      let ocean = vec4<f32>(0.03, 0.16, 0.32, 1.0);
-      shaded_rgba[flat_index] = pack_rgba8(ocean);
+      let nearest = jfa_nearest[flat_index];
+      var shelf_t = 1.0;
+      if (nearest.x >= 0.0 && nearest.y >= 0.0) {
+        let p_f = vec2<f32>(f32(x), f32(y));
+        shelf_t = smoothstep(0.0, 280.0, length(nearest - p_f));
+      }
+      let shallow = vec3<f32>(0.05, 0.22, 0.42);
+      let deep    = vec3<f32>(0.02, 0.09, 0.22);
+      shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(mix(shallow, deep, shelf_t), 1.0));
       return;
     }
 
@@ -111,15 +118,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dy = (bottom - top) * relief_scale;
     let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
 
-    let sun_rad = radians(params.sun_angle);
+    let sun_rad  = radians(params.sun_angle);
     let light_dir = normalize(vec3<f32>(cos(sun_rad), sin(sun_rad), 1.0));
-    let diffuse = max(dot(normal, light_dir), 0.0);
-    let ambient = 0.2;
-    let light = ambient + diffuse * (1.0 - ambient);
+    let diffuse  = max(dot(normal, light_dir), 0.0);
+    let fill_rad = radians(params.sun_angle + 120.0);
+    let fill_dir = normalize(vec3<f32>(cos(fill_rad), sin(fill_rad), 1.6));
+    let fill     = max(dot(normal, fill_dir), 0.0) * 0.22;
+    let ambient  = 0.18;
+    let light    = clamp(ambient + diffuse * (1.0 - ambient) + fill, 0.15, 1.0);
 
-    let lowland = vec3<f32>(0.56, 0.60, 0.45);
-    let highland = vec3<f32>(0.79, 0.74, 0.62);
-    let base_land = mix(lowland, highland, clamp(center, 0.0, 1.0));
+    let land_t = clamp((center - 0.08) / 0.65, 0.0, 1.0);
+    var base_land: vec3<f32>;
+    if (land_t < 0.2) {
+      base_land = mix(vec3<f32>(0.52, 0.58, 0.42), vec3<f32>(0.59, 0.63, 0.46), land_t * 5.0);
+    } else if (land_t < 0.45) {
+      base_land = mix(vec3<f32>(0.59, 0.63, 0.46), vec3<f32>(0.68, 0.65, 0.52),
+                      (land_t - 0.20) * 4.0);
+    } else if (land_t < 0.72) {
+      base_land = mix(vec3<f32>(0.68, 0.65, 0.52), vec3<f32>(0.80, 0.74, 0.61),
+                      (land_t - 0.45) * 3.7);
+    } else {
+      base_land = mix(vec3<f32>(0.80, 0.74, 0.61), vec3<f32>(0.94, 0.92, 0.90),
+                      (land_t - 0.72) * 3.57);
+    }
     let lit = base_land * light;
     shaded_rgba[flat_index] = pack_rgba8(vec4<f32>(lit, 1.0));
     return;

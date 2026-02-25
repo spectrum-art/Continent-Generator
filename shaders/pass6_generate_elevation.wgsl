@@ -14,7 +14,7 @@ struct TopographyParams {
 }
 
 const OCEAN_THRESHOLD: f32 = 0.1;
-const PLUME_SCALE: f32 = 0.42;
+const PLUME_SCALE: f32 = 0.30;
 
 @group(0) @binding(0) var<storage, read> kinematic_data: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read> jfa_nearest: array<vec2<f32>>;
@@ -193,7 +193,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     4u,
     params.seed ^ 0xb7e15162u
   );
-  let base_noise_component = (lowland_noise - 0.5) * 0.06;
+  let interior_swell = fbm(
+    sample_uv * (params.terrain_frequency * 0.12),
+    1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu
+  ) * 0.14 - 0.05;
+  let base_noise_component = (lowland_noise - 0.5) * 0.10 + interior_swell;
 
   var active_elev = 0.0;
   var fossil_elev = 0.0;
@@ -239,11 +243,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // --- Anisotropic ridge noise: 4× stretch along boundary ---
     let bn_along = dot(base_noise_uv, along_uv);
     let bn_across = dot(base_noise_uv, across_uv);
-    let aniso_noise_uv = along_uv * bn_along * 0.25 + across_uv * bn_across + uv_warp;
+    let warp_along  = dot(uv_warp, along_uv);
+    let warp_across = dot(uv_warp, across_uv);
+    let aniso_warp  = along_uv * warp_along * 0.25 + across_uv * warp_across;
+    let aniso_noise_uv = along_uv * bn_along * 0.25 + across_uv * bn_across + aniso_warp;
     let ridge_noise = ridge_multifractal(
       aniso_noise_uv, 1.0,
       0.55 + params.terrain_roughness * 0.35,
-      6u, params.seed ^ 0x243f6a88u
+      4u, params.seed ^ 0x243f6a88u
     );
 
     // --- dist_warp: full along-boundary snaking, 25% across ---
@@ -279,9 +286,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (final_kin_x > 0.0) {
       // Wide smooth base (foothills) + sharp ridges concentrated at crest
       let base_shape = pow(falloff, 0.7);
-      let peak_detail = ridge_noise * pow(falloff, 2.5);
+      let peak_detail = ridge_noise * pow(falloff, 1.8);
       active_elev = final_kin_x * (base_shape * 0.55 + peak_detail * 0.45)
                     * params.mountain_height * mountain_gate;
+      // Slope-masked erosion incisions (valleys on mid-slope)
+      let erosion_uv  = aniso_noise_uv * 2.5 + vec2<f32>(7.3, -2.1);
+      let erosion_fbm = fbm(erosion_uv, 1.0, 0.75, 4u, params.seed ^ 0x2b4d6e8fu);
+      let slope_mask  = falloff * (1.0 - falloff) * 4.0;  // peaks at falloff≈0.5 (mid-slope)
+      active_elev -= slope_mask * erosion_fbm * 0.04 * final_kin_x;
     } else if (final_kin_x < 0.0) {
       let rift_uv = sample_uv * (params.terrain_frequency * 7.0);
       let rift_fbm = fbm(rift_uv, 1.0, 0.60, 4u, params.seed ^ 0x082efa98u);
@@ -296,22 +308,27 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       sample_uv * (params.terrain_frequency * 0.10) + vec2<f32>(3.7, -1.4),
       params.seed ^ 0x4b7e1f3au
     ) * 0.5 + 0.5;
-    let zone_gate   = smoothstep(0.45, 0.72, ancient_zone);
-    let ancient_crest = smoothstep(0.70, 0.92, raw_ancient);
+    let zone_gate     = smoothstep(0.30, 0.75, ancient_zone);
+    let ancient_crest = clamp((raw_ancient - 0.48) * 2.2, 0.0, 1.0);
     fossil_elev = ancient_crest * zone_gate * react_mult * params.fossil_scale * params.mountain_height;
   }
 
   let base_continent_height = mix(0.08, 0.22, mask) + base_noise_component * craton_feather;
   let plume = plume_mask[flat_index];
-  let plume_curve = smoothstep(0.0, 1.0, plume);
+  let plume_perturb = snoise(
+    sample_uv * (params.terrain_frequency * 3.0), params.seed ^ 0x14c93a7eu
+  ) * 0.10;
+  let plume_curve = smoothstep(0.0, 1.0, plume + plume_perturb);
   let plume_noise = fbm(
     sample_uv * (params.terrain_frequency * 0.22) + vec2<f32>(3.1, 7.4),
-    1.0,
-    0.65,
-    4u,
-    params.seed ^ 0x6a09e667u
+    1.0, 0.65, 4u, params.seed ^ 0x6a09e667u
   );
-  let plume_elev = plume_curve * (0.5 + 0.5 * plume_noise) * PLUME_SCALE * params.mountain_height;
+  let plume_detail = fbm(
+    sample_uv * (params.terrain_frequency * 1.4) + vec2<f32>(5.2, -3.8),
+    1.0, 0.72, 4u, params.seed ^ 0x4a2c3d1eu
+  );
+  let plume_elev = plume_curve * (0.40 + 0.35 * plume_noise + 0.25 * plume_detail)
+                   * PLUME_SCALE * params.mountain_height;
 
   let final_elevation = base_continent_height + active_elev + fossil_elev + plume_elev;
   elevation[flat_index] = clamp(final_elevation, 0.0, 1.0);

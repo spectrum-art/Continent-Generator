@@ -121,10 +121,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);
   let warp_x = (fbm(sample_uv + vec2<f32>(5.3, 2.9)) * 2.0 - 1.0) * params.edge_warp;
   let warp_y = (fbm(sample_uv - vec2<f32>(1.1, 4.4)) * 2.0 - 1.0) * params.edge_warp;
+  let detail_warp_x = (fbm(sample_uv * 2.7 + vec2<f32>(3.7, -1.2)) * 2.0 - 1.0) * params.edge_warp * 0.45;
+  let detail_warp_y = (fbm(sample_uv * 2.7 - vec2<f32>(2.1, 4.9)) * 2.0 - 1.0) * params.edge_warp * 0.45;
   let dx = u_norm - 0.5;
   let dy = v_norm - 0.5;
   let physical_dist = length(vec2<f32>(dx, dy));
-  let warped_dist = length(vec2<f32>(dx + warp_x, dy + warp_y));
+  let warped_dist = length(vec2<f32>(dx + warp_x + detail_warp_x, dy + warp_y + detail_warp_y));
   let outward_dampener = smoothstep(0.38, 0.50, physical_dist);
   var final_dist = warped_dist;
   if (warped_dist < physical_dist) {
