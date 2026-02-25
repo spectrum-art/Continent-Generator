@@ -186,14 +186,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     fbm(base_noise_uv * 0.03, 1.0, 0.55, 3u, params.seed ^ 0xd2511f53u),
     fbm(base_noise_uv * 0.03 + vec2<f32>(7.4, 2.9), 1.0, 0.55, 3u, params.seed ^ 0xcd9e8d57u)
   ) * 6.0 - 3.0;
-  let warped_base_uv = base_noise_uv + uv_warp;
-  let ridge_noise = ridge_multifractal(
-    warped_base_uv,
-    1.0,
-    0.55 + params.terrain_roughness * 0.35,
-    6u,
-    params.seed ^ 0x243f6a88u
-  );
   let lowland_noise = fbm(
     sample_uv * (params.terrain_frequency * 0.35),
     1.0,
@@ -233,31 +225,67 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let final_kin_x = smoothed_kin_x / max(valid_samples, 1.0);
 
-    let dist_warp = vec2<f32>(
+    // --- Boundary frame ---
+    let bp_diff = p - final_nearest;
+    let bp_len = length(bp_diff);
+    let across_px = select(vec2<f32>(1.0, 0.0), bp_diff / bp_len, bp_len > 0.5);
+    let along_px = vec2<f32>(-across_px.y, across_px.x);
+    // Convert direction to noise-UV space (x is 2/width-scaled, y is 1/height-scaled)
+    let inv_h = 1.0 / f32(params.height);
+    let across_uv = normalize(vec2<f32>(across_px.x * params.inv_width * 2.0,
+                                        across_px.y * inv_h));
+    let along_uv = vec2<f32>(-across_uv.y, across_uv.x);
+
+    // --- Anisotropic ridge noise: 4× stretch along boundary ---
+    let bn_along = dot(base_noise_uv, along_uv);
+    let bn_across = dot(base_noise_uv, across_uv);
+    let aniso_noise_uv = along_uv * bn_along * 0.25 + across_uv * bn_across + uv_warp;
+    let ridge_noise = ridge_multifractal(
+      aniso_noise_uv, 1.0,
+      0.55 + params.terrain_roughness * 0.35,
+      6u, params.seed ^ 0x243f6a88u
+    );
+
+    // --- dist_warp: full along-boundary snaking, 25% across ---
+    let dist_warp_raw = vec2<f32>(
       snoise(sample_uv * 3.5, params.seed ^ 0xa4093822u)
         + snoise(sample_uv * 9.0, params.seed ^ 0x5f3759dfu) * 0.4,
       snoise(sample_uv * 3.5 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
         + snoise(sample_uv * 9.0 + vec2<f32>(1.7, -2.3), params.seed ^ 0xc0b18458u) * 0.4
     ) * (params.mountain_radius * 1.4);
+    let dw_along = dot(dist_warp_raw, along_px);
+    let dw_across = dot(dist_warp_raw, across_px);
+    let dist_warp = along_px * dw_along + across_px * dw_across * 0.25;
     let active_distance = length((p + dist_warp) - final_nearest);
-    let width_low  = snoise(final_nearest * params.inv_width * 2.5, params.seed ^ 0x13198a2eu);
-    let width_high = snoise(final_nearest * params.inv_width * 8.0, params.seed ^ 0x27c0da8bu);
+
+    // --- long_mod: smooth variation along 1D boundary arc ---
+    let boundary_arc = dot(final_nearest * params.inv_width, along_uv);
+    let arc_uv = along_uv * boundary_arc;
+    let width_low  = snoise(arc_uv * 2.5, params.seed ^ 0x13198a2eu);
+    let width_high = snoise(arc_uv * 8.0, params.seed ^ 0x27c0da8bu);
     let long_mod = clamp(width_low * 0.65 + width_high * 0.40 + 0.80, 0.15, 1.65);
     let modulated_radius = max(params.mountain_radius * long_mod, 1.0);
+
+    // --- gap gate (unchanged from 5.35) ---
     let gap_a = snoise(final_nearest * params.inv_width * 1.8, params.seed ^ 0x3c6ef372u);
     let gap_b = snoise(final_nearest * params.inv_width * 0.6, params.seed ^ 0x9e3779b9u);
     let mountain_gate = smoothstep(-0.05, 0.40, gap_a * 0.55 + gap_b * 0.45);
+
     let active_dist_normalized = clamp(active_distance / modulated_radius, 0.0, 1.0);
     let linear_falloff = smoothstep(1.0, 0.0, active_dist_normalized);
     let falloff = pow(linear_falloff, 1.5);
     craton_feather = mix(0.65, 1.0, falloff);
 
     if (final_kin_x > 0.0) {
-      active_elev = final_kin_x * falloff * mix(0.4, 1.0, ridge_noise) * params.mountain_height * mountain_gate;
+      // Wide smooth base (foothills) + sharp ridges concentrated at crest
+      let base_shape = pow(falloff, 0.7);
+      let peak_detail = ridge_noise * pow(falloff, 2.5);
+      active_elev = final_kin_x * (base_shape * 0.55 + peak_detail * 0.45)
+                    * params.mountain_height * mountain_gate;
     } else if (final_kin_x < 0.0) {
       let rift_uv = sample_uv * (params.terrain_frequency * 7.0);
       let rift_fbm = fbm(rift_uv, 1.0, 0.60, 4u, params.seed ^ 0x082efa98u);
-      active_elev = final_kin_x * falloff * 0.35 * rift_fbm * params.mountain_height;
+      active_elev = final_kin_x * falloff * 0.18 * rift_fbm * params.mountain_height;
     }
 
     let macro_dist = clamp(active_distance / (f32(params.width) * 0.5), 0.0, 1.0);
