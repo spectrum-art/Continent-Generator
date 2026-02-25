@@ -119,16 +119,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y = f32(idx / params.width);
   let uv = vec2<f32>(x * params.inv_width * 2.0, y * params.inv_height);
 
-  // Domain warp — curves plate boundaries into organic shapes
-  let warp_x = (fbm(uv + vec2<f32>(17.3, -9.1), 0.12, params.warp_roughness, 4u,
-                    params.seed ^ 0x243f6a88u) * 2.0 - 1.0) * 0.22;
-  let warp_y = (fbm(uv - vec2<f32>(8.4, 21.2),  0.12, params.warp_roughness, 4u,
-                    params.seed ^ 0x6a09e667u) * 2.0 - 1.0) * 0.22;
-  // Finer warp for local boundary detail
-  let fine_x = (fbm(uv + vec2<f32>(63.7, 11.4), 0.55, params.warp_roughness, 3u,
-                    params.seed ^ 0xb7e15162u) * 2.0 - 1.0) * 0.05;
-  let fine_y = (fbm(uv - vec2<f32>(19.2, 37.8), 0.55, params.warp_roughness, 3u,
-                    params.seed ^ 0x8aed2a6bu) * 2.0 - 1.0) * 0.05;
+  // Domain warp — curves plate boundaries into organic shapes.
+  // Macro warp: freq 0.7 gives periods ~1.4 UV wide — right scale for plate boundaries.
+  let warp_x = (fbm(uv + vec2<f32>(17.3, -9.1), 0.70, params.warp_roughness, 4u,
+                    params.seed ^ 0x243f6a88u) * 2.0 - 1.0) * 0.18;
+  let warp_y = (fbm(uv - vec2<f32>(8.4, 21.2),  0.70, params.warp_roughness, 4u,
+                    params.seed ^ 0x6a09e667u) * 2.0 - 1.0) * 0.18;
+  // Finer warp for inlet/peninsula detail
+  let fine_x = (fbm(uv + vec2<f32>(63.7, 11.4), 2.50, params.warp_roughness, 3u,
+                    params.seed ^ 0xb7e15162u) * 2.0 - 1.0) * 0.09;
+  let fine_y = (fbm(uv - vec2<f32>(19.2, 37.8), 2.50, params.warp_roughness, 3u,
+                    params.seed ^ 0x8aed2a6bu) * 2.0 - 1.0) * 0.09;
 
   let warped = uv + vec2<f32>(warp_x + fine_x, warp_y + fine_y);
 

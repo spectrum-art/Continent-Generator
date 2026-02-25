@@ -280,8 +280,8 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 1 / WIDTH, true)
     v.setFloat32(20, 1 / HEIGHT, true)
-    v.setFloat32(24, 0.75, true)  // mountain_height
-    v.setFloat32(28, 35.0, true)  // mountain_radius (pixels)
+    v.setFloat32(24, 0.42, true)  // mountain_height
+    v.setFloat32(28, 72.0, true)  // mountain_radius (pixels)
     v.setFloat32(32, 0.7, true)   // terrain_roughness
     v.setFloat32(36, 0.0, true)
     v.setFloat32(40, 0.0, true)
@@ -298,7 +298,7 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 315.0, true)   // sun_angle
     v.setFloat32(20, 10.0, true)    // elevation_scale
-    v.setFloat32(24, 7.5, true)     // vertical_exaggeration
+    v.setFloat32(24, 3.5, true)     // vertical_exaggeration
     v.setFloat32(28, seed >>> 0, true)
     device.queue.writeBuffer(renderUniformBuf, 0, a)
   }
