@@ -79,10 +79,10 @@ fn perlin_noise_2d(p: vec2<f32>, seed: u32) -> f32 {
   let c01 = vec2<u32>(u32(cell.x), u32(cell.y + 1));
   let c11 = vec2<u32>(u32(cell.x + 1), u32(cell.y + 1));
 
-  let g00 = gradient_from_hash(seeded_hash_2d(c00, seed ^ 0x9e3779b9u));
-  let g10 = gradient_from_hash(seeded_hash_2d(c10, seed ^ 0x85ebca6bu));
-  let g01 = gradient_from_hash(seeded_hash_2d(c01, seed ^ 0xc2b2ae35u));
-  let g11 = gradient_from_hash(seeded_hash_2d(c11, seed ^ 0x27d4eb2fu));
+  let g00 = gradient_from_hash(seeded_hash_2d(c00, seed));
+  let g10 = gradient_from_hash(seeded_hash_2d(c10, seed));
+  let g01 = gradient_from_hash(seeded_hash_2d(c01, seed));
+  let g11 = gradient_from_hash(seeded_hash_2d(c11, seed));
 
   let d00 = frac - vec2<f32>(0.0, 0.0);
   let d10 = frac - vec2<f32>(1.0, 0.0);

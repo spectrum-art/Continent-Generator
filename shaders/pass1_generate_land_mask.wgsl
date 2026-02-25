@@ -37,19 +37,27 @@ fn fade2(t: vec2<f32>) -> vec2<f32> {
 }
 
 fn gradient_from_hash(h: u32) -> vec2<f32> {
-  switch (h & 7u) {
-    case 0u: { return vec2<f32>(1.0, 0.0); }
-    case 1u: { return vec2<f32>(-1.0, 0.0); }
-    case 2u: { return vec2<f32>(0.0, 1.0); }
-    case 3u: { return vec2<f32>(0.0, -1.0); }
-    case 4u: { return vec2<f32>(0.70710677, 0.70710677); }
-    case 5u: { return vec2<f32>(-0.70710677, 0.70710677); }
-    case 6u: { return vec2<f32>(0.70710677, -0.70710677); }
-    default: { return vec2<f32>(-0.70710677, -0.70710677); }
+  switch (h & 15u) {
+    case 0u:  { return vec2<f32>( 1.0,       0.0      ); }
+    case 1u:  { return vec2<f32>( 0.9238795,  0.3826834); }
+    case 2u:  { return vec2<f32>( 0.70710677, 0.70710677); }
+    case 3u:  { return vec2<f32>( 0.3826834,  0.9238795); }
+    case 4u:  { return vec2<f32>( 0.0,        1.0      ); }
+    case 5u:  { return vec2<f32>(-0.3826834,  0.9238795); }
+    case 6u:  { return vec2<f32>(-0.70710677, 0.70710677); }
+    case 7u:  { return vec2<f32>(-0.9238795,  0.3826834); }
+    case 8u:  { return vec2<f32>(-1.0,        0.0      ); }
+    case 9u:  { return vec2<f32>(-0.9238795, -0.3826834); }
+    case 10u: { return vec2<f32>(-0.70710677,-0.70710677); }
+    case 11u: { return vec2<f32>(-0.3826834, -0.9238795); }
+    case 12u: { return vec2<f32>( 0.0,       -1.0      ); }
+    case 13u: { return vec2<f32>( 0.3826834, -0.9238795); }
+    case 14u: { return vec2<f32>( 0.70710677,-0.70710677); }
+    default:  { return vec2<f32>( 0.9238795, -0.3826834); }
   }
 }
 
-fn perlin_noise_2d(p: vec2<f32>) -> f32 {
+fn perlin_noise_2d(p: vec2<f32>, seed: u32) -> f32 {
   let cell = vec2<i32>(floor(p));
   let frac = fract(p);
   let u = fade2(frac);
@@ -59,10 +67,10 @@ fn perlin_noise_2d(p: vec2<f32>) -> f32 {
   let c01 = vec2<u32>(u32(cell.x), u32(cell.y + 1));
   let c11 = vec2<u32>(u32(cell.x + 1), u32(cell.y + 1));
 
-  let g00 = gradient_from_hash(seeded_hash_2d(c00, params.seed));
-  let g10 = gradient_from_hash(seeded_hash_2d(c10, params.seed));
-  let g01 = gradient_from_hash(seeded_hash_2d(c01, params.seed));
-  let g11 = gradient_from_hash(seeded_hash_2d(c11, params.seed));
+  let g00 = gradient_from_hash(seeded_hash_2d(c00, seed));
+  let g10 = gradient_from_hash(seeded_hash_2d(c10, seed));
+  let g01 = gradient_from_hash(seeded_hash_2d(c01, seed));
+  let g11 = gradient_from_hash(seeded_hash_2d(c11, seed));
 
   let d00 = frac - vec2<f32>(0.0, 0.0);
   let d10 = frac - vec2<f32>(1.0, 0.0);
@@ -86,7 +94,7 @@ fn fbm(p: vec2<f32>) -> f32 {
   var amplitude_sum = 0.0;
 
   for (var octave: u32 = 0u; octave < 3u; octave = octave + 1u) {
-    let octave_noise = perlin_noise_2d(p * frequency) * 0.5 + 0.5;
+    let octave_noise = perlin_noise_2d(p * frequency, params.seed) * 0.5 + 0.5;
     total = total + octave_noise * amplitude;
     amplitude_sum = amplitude_sum + amplitude;
     frequency = frequency * 2.0;
