@@ -6,19 +6,19 @@ const GRID_CELL_COUNT: u32 = GRID_WIDTH * GRID_HEIGHT;
 const WORKGROUP_SIZE: u32 = 256;
 const DEFAULT_FBM_BASE_FREQUENCY_NORM: f32 = 1.20;
 const DEFAULT_LAND_THRESHOLD_NORM: f32 = 0.54;
-const DEFAULT_FALLOFF_STRENGTH_NORM: f32 = 2.20;
+const DEFAULT_FALLOFF_STRENGTH_NORM: f32 = 2.00;
 const DEFAULT_NOISE_AMPLITUDE_NORM: f32 = 0.60;
 const DEFAULT_EDGE_WARP_NORM: f32 = 0.12;
 const DEFAULT_PLATE_COUNT: u32 = 15;
-const DEFAULT_PLATE_WARP_AMPLITUDE_NORM: f32 = 0.50;
+const DEFAULT_PLATE_WARP_AMPLITUDE_NORM: f32 = 1.10;
 const DEFAULT_PLATE_WARP_ROUGHNESS_NORM: f32 = 0.60;
-const DEFAULT_MOUNTAIN_RADIUS_NORM: f32 = 20.0;
-const DEFAULT_MOUNTAIN_HEIGHT_NORM: f32 = 0.80;
-const DEFAULT_TERRAIN_ROUGHNESS_NORM: f32 = 0.50;
-const DEFAULT_TERRAIN_FREQUENCY_NORM: f32 = 8.0;
+const DEFAULT_MOUNTAIN_RADIUS_NORM: f32 = 35.0;
+const DEFAULT_MOUNTAIN_HEIGHT_NORM: f32 = 0.60;
+const DEFAULT_TERRAIN_ROUGHNESS_NORM: f32 = 0.70;
+const DEFAULT_TERRAIN_FREQUENCY_NORM: f32 = 18.0;
 const DEFAULT_SUN_ANGLE_NORM: f32 = 315.0;
 const DEFAULT_ELEVATION_SCALE_NORM: f32 = 10.0;
-const DEFAULT_VERTICAL_EXAGGERATION_NORM: f32 = 5.0;
+const DEFAULT_VERTICAL_EXAGGERATION_NORM: f32 = 7.5;
 const DEFAULT_SEED: u32 = 1337;
 
 fn compute_dispatch(flat_cell_count: u32, coverage_norm: f32) -> Result<(u32, u32), JsValue> {
@@ -65,7 +65,7 @@ pub fn normalized_land_threshold() -> f32 {
 
 #[wasm_bindgen]
 pub fn normalized_land_threshold_from_slider(raw: f32) -> f32 {
-    raw.clamp(-1.0, 2.0)
+    raw.clamp(0.2, 1.0)
 }
 
 #[wasm_bindgen]
@@ -96,7 +96,7 @@ pub fn normalized_edge_warp() -> f32 {
 #[wasm_bindgen]
 pub fn normalized_edge_warp_from_input(raw: f32) -> f32 {
     if raw.is_finite() {
-        raw
+        raw.clamp(0.0, 5.0)
     } else {
         DEFAULT_EDGE_WARP_NORM
     }
@@ -137,7 +137,7 @@ pub fn normalized_plate_warp_roughness() -> f32 {
 
 #[wasm_bindgen]
 pub fn normalized_plate_warp_roughness_from_slider(raw: f32) -> f32 {
-    raw.clamp(0.3, 0.8)
+    raw.clamp(0.3, 0.70)
 }
 
 #[wasm_bindgen]
@@ -147,7 +147,7 @@ pub fn normalized_mountain_radius() -> f32 {
 
 #[wasm_bindgen]
 pub fn normalized_mountain_radius_from_slider(raw: f32) -> f32 {
-    raw.clamp(5.0, 50.0)
+    raw.clamp(20.0, 50.0)
 }
 
 #[wasm_bindgen]
@@ -157,7 +157,7 @@ pub fn normalized_mountain_height() -> f32 {
 
 #[wasm_bindgen]
 pub fn normalized_mountain_height_from_slider(raw: f32) -> f32 {
-    raw.clamp(0.1, 2.0)
+    raw.clamp(0.1, 1.0)
 }
 
 #[wasm_bindgen]

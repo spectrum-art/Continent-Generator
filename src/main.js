@@ -20,8 +20,6 @@ import initWasm, {
   normalized_edge_warp_from_input,
   normalized_elevation_scale,
   normalized_elevation_scale_from_slider,
-  normalized_falloff_strength,
-  normalized_falloff_strength_from_slider,
   normalized_fbm_base_frequency,
   normalized_land_threshold,
   normalized_land_threshold_from_slider,
@@ -29,20 +27,12 @@ import initWasm, {
   normalized_mountain_height_from_slider,
   normalized_mountain_radius,
   normalized_mountain_radius_from_slider,
-  normalized_noise_amplitude,
-  normalized_noise_amplitude_from_slider,
   normalized_plate_count,
   normalized_plate_count_from_slider,
-  normalized_plate_warp_amplitude,
-  normalized_plate_warp_amplitude_from_slider,
   normalized_plate_warp_roughness,
   normalized_plate_warp_roughness_from_slider,
   normalized_sun_angle,
   normalized_sun_angle_from_slider,
-  normalized_terrain_frequency,
-  normalized_terrain_frequency_from_slider,
-  normalized_terrain_roughness,
-  normalized_terrain_roughness_from_slider,
   normalized_vertical_exaggeration,
   normalized_vertical_exaggeration_from_slider,
 } from './wasm/wasm_core.js'
@@ -53,25 +43,15 @@ const seedInput = document.querySelector('#seed-input')
 const randomizeSeedButton = document.querySelector('#randomize-seed')
 const thresholdSlider = document.querySelector('#land-threshold')
 const thresholdValueNode = document.querySelector('#land-threshold-value')
-const falloffSlider = document.querySelector('#falloff-strength')
-const falloffValueNode = document.querySelector('#falloff-strength-value')
-const noiseSlider = document.querySelector('#noise-amplitude')
-const noiseValueNode = document.querySelector('#noise-amplitude-value')
 const edgeWarpInput = document.querySelector('#edge-warp')
 const plateCountSlider = document.querySelector('#plate-count')
 const plateCountValueNode = document.querySelector('#plate-count-value')
-const plateWarpSlider = document.querySelector('#plate-warp-amplitude')
-const plateWarpValueNode = document.querySelector('#plate-warp-amplitude-value')
 const plateRoughnessSlider = document.querySelector('#plate-warp-roughness')
 const plateRoughnessValueNode = document.querySelector('#plate-warp-roughness-value')
 const mountainRadiusSlider = document.querySelector('#mountain-radius')
 const mountainRadiusValueNode = document.querySelector('#mountain-radius-value')
 const mountainHeightSlider = document.querySelector('#mountain-height')
 const mountainHeightValueNode = document.querySelector('#mountain-height-value')
-const terrainRoughnessSlider = document.querySelector('#terrain-roughness')
-const terrainRoughnessValueNode = document.querySelector('#terrain-roughness-value')
-const terrainFrequencySlider = document.querySelector('#terrain-frequency')
-const terrainFrequencyValueNode = document.querySelector('#terrain-frequency-value')
 const fossilScaleSlider = document.querySelector('#fossil-scale')
 const fossilScaleValueNode = document.querySelector('#fossil-scale-value')
 const sunAngleSlider = document.querySelector('#sun-angle')
@@ -341,25 +321,15 @@ async function runPipeline() {
     !randomizeSeedButton ||
     !thresholdSlider ||
     !thresholdValueNode ||
-    !falloffSlider ||
-    !falloffValueNode ||
-    !noiseSlider ||
-    !noiseValueNode ||
     !edgeWarpInput ||
     !plateCountSlider ||
     !plateCountValueNode ||
-    !plateWarpSlider ||
-    !plateWarpValueNode ||
     !plateRoughnessSlider ||
     !plateRoughnessValueNode ||
     !mountainRadiusSlider ||
     !mountainRadiusValueNode ||
     !mountainHeightSlider ||
     !mountainHeightValueNode ||
-    !terrainRoughnessSlider ||
-    !terrainRoughnessValueNode ||
-    !terrainFrequencySlider ||
-    !terrainFrequencyValueNode ||
     !fossilScaleSlider ||
     !fossilScaleValueNode ||
     !sunAngleSlider ||
@@ -706,31 +676,32 @@ async function runPipeline() {
 
   const renderWithControls = async (
     threshold,
-    falloffStrength,
-    noiseAmplitude,
     edgeWarp,
     seed,
     plateCount,
-    plateWarpAmplitude,
     plateWarpRoughness,
     mountainRadius,
     mountainHeight,
     renderMode,
-    terrainRoughness,
-    terrainFrequency,
     sunAngle,
     elevationScale,
     verticalExaggeration,
     fossilScale
   ) => {
+    const FALLOFF_STRENGTH = 2.0
+    const NOISE_AMPLITUDE = 0.6
+    const PLATE_WARP_AMPLITUDE = 1.1
+    const TERRAIN_ROUGHNESS = 0.7
+    const TERRAIN_FREQUENCY = 18.0
+
     writeGenerateParams(
       generateParamsBytes,
       width,
       height,
       fbmBaseFrequency,
       threshold,
-      falloffStrength,
-      noiseAmplitude,
+      FALLOFF_STRENGTH,
+      NOISE_AMPLITUDE,
       edgeWarp,
       seed
     )
@@ -739,7 +710,7 @@ async function runPipeline() {
       width,
       height,
       plateCount,
-      plateWarpAmplitude,
+      PLATE_WARP_AMPLITUDE,
       plateWarpRoughness,
       plateWarpFrequency,
       seed
@@ -752,8 +723,8 @@ async function runPipeline() {
       seed,
       mountainRadius,
       mountainHeight,
-      terrainRoughness,
-      terrainFrequency,
+      TERRAIN_ROUGHNESS,
+      TERRAIN_FREQUENCY,
       fossilScale
     )
     writeRenderParams(
@@ -921,7 +892,7 @@ async function runPipeline() {
     )
 
     statusNode.textContent =
-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / falloff ${falloffStrength.toFixed(2)} / noise ${noiseAmplitude.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_warp ${plateWarpAmplitude.toFixed(2)} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / terrain_roughness ${terrainRoughness.toFixed(2)} / terrain_frequency ${terrainFrequency.toFixed(1)} / fossil_scale ${fossilScale.toFixed(2)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
+      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / fossil_scale ${fossilScale.toFixed(2)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
     landFractionNode.textContent =
       `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
 
@@ -929,31 +900,24 @@ async function runPipeline() {
   }
 
   let queuedThreshold = normalized_land_threshold_from_slider(normalized_land_threshold())
-  let queuedFalloff = normalized_falloff_strength_from_slider(normalized_falloff_strength())
-  let queuedNoise = normalized_noise_amplitude_from_slider(normalized_noise_amplitude())
   let queuedEdgeWarp = normalized_edge_warp_from_input(normalized_edge_warp())
   let queuedSeed = deterministic_seed_from_input(deterministic_seed())
   let queuedPlateCount = normalized_plate_count_from_slider(normalized_plate_count())
-  let queuedPlateWarpAmplitude = normalized_plate_warp_amplitude_from_slider(
-    normalized_plate_warp_amplitude()
-  )
   let queuedPlateWarpRoughness = normalized_plate_warp_roughness_from_slider(
     normalized_plate_warp_roughness()
   )
   let queuedMountainRadius = normalized_mountain_radius_from_slider(normalized_mountain_radius())
   let queuedMountainHeight = normalized_mountain_height_from_slider(normalized_mountain_height())
-  let queuedTerrainRoughness = normalized_terrain_roughness_from_slider(normalized_terrain_roughness())
-  let queuedTerrainFrequency = normalized_terrain_frequency_from_slider(normalized_terrain_frequency())
   let queuedFossilScale = Number.parseFloat(fossilScaleSlider.value)
   if (!Number.isFinite(queuedFossilScale)) {
-    queuedFossilScale = 1.0
+    queuedFossilScale = 0.15
   }
   let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
   let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
   let queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
     normalized_vertical_exaggeration()
   )
-  let queuedRenderMode = 'land_mask'
+  let queuedRenderMode = 'shaded_relief'
   let renderQueued = false
   let renderInFlight = false
 
@@ -967,18 +931,13 @@ async function runPipeline() {
         renderQueued = false
         await renderWithControls(
           queuedThreshold,
-          queuedFalloff,
-          queuedNoise,
           queuedEdgeWarp,
           queuedSeed,
           queuedPlateCount,
-          queuedPlateWarpAmplitude,
           queuedPlateWarpRoughness,
           queuedMountainRadius,
           queuedMountainHeight,
           queuedRenderMode,
-          queuedTerrainRoughness,
-          queuedTerrainFrequency,
           queuedSunAngle,
           queuedElevationScale,
           queuedVerticalExaggeration,
@@ -992,32 +951,22 @@ async function runPipeline() {
 
   const queueRender = (
     rawThreshold,
-    rawFalloff,
-    rawNoise,
     rawEdgeWarp,
     rawSeed,
     rawPlateCount,
-    rawPlateWarpAmplitude,
     rawPlateWarpRoughness,
     rawMountainRadius,
     rawMountainHeight,
     rawRenderMode,
-    rawTerrainRoughness,
-    rawTerrainFrequency,
     rawSunAngle,
     rawElevationScale,
     rawVerticalExaggeration,
     rawFossilScale
   ) => {
     const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
-    const parsedFalloff = Number.isFinite(rawFalloff) ? rawFalloff : queuedFalloff
-    const parsedNoise = Number.isFinite(rawNoise) ? rawNoise : queuedNoise
     const parsedEdgeWarp = Number.isFinite(rawEdgeWarp) ? rawEdgeWarp : queuedEdgeWarp
     const parsedSeed = Number.isFinite(rawSeed) ? rawSeed : queuedSeed
     const parsedPlateCount = Number.isFinite(rawPlateCount) ? rawPlateCount : queuedPlateCount
-    const parsedPlateWarpAmplitude = Number.isFinite(rawPlateWarpAmplitude)
-      ? rawPlateWarpAmplitude
-      : queuedPlateWarpAmplitude
     const parsedPlateWarpRoughness = Number.isFinite(rawPlateWarpRoughness)
       ? rawPlateWarpRoughness
       : queuedPlateWarpRoughness
@@ -1027,12 +976,6 @@ async function runPipeline() {
     const parsedMountainHeight = Number.isFinite(rawMountainHeight)
       ? rawMountainHeight
       : queuedMountainHeight
-    const parsedTerrainRoughness = Number.isFinite(rawTerrainRoughness)
-      ? rawTerrainRoughness
-      : queuedTerrainRoughness
-    const parsedTerrainFrequency = Number.isFinite(rawTerrainFrequency)
-      ? rawTerrainFrequency
-      : queuedTerrainFrequency
     const parsedFossilScale = Number.isFinite(rawFossilScale) ? rawFossilScale : queuedFossilScale
     const parsedSunAngle = Number.isFinite(rawSunAngle) ? rawSunAngle : queuedSunAngle
     const parsedElevationScale = Number.isFinite(rawElevationScale)
@@ -1049,20 +992,15 @@ async function runPipeline() {
       rawRenderMode === 'shaded_relief' ||
       rawRenderMode === 'elevation'
         ? rawRenderMode
-        : 'land_mask'
+        : 'shaded_relief'
 
     queuedThreshold = normalized_land_threshold_from_slider(parsedThreshold)
-    queuedFalloff = normalized_falloff_strength_from_slider(parsedFalloff)
-    queuedNoise = normalized_noise_amplitude_from_slider(parsedNoise)
     queuedEdgeWarp = normalized_edge_warp_from_input(parsedEdgeWarp)
     queuedSeed = deterministic_seed_from_input(parsedSeed)
     queuedPlateCount = normalized_plate_count_from_slider(parsedPlateCount)
-    queuedPlateWarpAmplitude = normalized_plate_warp_amplitude_from_slider(parsedPlateWarpAmplitude)
     queuedPlateWarpRoughness = normalized_plate_warp_roughness_from_slider(parsedPlateWarpRoughness)
     queuedMountainRadius = normalized_mountain_radius_from_slider(parsedMountainRadius)
     queuedMountainHeight = normalized_mountain_height_from_slider(parsedMountainHeight)
-    queuedTerrainRoughness = normalized_terrain_roughness_from_slider(parsedTerrainRoughness)
-    queuedTerrainFrequency = normalized_terrain_frequency_from_slider(parsedTerrainFrequency)
     queuedFossilScale = Math.min(Math.max(parsedFossilScale, 0), 3)
     queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
     queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
@@ -1073,25 +1011,15 @@ async function runPipeline() {
 
     thresholdSlider.value = queuedThreshold.toFixed(2)
     thresholdValueNode.textContent = queuedThreshold.toFixed(2)
-    falloffSlider.value = queuedFalloff.toFixed(2)
-    falloffValueNode.textContent = queuedFalloff.toFixed(2)
-    noiseSlider.value = queuedNoise.toFixed(2)
-    noiseValueNode.textContent = queuedNoise.toFixed(2)
     edgeWarpInput.value = String(queuedEdgeWarp)
     plateCountSlider.value = String(queuedPlateCount)
     plateCountValueNode.textContent = String(queuedPlateCount)
-    plateWarpSlider.value = queuedPlateWarpAmplitude.toFixed(2)
-    plateWarpValueNode.textContent = queuedPlateWarpAmplitude.toFixed(2)
     plateRoughnessSlider.value = queuedPlateWarpRoughness.toFixed(2)
     plateRoughnessValueNode.textContent = queuedPlateWarpRoughness.toFixed(2)
     mountainRadiusSlider.value = queuedMountainRadius.toFixed(1)
     mountainRadiusValueNode.textContent = queuedMountainRadius.toFixed(1)
     mountainHeightSlider.value = queuedMountainHeight.toFixed(2)
     mountainHeightValueNode.textContent = queuedMountainHeight.toFixed(2)
-    terrainRoughnessSlider.value = queuedTerrainRoughness.toFixed(2)
-    terrainRoughnessValueNode.textContent = queuedTerrainRoughness.toFixed(2)
-    terrainFrequencySlider.value = queuedTerrainFrequency.toFixed(1)
-    terrainFrequencyValueNode.textContent = queuedTerrainFrequency.toFixed(1)
     fossilScaleSlider.value = queuedFossilScale.toFixed(2)
     fossilScaleValueNode.textContent = queuedFossilScale.toFixed(2)
     sunAngleSlider.value = queuedSunAngle.toFixed(0)
@@ -1113,44 +1041,9 @@ async function runPipeline() {
   thresholdSlider.addEventListener('input', (event) => {
     queueRender(
       Number.parseFloat(event.target.value),
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
-
-  falloffSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      Number.parseFloat(event.target.value),
-      queuedNoise,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpAmplitude,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
-
-  noiseSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedFalloff,
-      Number.parseFloat(event.target.value),
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1161,12 +1054,9 @@ async function runPipeline() {
   edgeWarpInput.addEventListener('change', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       Number.parseFloat(event.target.value),
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1177,27 +1067,8 @@ async function runPipeline() {
   plateCountSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
-      Number.parseFloat(event.target.value),
-      queuedPlateWarpAmplitude,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
-
-  plateWarpSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
       Number.parseFloat(event.target.value),
       queuedPlateWarpRoughness,
       queuedMountainRadius,
@@ -1209,12 +1080,9 @@ async function runPipeline() {
   plateRoughnessSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       Number.parseFloat(event.target.value),
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1225,12 +1093,9 @@ async function runPipeline() {
   mountainRadiusSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       Number.parseFloat(event.target.value),
       queuedMountainHeight,
@@ -1241,12 +1106,9 @@ async function runPipeline() {
   mountainHeightSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       Number.parseFloat(event.target.value),
@@ -1254,57 +1116,16 @@ async function runPipeline() {
     )
   })
 
-  terrainRoughnessSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpAmplitude,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      Number.parseFloat(event.target.value),
-      queuedTerrainFrequency
-    )
-  })
-
-  terrainFrequencySlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpAmplitude,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      queuedTerrainRoughness,
-      Number.parseFloat(event.target.value)
-    )
-  })
-
   fossilScaleSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
       queuedRenderMode,
-      queuedTerrainRoughness,
-      queuedTerrainFrequency,
       queuedSunAngle,
       queuedElevationScale,
       queuedVerticalExaggeration,
@@ -1315,18 +1136,13 @@ async function runPipeline() {
   sunAngleSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
       queuedRenderMode,
-      queuedTerrainRoughness,
-      queuedTerrainFrequency,
       Number.parseFloat(event.target.value),
       queuedElevationScale
     )
@@ -1335,18 +1151,13 @@ async function runPipeline() {
   elevationScaleSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
       queuedRenderMode,
-      queuedTerrainRoughness,
-      queuedTerrainFrequency,
       queuedSunAngle,
       Number.parseFloat(event.target.value),
       queuedVerticalExaggeration
@@ -1356,18 +1167,13 @@ async function runPipeline() {
   verticalExaggerationSlider.addEventListener('input', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
       queuedRenderMode,
-      queuedTerrainRoughness,
-      queuedTerrainFrequency,
       queuedSunAngle,
       queuedElevationScale,
       Number.parseFloat(event.target.value)
@@ -1377,12 +1183,9 @@ async function runPipeline() {
   renderModeSelect.addEventListener('change', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       queuedSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1393,12 +1196,9 @@ async function runPipeline() {
   seedInput.addEventListener('change', (event) => {
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       Number.parseFloat(event.target.value),
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1410,12 +1210,9 @@ async function runPipeline() {
     const randomSeed = crypto.getRandomValues(new Uint32Array(1))[0]
     queueRender(
       queuedThreshold,
-      queuedFalloff,
-      queuedNoise,
       queuedEdgeWarp,
       randomSeed,
       queuedPlateCount,
-      queuedPlateWarpAmplitude,
       queuedPlateWarpRoughness,
       queuedMountainRadius,
       queuedMountainHeight,
@@ -1425,18 +1222,13 @@ async function runPipeline() {
 
   queueRender(
     queuedThreshold,
-    queuedFalloff,
-    queuedNoise,
     queuedEdgeWarp,
     queuedSeed,
     queuedPlateCount,
-    queuedPlateWarpAmplitude,
     queuedPlateWarpRoughness,
     queuedMountainRadius,
     queuedMountainHeight,
     queuedRenderMode,
-    queuedTerrainRoughness,
-    queuedTerrainFrequency,
     queuedSunAngle,
     queuedElevationScale,
     queuedVerticalExaggeration,

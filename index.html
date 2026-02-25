@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Continent Generator Tweak 5.34</title>
+    <title>Continent Generator Tweak 5.35</title>
   </head>
   <body>
     <main class="layout">
-      <h1>Continent Generator: Tweak 5.34</h1>
+      <h1>Continent Generator: Tweak 5.35</h1>
       <p id="status">Booting WebGPU compute pipeline...</p>
       <section class="controls" aria-label="Continent Controls">
         <label for="seed-input">Seed</label>
@@ -27,36 +27,12 @@
           <input
             id="land-threshold"
             type="range"
-            min="-1"
-            max="2"
+            min="0.2"
+            max="1.0"
             step="0.01"
             value="0.54"
           />
           <output id="land-threshold-value" for="land-threshold">0.54</output>
-        </div>
-        <label for="falloff-strength">Falloff Strength</label>
-        <div class="control-row">
-          <input
-            id="falloff-strength"
-            type="range"
-            min="0"
-            max="4"
-            step="0.01"
-            value="2.20"
-          />
-          <output id="falloff-strength-value" for="falloff-strength">2.20</output>
-        </div>
-        <label for="noise-amplitude">Noise Amplitude</label>
-        <div class="control-row">
-          <input
-            id="noise-amplitude"
-            type="range"
-            min="0"
-            max="2"
-            step="0.01"
-            value="0.60"
-          />
-          <output id="noise-amplitude-value" for="noise-amplitude">0.60</output>
         </div>
         <label for="edge-warp">Edge Warp</label>
         <div class="control-row">
@@ -74,25 +50,13 @@
           />
           <output id="plate-count-value" for="plate-count">15</output>
         </div>
-        <label for="plate-warp-amplitude">Plate Warp Amplitude</label>
-        <div class="control-row">
-          <input
-            id="plate-warp-amplitude"
-            type="range"
-            min="0"
-            max="2"
-            step="0.01"
-            value="0.50"
-          />
-          <output id="plate-warp-amplitude-value" for="plate-warp-amplitude">0.50</output>
-        </div>
         <label for="plate-warp-roughness">Plate Warp Roughness</label>
         <div class="control-row">
           <input
             id="plate-warp-roughness"
             type="range"
             min="0.3"
-            max="0.8"
+            max="0.7"
             step="0.05"
             value="0.60"
           />
@@ -103,12 +67,12 @@
           <input
             id="mountain-radius"
             type="range"
-            min="5"
+            min="20"
             max="50"
             step="1"
-            value="20"
+            value="35"
           />
-          <output id="mountain-radius-value" for="mountain-radius">20.0</output>
+          <output id="mountain-radius-value" for="mountain-radius">35.0</output>
         </div>
         <label for="mountain-height">Mountain Height</label>
         <div class="control-row">
@@ -116,35 +80,11 @@
             id="mountain-height"
             type="range"
             min="0.1"
-            max="2.0"
+            max="1.0"
             step="0.01"
-            value="0.80"
+            value="0.60"
           />
-          <output id="mountain-height-value" for="mountain-height">0.80</output>
-        </div>
-        <label for="terrain-roughness">Terrain Roughness</label>
-        <div class="control-row">
-          <input
-            id="terrain-roughness"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value="0.50"
-          />
-          <output id="terrain-roughness-value" for="terrain-roughness">0.50</output>
-        </div>
-        <label for="terrain-frequency">Terrain Frequency</label>
-        <div class="control-row">
-          <input
-            id="terrain-frequency"
-            type="range"
-            min="1"
-            max="20"
-            step="0.1"
-            value="8.0"
-          />
-          <output id="terrain-frequency-value" for="terrain-frequency">8.0</output>
+          <output id="mountain-height-value" for="mountain-height">0.60</output>
         </div>
         <label for="fossil-scale">Fossil Scale</label>
         <div class="control-row">
@@ -154,9 +94,9 @@
             min="0"
             max="3"
             step="0.01"
-            value="1.00"
+            value="0.15"
           />
-          <output id="fossil-scale-value" for="fossil-scale">1.00</output>
+          <output id="fossil-scale-value" for="fossil-scale">0.15</output>
         </div>
         <label for="sun-angle">Sun Angle</label>
         <div class="control-row">
@@ -190,9 +130,9 @@
             min="1"
             max="20"
             step="0.1"
-            value="5.0"
+            value="7.5"
           />
-          <output id="vertical-exaggeration-value" for="vertical-exaggeration">5.0</output>
+          <output id="vertical-exaggeration-value" for="vertical-exaggeration">7.5</output>
         </div>
         <label for="render-mode">Render Mode</label>
         <div class="control-row">
@@ -202,7 +142,7 @@
             <option value="kinematics">Kinematics</option>
             <option value="sdf_distance">SDF Distance</option>
             <option value="elevation">Elevation</option>
-            <option value="shaded_relief">Shaded Relief</option>
+            <option value="shaded_relief" selected>Shaded Relief</option>
           </select>
         </div>
         <p id="land-fraction">Land fraction: --%</p>

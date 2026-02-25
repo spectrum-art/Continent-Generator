@@ -183,9 +183,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let base_noise_uv = sample_uv * params.terrain_frequency * 50.0;
   let uv_warp = vec2<f32>(
-    fbm(base_noise_uv * 0.4, 1.0, 0.5, 2u, params.seed ^ 0xd2511f53u),
-    fbm(base_noise_uv * 0.4 + vec2<f32>(7.4, 2.9), 1.0, 0.5, 2u, params.seed ^ 0xcd9e8d57u)
-  ) * 0.3;
+    fbm(base_noise_uv * 0.03, 1.0, 0.55, 3u, params.seed ^ 0xd2511f53u),
+    fbm(base_noise_uv * 0.03 + vec2<f32>(7.4, 2.9), 1.0, 0.55, 3u, params.seed ^ 0xcd9e8d57u)
+  ) * 6.0 - 3.0;
   let warped_base_uv = base_noise_uv + uv_warp;
   let ridge_noise = ridge_multifractal(
     warped_base_uv,
@@ -234,37 +234,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let final_kin_x = smoothed_kin_x / max(valid_samples, 1.0);
 
     let dist_warp = vec2<f32>(
-      snoise(sample_uv * 5.0, params.seed ^ 0xa4093822u),
-      snoise(sample_uv * 5.0 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
-    ) * (params.mountain_radius * 0.5);
+      snoise(sample_uv * 3.5, params.seed ^ 0xa4093822u)
+        + snoise(sample_uv * 9.0, params.seed ^ 0x5f3759dfu) * 0.4,
+      snoise(sample_uv * 3.5 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
+        + snoise(sample_uv * 9.0 + vec2<f32>(1.7, -2.3), params.seed ^ 0xc0b18458u) * 0.4
+    ) * (params.mountain_radius * 1.4);
     let active_distance = length((p + dist_warp) - final_nearest);
-    let long_mod = snoise(final_nearest * params.inv_width * 5.0, params.seed ^ 0x13198a2eu) * 0.5 + 0.8;
+    let width_low  = snoise(final_nearest * params.inv_width * 2.5, params.seed ^ 0x13198a2eu);
+    let width_high = snoise(final_nearest * params.inv_width * 8.0, params.seed ^ 0x27c0da8bu);
+    let long_mod = clamp(width_low * 0.65 + width_high * 0.40 + 0.80, 0.15, 1.65);
     let modulated_radius = max(params.mountain_radius * long_mod, 1.0);
+    let gap_a = snoise(final_nearest * params.inv_width * 1.8, params.seed ^ 0x3c6ef372u);
+    let gap_b = snoise(final_nearest * params.inv_width * 0.6, params.seed ^ 0x9e3779b9u);
+    let mountain_gate = smoothstep(-0.05, 0.40, gap_a * 0.55 + gap_b * 0.45);
     let active_dist_normalized = clamp(active_distance / modulated_radius, 0.0, 1.0);
     let linear_falloff = smoothstep(1.0, 0.0, active_dist_normalized);
     let falloff = pow(linear_falloff, 1.5);
     craton_feather = mix(0.65, 1.0, falloff);
 
     if (final_kin_x > 0.0) {
-      active_elev = final_kin_x * falloff * mix(0.4, 1.0, ridge_noise) * params.mountain_height;
+      active_elev = final_kin_x * falloff * mix(0.4, 1.0, ridge_noise) * params.mountain_height * mountain_gate;
     } else if (final_kin_x < 0.0) {
-      let rift_fbm = fbm(warped_base_uv, 1.0, 0.5, 5u, params.seed ^ 0x082efa98u);
-      let terraces = rift_fbm - smoothstep(0.0, 0.3, fract(rift_fbm * 6.0)) * 0.15;
-      active_elev = final_kin_x * falloff * 0.35 * terraces * params.mountain_height;
+      let rift_uv = sample_uv * (params.terrain_frequency * 7.0);
+      let rift_fbm = fbm(rift_uv, 1.0, 0.60, 4u, params.seed ^ 0x082efa98u);
+      active_elev = final_kin_x * falloff * 0.35 * rift_fbm * params.mountain_height;
     }
 
     let macro_dist = clamp(active_distance / (f32(params.width) * 0.5), 0.0, 1.0);
     let react_mult = mix(1.0, 0.3, macro_dist);
-    let ancient_uv = sample_uv * (params.terrain_frequency * 1.5) + vec2<f32>(14.2, -5.8);
-    let raw_ancient = fbm(
-      ancient_uv,
-      1.0,
-      0.55,
-      5u,
-      params.seed ^ 0x8aed2a6bu
-    );
-    let ancient_noise = smoothstep(0.35, 0.85, raw_ancient);
-    fossil_elev = ancient_noise * react_mult * params.fossil_scale * params.mountain_height;
+    let ancient_uv = sample_uv * (params.terrain_frequency * 0.55) + vec2<f32>(14.2, -5.8);
+    let raw_ancient = ridge_multifractal(ancient_uv, 1.0, 0.68, 5u, params.seed ^ 0x8aed2a6bu);
+    let ancient_zone = snoise(
+      sample_uv * (params.terrain_frequency * 0.10) + vec2<f32>(3.7, -1.4),
+      params.seed ^ 0x4b7e1f3au
+    ) * 0.5 + 0.5;
+    let zone_gate   = smoothstep(0.45, 0.72, ancient_zone);
+    let ancient_crest = smoothstep(0.70, 0.92, raw_ancient);
+    fossil_elev = ancient_crest * zone_gate * react_mult * params.fossil_scale * params.mountain_height;
   }
 
   let base_continent_height = mix(0.08, 0.22, mask) + base_noise_component * craton_feather;
