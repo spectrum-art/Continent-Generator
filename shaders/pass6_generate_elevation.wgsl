@@ -199,6 +199,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   ) * 0.14 - 0.05;
   let base_noise_component = (lowland_noise - 0.5) * 0.10 + interior_swell;
 
+  // Continental-scale tilt and basin/arch structure (issue 4: interior flatness)
+  let tilt_uv = sample_uv * (params.terrain_frequency * 0.03);
+  let regional_tilt = perlin_noise_2d(tilt_uv, params.seed ^ 0x4d2a7f3eu) * 0.07;
+  let basin_uv = sample_uv * (params.terrain_frequency * 0.07);
+  let basin_arch = (fbm(basin_uv, 1.0, 0.50, 2u, params.seed ^ 0x6c3e9b1fu) * 2.0 - 1.0) * 0.05;
+
   var active_elev = 0.0;
   var fossil_elev = 0.0;
   var craton_feather = 1.0;
@@ -240,18 +246,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                                         across_px.y * inv_h));
     let along_uv = vec2<f32>(-across_uv.y, across_uv.x);
 
-    // --- Anisotropic ridge noise: 4× stretch along boundary ---
+    // --- Anisotropic ridge noise: ~14× stretch along boundary (issue 2: directionality) ---
     let bn_along = dot(base_noise_uv, along_uv);
     let bn_across = dot(base_noise_uv, across_uv);
     let warp_along  = dot(uv_warp, along_uv);
     let warp_across = dot(uv_warp, across_uv);
-    let aniso_warp  = along_uv * warp_along * 0.25 + across_uv * warp_across;
-    let aniso_noise_uv = along_uv * bn_along * 0.25 + across_uv * bn_across + aniso_warp;
+    let aniso_warp  = along_uv * warp_along * 0.07 + across_uv * warp_across;
+    let aniso_noise_uv = along_uv * bn_along * 0.07 + across_uv * bn_across + aniso_warp;
+    // Fine peak detail (highest frequency, strongly aligned)
     let ridge_noise = ridge_multifractal(
       aniso_noise_uv, 1.0,
       0.55 + params.terrain_roughness * 0.35,
       4u, params.seed ^ 0x243f6a88u
     );
+    // Range-scale ridges (~30–80 cycles): sub-ranges within the orogen (issue 1: hierarchy)
+    let range_uv = along_uv * bn_along * 0.06 + across_uv * bn_across * 0.7 + aniso_warp * 0.3;
+    let range_ridge = ridge_multifractal(range_uv, 1.0, 0.58, 3u, params.seed ^ 0xf53a7c1eu);
+    // Ridgeline-scale (~100–250 cycles): individual crests within each arm
+    let crest_uv = along_uv * bn_along * 0.18 + across_uv * bn_across * 0.5 + aniso_warp * 0.5;
+    let crest_ridge = ridge_multifractal(crest_uv, 1.0, 0.55, 3u, params.seed ^ 0x7c3b9a4fu);
 
     // --- dist_warp: full along-boundary snaking, 25% across ---
     let dist_warp_raw = vec2<f32>(
@@ -284,20 +297,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     craton_feather = mix(0.65, 1.0, falloff);
 
     if (final_kin_x > 0.0) {
-      // Wide smooth base (foothills) + sharp ridges concentrated at crest
+      // Hierarchical composition: massif → sub-ranges → ridgelines → fine peak detail
+      // (issues 1+2: elevation hierarchy and directionality)
       let base_shape = pow(falloff, 0.7);
-      let peak_detail = ridge_noise * pow(falloff, 1.8);
-      active_elev = final_kin_x * (base_shape * 0.55 + peak_detail * 0.45)
-                    * params.mountain_height * mountain_gate;
-      // Slope-masked erosion incisions (valleys on mid-slope)
-      let erosion_uv  = aniso_noise_uv * 2.5 + vec2<f32>(7.3, -2.1);
-      let erosion_fbm = fbm(erosion_uv, 1.0, 0.75, 4u, params.seed ^ 0x2b4d6e8fu);
-      let slope_mask  = falloff * (1.0 - falloff) * 4.0;  // peaks at falloff≈0.5 (mid-slope)
-      active_elev -= slope_mask * erosion_fbm * 0.04 * final_kin_x;
+      active_elev = final_kin_x * mountain_gate * params.mountain_height * (
+        base_shape                                        * 0.30   // massif envelope
+        + range_ridge  * pow(falloff, 0.85)               * 0.30   // sub-range arms
+        + crest_ridge  * range_ridge * pow(falloff, 1.8)  * 0.25   // ridgelines gated by arms
+        + ridge_noise  * pow(falloff, 2.5)                * 0.15   // fine peak detail
+      );
     } else if (final_kin_x < 0.0) {
-      let rift_uv = sample_uv * (params.terrain_frequency * 7.0);
-      let rift_fbm = fbm(rift_uv, 1.0, 0.60, 4u, params.seed ^ 0x082efa98u);
-      active_elev = final_kin_x * falloff * 0.18 * rift_fbm * params.mountain_height;
+      // Smooth rift valley — low frequency, wide gentle depression (issue 3: fault artifacts)
+      let rift_uv = sample_uv * (params.terrain_frequency * 0.8);
+      let rift_fbm = fbm(rift_uv, 1.0, 0.50, 2u, params.seed ^ 0x082efa98u);
+      active_elev = final_kin_x * pow(falloff, 0.6) * 0.14
+                    * (0.7 + rift_fbm * 0.3) * params.mountain_height;
     }
 
     let macro_dist = clamp(active_distance / (f32(params.width) * 0.5), 0.0, 1.0);
@@ -313,7 +327,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     fossil_elev = ancient_crest * zone_gate * react_mult * params.fossil_scale * params.mountain_height;
   }
 
-  let base_continent_height = mix(0.08, 0.22, mask) + base_noise_component * craton_feather;
+  let base_continent_height = mix(0.08, 0.22, mask) + base_noise_component * craton_feather
+                              + regional_tilt + basin_arch;
   let plume = plume_mask[flat_index];
   let plume_perturb = snoise(
     sample_uv * (params.terrain_frequency * 3.0), params.seed ^ 0x14c93a7eu

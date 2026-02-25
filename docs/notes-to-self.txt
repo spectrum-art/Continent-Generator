@@ -1,6 +1,4 @@
 1. Thusfar, our aspect ratio has been 2:1. We're multiplying the horizontal normalized coordinate (u_norm) by 2.0 and tuning the math of the Box SDF Falloff to account for this. If we add user options of different resolutions or aspect ratios in the future, these and other parameters will need to be adjusted accordingly.
 
-2. Land Threshold should be clamped between 0.2 and 1.0; Falloff Strength should be constant at 2.00; Noise Amplitude should be constant at 0.6; Edge Warp should be clamped between 0 and 5; Plate Warp Amplitude should be fixed at 1.10; Plate Warp Roughness should be clamped at 0.70;
-
-Double-Check: Mountain Radius should be clamped between 20 and 50, with a default of 35; Mountain Height should be clamped between 0.1 and 1.0, default 0.6; Terrain Roughness should be constant at 0.7; Terrain Frequency should be constant at 18.0.
+2. Land Threshold should be clamped between 0.2 and 1.0; Falloff Strength should be constant at 2.00; Noise Amplitude should be constant at 0.6; Edge Warp should be clamped between 0 and 5; Plate Warp Amplitude should be fixed at 1.10; Plate Warp Roughness should be clamped at 0.70; Terrain Frequency should default to 20.0; Fossil Scale should default to 0.15; Vertical Exaggeration should default to 7.5; Render mode should default to Shaded Relief; Mountain Radius should be clamped between 20 and 50, with a default of 35; Mountain Height should be clamped between 0.1 and 1.0, default 0.6; Terrain Roughness should be constant at 0.7; Terrain Frequency should be constant at 18.0.
 
