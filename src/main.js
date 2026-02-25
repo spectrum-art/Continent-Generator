@@ -1,83 +1,29 @@
 import './style.css'
-import pass1Source from '../shaders/pass1_generate_land_mask.wgsl?raw'
-import pass2Source from '../shaders/pass2_reduce_bbox.wgsl?raw'
-import pass3Source from '../shaders/pass3_shift_land_mask.wgsl?raw'
-import pass4Source from '../shaders/pass4_generate_plate_ids.wgsl?raw'
-import pass5Source from '../shaders/pass5_compute_fault_stress.wgsl?raw'
-import pass6Source from '../shaders/pass6_generate_elevation.wgsl?raw'
-import pass7Source from '../shaders/pass7_shaded_relief.wgsl?raw'
-import pass8Source from '../shaders/pass8_jfa_step.wgsl?raw'
-import pass9Source from '../shaders/pass9_jfa_init.wgsl?raw'
+import pass1Src from '../shaders/pass1_generate_plates.wgsl?raw'
+import pass2Src from '../shaders/pass2_derive_land_mask.wgsl?raw'
+import pass3Src from '../shaders/pass3_boundary_stress.wgsl?raw'
+import pass6Src from '../shaders/pass6_elevation.wgsl?raw'
+import pass7Src from '../shaders/pass7_shaded_relief.wgsl?raw'
+import pass8Src from '../shaders/pass8_jfa_step.wgsl?raw'
+import pass9Src from '../shaders/pass9_jfa_init.wgsl?raw'
 import initWasm, {
   deterministic_seed,
   deterministic_seed_from_input,
-  six_pass_dispatch_sequence,
   grid_cell_count,
   grid_height,
   grid_width,
-  map_flat_1d_to_gpu,
-  normalized_edge_warp,
-  normalized_edge_warp_from_input,
-  normalized_elevation_scale,
-  normalized_elevation_scale_from_slider,
-  normalized_fbm_base_frequency,
-  normalized_land_threshold,
-  normalized_land_threshold_from_slider,
-  normalized_mountain_height,
-  normalized_mountain_height_from_slider,
-  normalized_mountain_radius,
-  normalized_mountain_radius_from_slider,
-  normalized_plate_count,
-  normalized_plate_count_from_slider,
-  normalized_plate_warp_roughness,
-  normalized_plate_warp_roughness_from_slider,
-  normalized_sun_angle,
-  normalized_sun_angle_from_slider,
-  normalized_vertical_exaggeration,
-  normalized_vertical_exaggeration_from_slider,
+  n_pass_dispatch,
 } from './wasm/wasm_core.js'
 
+// ── DOM refs ──────────────────────────────────────────────────────────────────
 const statusNode = document.querySelector('#status')
 const canvas = document.querySelector('#heightmap')
 const seedInput = document.querySelector('#seed-input')
-const randomizeSeedButton = document.querySelector('#randomize-seed')
-const thresholdSlider = document.querySelector('#land-threshold')
-const thresholdValueNode = document.querySelector('#land-threshold-value')
-const edgeWarpInput = document.querySelector('#edge-warp')
-const plateCountSlider = document.querySelector('#plate-count')
-const plateCountValueNode = document.querySelector('#plate-count-value')
-const plateRoughnessSlider = document.querySelector('#plate-warp-roughness')
-const plateRoughnessValueNode = document.querySelector('#plate-warp-roughness-value')
-const mountainRadiusSlider = document.querySelector('#mountain-radius')
-const mountainRadiusValueNode = document.querySelector('#mountain-radius-value')
-const mountainHeightSlider = document.querySelector('#mountain-height')
-const mountainHeightValueNode = document.querySelector('#mountain-height-value')
-const fossilScaleSlider = document.querySelector('#fossil-scale')
-const fossilScaleValueNode = document.querySelector('#fossil-scale-value')
-const sunAngleSlider = document.querySelector('#sun-angle')
-const sunAngleValueNode = document.querySelector('#sun-angle-value')
-const elevationScaleSlider = document.querySelector('#elevation-scale')
-const elevationScaleValueNode = document.querySelector('#elevation-scale-value')
-const verticalExaggerationSlider = document.querySelector('#vertical-exaggeration')
-const verticalExaggerationValueNode = document.querySelector('#vertical-exaggeration-value')
-const renderModeSelect = document.querySelector('#render-mode')
+const randomizeSeedBtn = document.querySelector('#randomize-seed')
+const generateBtn = document.querySelector('#generate-btn')
 const landFractionNode = document.querySelector('#land-fraction')
 
-function renderLandMask(ctx, flatData, width, height) {
-  const image = ctx.createImageData(width, height)
-  const pixels = image.data
-  for (let i = 0; i < flatData.length; i += 1) {
-    const isLand = flatData[i] >= 0.5
-    const intensity = isLand ? 255 : 0
-    const offset = i * 4
-    pixels[offset] = intensity
-    pixels[offset + 1] = intensity
-    pixels[offset + 2] = intensity
-    pixels[offset + 3] = 255
-  }
-  ctx.putImageData(image, 0, 0)
-}
-
+// ── Seed helpers ──────────────────────────────────────────────────────────────
 function hash32(x) {
   let h = x >>> 0
   h ^= h >>> 16
@@ -88,1157 +34,452 @@ function hash32(x) {
   return h >>> 0
 }
 
-const ACTIVE_MAX_PLATES = 100
-const ACTIVE_PLATE_FLOATS = 8
-const ACTIVE_PLATE_STRIDE_BYTES = ACTIVE_PLATE_FLOATS * Float32Array.BYTES_PER_ELEMENT
-const ACTIVE_MAX_SPEED = 22.0
-
 function hashToUnit(v) {
   return (hash32(v >>> 0) >>> 0) / 4294967295
 }
 
-function buildActivePlateSeedData(plateCount, seed) {
-  const activeCount = Math.min(Math.max(Math.floor(plateCount), 1), ACTIVE_MAX_PLATES)
-  const plateFloats = new Float32Array(ACTIVE_MAX_PLATES * ACTIVE_PLATE_FLOATS)
-
-  for (let i = 0; i < activeCount; i += 1) {
-    const mix = (Math.imul((i + 1) >>> 0, 747796405) + 2891336453) >>> 0
-    const base = hash32((seed ^ mix) >>> 0)
-    const hx = hashToUnit(base ^ 0x9e3779b9)
-    const hy = hashToUnit(base ^ 0x85ebca6b)
-    const hw = hashToUnit(base ^ 0xc2b2ae35)
-    const hs = hashToUnit(base ^ 0x27d4eb2f)
-    const ha = hashToUnit(base ^ 0x165667b1)
-    const speed = Math.pow(hs, 2.0) * ACTIVE_MAX_SPEED
-    const angle = ha * Math.PI * 2.0
-
-    const offset = i * ACTIVE_PLATE_FLOATS
-    plateFloats[offset] = hx * 2.0
-    plateFloats[offset + 1] = hy
-    plateFloats[offset + 2] = Math.pow(hw, 4.0) * 0.65
-    plateFloats[offset + 3] = 0.0
-    plateFloats[offset + 4] = Math.cos(angle) * speed
-    plateFloats[offset + 5] = Math.sin(angle) * speed
-    plateFloats[offset + 6] = 0.0
-    plateFloats[offset + 7] = 0.0
-  }
-
-  return plateFloats
+function randomSeed() {
+  return (Math.random() * 0xffffffff) >>> 0
 }
 
-function plateColor(id, cache) {
-  const cached = cache.get(id)
-  if (cached) {
-    return cached
-  }
-
-  const h = hash32((id + 1) >>> 0)
-  const color = [
-    64 + (h & 0x7f),
-    64 + ((h >>> 8) & 0x7f),
-    64 + ((h >>> 16) & 0x7f),
-  ]
-  cache.set(id, color)
-  return color
-}
-
-function renderPlateIds(ctx, flatPlateIds, width, height, colorCache) {
+// ── Canvas render ─────────────────────────────────────────────────────────────
+function renderPackedRgba(ctx, packedColor, width, height) {
   const image = ctx.createImageData(width, height)
   const pixels = image.data
-  for (let i = 0; i < flatPlateIds.length; i += 1) {
-    const [r, g, b] = plateColor(flatPlateIds[i], colorCache)
-    const offset = i * 4
-    pixels[offset] = r
-    pixels[offset + 1] = g
-    pixels[offset + 2] = b
-    pixels[offset + 3] = 255
-  }
-  ctx.putImageData(image, 0, 0)
-}
-
-function renderShadedRelief(ctx, packedColor, width, height) {
-  const image = ctx.createImageData(width, height)
-  const pixels = image.data
-  for (let i = 0; i < packedColor.length; i += 1) {
+  for (let i = 0; i < packedColor.length; i++) {
     const rgba = packedColor[i] >>> 0
-    const offset = i * 4
-    pixels[offset] = rgba & 0xff
-    pixels[offset + 1] = (rgba >>> 8) & 0xff
-    pixels[offset + 2] = (rgba >>> 16) & 0xff
-    pixels[offset + 3] = (rgba >>> 24) & 0xff
+    const o = i * 4
+    pixels[o    ] = rgba & 0xff
+    pixels[o + 1] = (rgba >>> 8) & 0xff
+    pixels[o + 2] = (rgba >>> 16) & 0xff
+    pixels[o + 3] = (rgba >>> 24) & 0xff
   }
   ctx.putImageData(image, 0, 0)
 }
 
-function computeLandFraction(flatData) {
-  let landCount = 0
-  for (let i = 0; i < flatData.length; i += 1) {
-    if (flatData[i] >= 0.5) {
-      landCount += 1
-    }
-  }
-  return landCount / flatData.length
-}
-
-function writeGenerateParams(
-  buffer,
-  width,
-  height,
-  fbmBaseFrequency,
-  threshold,
-  falloff,
-  noiseAmplitude,
-  edgeWarp,
-  seed
-) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, 0, true)
-  view.setUint32(12, seed >>> 0, true)
-  view.setFloat32(16, 1 / width, true)
-  view.setFloat32(20, 1 / height, true)
-  view.setFloat32(24, fbmBaseFrequency, true)
-  view.setFloat32(28, threshold, true)
-  view.setFloat32(32, falloff, true)
-  view.setFloat32(36, noiseAmplitude, true)
-  view.setFloat32(40, edgeWarp, true)
-  view.setFloat32(44, 0, true)
-}
-
-function writePlateParams(
-  buffer,
-  width,
-  height,
-  plateCount,
-  plateWarpAmplitude,
-  plateWarpRoughness,
-  plateWarpFrequency,
-  seed
-) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, plateCount >>> 0, true)
-  view.setUint32(12, seed >>> 0, true)
-  view.setFloat32(16, 1 / width, true)
-  view.setFloat32(20, 1 / height, true)
-  view.setFloat32(24, plateWarpAmplitude, true)
-  view.setFloat32(28, plateWarpRoughness, true)
-  view.setFloat32(32, plateWarpFrequency, true)
-  view.setFloat32(36, 0, true)
-  view.setFloat32(40, 0, true)
-  view.setFloat32(44, 0, true)
-}
-
-function writeGridParams(buffer, width, height) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, 0, true)
-  view.setUint32(12, 0, true)
-}
-
-function writeKinematicParams(buffer, width, height, seed) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, seed >>> 0, true)
-  view.setUint32(12, 0, true)
-}
-
-function writeJfaStepParams(buffer, width, height, stepSize) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setFloat32(8, stepSize, true)
-  view.setFloat32(12, 0, true)
-}
-
-function writeTopographyParams(
-  buffer,
-  width,
-  height,
-  seed,
-  mountainRadius,
-  mountainHeight,
-  terrainRoughness,
-  terrainFrequency,
-  fossilScale
-) {
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, seed >>> 0, true)
-  view.setUint32(12, 0, true)
-  view.setFloat32(16, mountainRadius, true)
-  view.setFloat32(20, mountainHeight, true)
-  view.setFloat32(24, terrainRoughness, true)
-  view.setFloat32(28, terrainFrequency, true)
-  view.setFloat32(32, fossilScale, true)
-  view.setFloat32(36, 1 / width, true)
-  view.setFloat32(40, 0, true)
-  view.setFloat32(44, 0, true)
-}
-
-function writeRenderParams(
-  buffer,
-  width,
-  height,
-  renderMode,
-  sunAngle,
-  elevationScale,
-  verticalExaggeration
-) {
-  let renderModeCode = 0
-  if (renderMode === 'kinematics') {
-    renderModeCode = 1
-  } else if (renderMode === 'sdf_distance') {
-    renderModeCode = 2
-  } else if (renderMode === 'shaded_relief') {
-    renderModeCode = 3
-  } else if (renderMode === 'elevation') {
-    renderModeCode = 4
-  }
-  const view = new DataView(buffer)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setUint32(8, renderModeCode, true)
-  view.setUint32(12, 0, true)
-  view.setFloat32(16, sunAngle, true)
-  view.setFloat32(20, elevationScale, true)
-  view.setFloat32(24, verticalExaggeration, true)
-  view.setFloat32(28, 0, true)
-}
-
-async function runPipeline() {
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function main() {
+  // Init WASM
   await initWasm()
+  const WIDTH = grid_width()
+  const HEIGHT = grid_height()
+  const CELL_COUNT = grid_cell_count()
 
-  if (
-    !statusNode ||
-    !canvas ||
-    !seedInput ||
-    !randomizeSeedButton ||
-    !thresholdSlider ||
-    !thresholdValueNode ||
-    !edgeWarpInput ||
-    !plateCountSlider ||
-    !plateCountValueNode ||
-    !plateRoughnessSlider ||
-    !plateRoughnessValueNode ||
-    !mountainRadiusSlider ||
-    !mountainRadiusValueNode ||
-    !mountainHeightSlider ||
-    !mountainHeightValueNode ||
-    !fossilScaleSlider ||
-    !fossilScaleValueNode ||
-    !sunAngleSlider ||
-    !sunAngleValueNode ||
-    !elevationScaleSlider ||
-    !elevationScaleValueNode ||
-    !verticalExaggerationSlider ||
-    !verticalExaggerationValueNode ||
-    !renderModeSelect ||
-    !landFractionNode
-  ) {
-    throw new Error('Required DOM nodes were not found.')
-  }
+  // Size canvas
+  canvas.width = WIDTH
+  canvas.height = HEIGHT
+  const ctx = canvas.getContext('2d')
 
+  // Seed input setup
+  seedInput.value = String(deterministic_seed())
+  randomizeSeedBtn.addEventListener('click', () => {
+    seedInput.value = String(randomSeed())
+    generate()
+  })
+
+  // WebGPU init
   if (!navigator.gpu) {
-    throw new Error('WebGPU is unavailable in this browser.')
+    statusNode.textContent = 'WebGPU not available. Use Chrome/Edge with WebGPU enabled.'
+    return
   }
-
   const adapter = await navigator.gpu.requestAdapter()
   if (!adapter) {
-    throw new Error('Failed to acquire a WebGPU adapter.')
+    statusNode.textContent = 'No WebGPU adapter found.'
+    return
   }
-
   const device = await adapter.requestDevice()
-  const width = grid_width()
-  const height = grid_height()
-  const cellCount = grid_cell_count()
-  const coverageNorm = 1.0
-  const mapping = map_flat_1d_to_gpu(cellCount, coverageNorm)
-  const activeCells = mapping[2]
-  const dispatches = six_pass_dispatch_sequence(cellCount, coverageNorm)
-  const dispatchGenerate = dispatches[0]
-  const dispatchReduce = dispatches[1]
-  const dispatchShift = dispatches[2]
-  const dispatchPlate = dispatches[3]
-  const dispatchKinematics = dispatches[4]
-  const dispatchJfa = dispatches[5]
-  const dispatchTopo = dispatchJfa
-  const dispatchShade = dispatchJfa
-  const jfaPasses = Math.ceil(Math.log2(Math.max(width, height)))
-  const dataByteLength = activeCells * Float32Array.BYTES_PER_ELEMENT
-  const plateByteLength = activeCells * Uint32Array.BYTES_PER_ELEMENT
-  const plateVelocityByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
-  const jfaByteLength = activeCells * 2 * Float32Array.BYTES_PER_ELEMENT
-  const activePlateSeedByteLength = ACTIVE_MAX_PLATES * ACTIVE_PLATE_STRIDE_BYTES
+  device.lost.then(info => {
+    statusNode.textContent = `GPU device lost: ${info.message}`
+  })
 
-  canvas.width = width
-  canvas.height = height
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('2D canvas context could not be created.')
+  statusNode.textContent = 'Ready.'
+
+  // ── Buffer allocation ───────────────────────────────────────────────────────
+  const PLATE_FLOATS_PER_ENTRY = 8           // see buildPlateStory layout
+  const MAX_PLATES = 24
+  const F32 = Float32Array.BYTES_PER_ELEMENT
+  const U32 = Uint32Array.BYTES_PER_ELEMENT
+
+  function makeStorageBuffer(byteSize, label) {
+    return device.createBuffer({
+      label,
+      size: byteSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    })
   }
-
-  const landMaskBuffer = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const finalLandMaskBuffer = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const plateIdBuffer = device.createBuffer({
-    size: plateByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const plateVelocityBuffer = device.createBuffer({
-    size: plateVelocityByteLength,
-    usage: GPUBufferUsage.STORAGE,
-  })
-  const activePlateSeedBuffer = device.createBuffer({
-    size: activePlateSeedByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  })
-  const fossilIdBuffer = device.createBuffer({
-    size: plateByteLength,
-    usage: GPUBufferUsage.STORAGE,
-  })
-  const plumeMaskBuffer = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.STORAGE,
-  })
-  const kinematicDataBuffer = device.createBuffer({
-    size: dataByteLength * 4,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const elevationBuffer = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const jfaBufferA = device.createBuffer({
-    size: jfaByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const jfaBufferB = device.createBuffer({
-    size: jfaByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const shadedOutputBuffer = device.createBuffer({
-    size: plateByteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  })
-  const bboxBuffer = device.createBuffer({
-    size: 16,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-  })
-  const pass3Readback = device.createBuffer({
-    size: dataByteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-  const plateReadback = device.createBuffer({
-    size: plateByteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-  const shadedOutputReadback = device.createBuffer({
-    size: plateByteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-
-  const generateParamsBuffer = device.createBuffer({
-    size: 48,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const gridParamsBuffer = device.createBuffer({
-    size: 16,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const plateParamsBuffer = device.createBuffer({
-    size: 48,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const kinematicParamsBuffer = device.createBuffer({
-    size: 16,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const topographyParamsBuffer = device.createBuffer({
-    size: 48,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const jfaStepParamsBuffer = device.createBuffer({
-    size: 16,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  const renderParamsBuffer = device.createBuffer({
-    size: 32,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-
-  const generateParamsBytes = new ArrayBuffer(48)
-  const gridParamsBytes = new ArrayBuffer(16)
-  const plateParamsBytes = new ArrayBuffer(48)
-  const kinematicParamsBytes = new ArrayBuffer(16)
-  const topographyParamsBytes = new ArrayBuffer(48)
-  const jfaStepParamsBytes = new ArrayBuffer(16)
-  const renderParamsBytes = new ArrayBuffer(32)
-  writeGridParams(gridParamsBytes, width, height)
-  device.queue.writeBuffer(gridParamsBuffer, 0, gridParamsBytes)
-
-  const pass1Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass1Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass2Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass2Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass3Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass3Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass4Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass4Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass5Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass5Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass6Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass6Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass7Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass7Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass8Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass8Source }),
-      entryPoint: 'main',
-    },
-  })
-  const pass9Pipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ code: pass9Source }),
-      entryPoint: 'main',
-    },
-  })
-
-  const pass1BindGroup = device.createBindGroup({
-    layout: pass1Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: landMaskBuffer } },
-      { binding: 1, resource: { buffer: generateParamsBuffer } },
-    ],
-  })
-
-  const pass2BindGroup = device.createBindGroup({
-    layout: pass2Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: landMaskBuffer } },
-      { binding: 1, resource: { buffer: bboxBuffer } },
-      { binding: 2, resource: { buffer: gridParamsBuffer } },
-    ],
-  })
-
-  const pass3BindGroup = device.createBindGroup({
-    layout: pass3Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: landMaskBuffer } },
-      { binding: 1, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 2, resource: { buffer: bboxBuffer } },
-      { binding: 3, resource: { buffer: gridParamsBuffer } },
-    ],
-  })
-
-  const pass4BindGroup = device.createBindGroup({
-    layout: pass4Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: plateIdBuffer } },
-      { binding: 1, resource: { buffer: plateVelocityBuffer } },
-      { binding: 2, resource: { buffer: fossilIdBuffer } },
-      { binding: 3, resource: { buffer: plumeMaskBuffer } },
-      { binding: 4, resource: { buffer: plateParamsBuffer } },
-      { binding: 5, resource: { buffer: activePlateSeedBuffer } },
-    ],
-  })
-
-  const pass5BindGroup = device.createBindGroup({
-    layout: pass5Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: plateIdBuffer } },
-      { binding: 1, resource: { buffer: plateVelocityBuffer } },
-      { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: kinematicDataBuffer } },
-      { binding: 4, resource: { buffer: kinematicParamsBuffer } },
-    ],
-  })
-
-  const pass9BindGroup = device.createBindGroup({
-    layout: pass9Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: kinematicDataBuffer } },
-      { binding: 1, resource: { buffer: jfaBufferA } },
-      { binding: 2, resource: { buffer: gridParamsBuffer } },
-    ],
-  })
-
-  const pass6BindGroupA = device.createBindGroup({
-    layout: pass6Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: kinematicDataBuffer } },
-      { binding: 1, resource: { buffer: jfaBufferA } },
-      { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: plumeMaskBuffer } },
-      { binding: 4, resource: { buffer: elevationBuffer } },
-      { binding: 5, resource: { buffer: topographyParamsBuffer } },
-    ],
-  })
-  const pass6BindGroupB = device.createBindGroup({
-    layout: pass6Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: kinematicDataBuffer } },
-      { binding: 1, resource: { buffer: jfaBufferB } },
-      { binding: 2, resource: { buffer: finalLandMaskBuffer } },
-      { binding: 3, resource: { buffer: plumeMaskBuffer } },
-      { binding: 4, resource: { buffer: elevationBuffer } },
-      { binding: 5, resource: { buffer: topographyParamsBuffer } },
-    ],
-  })
-  const pass8BindGroupAB = device.createBindGroup({
-    layout: pass8Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: jfaBufferA } },
-      { binding: 1, resource: { buffer: jfaBufferB } },
-      { binding: 2, resource: { buffer: jfaStepParamsBuffer } },
-    ],
-  })
-  const pass8BindGroupBA = device.createBindGroup({
-    layout: pass8Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: jfaBufferB } },
-      { binding: 1, resource: { buffer: jfaBufferA } },
-      { binding: 2, resource: { buffer: jfaStepParamsBuffer } },
-    ],
-  })
-  const pass7BindGroupA = device.createBindGroup({
-    layout: pass7Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: kinematicDataBuffer } },
-      { binding: 1, resource: { buffer: jfaBufferA } },
-      { binding: 2, resource: { buffer: elevationBuffer } },
-      { binding: 3, resource: { buffer: shadedOutputBuffer } },
-      { binding: 4, resource: { buffer: renderParamsBuffer } },
-    ],
-  })
-  const pass7BindGroupB = device.createBindGroup({
-    layout: pass7Pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: kinematicDataBuffer } },
-      { binding: 1, resource: { buffer: jfaBufferB } },
-      { binding: 2, resource: { buffer: elevationBuffer } },
-      { binding: 3, resource: { buffer: shadedOutputBuffer } },
-      { binding: 4, resource: { buffer: renderParamsBuffer } },
-    ],
-  })
-
-  const bboxInit = new Uint32Array([width, 0, height, 0])
-  const fbmBaseFrequency = normalized_fbm_base_frequency()
-  const plateWarpFrequency = 1.5
-  const plateColorCache = new Map()
-
-  const renderWithControls = async (
-    threshold,
-    edgeWarp,
-    seed,
-    plateCount,
-    plateWarpRoughness,
-    mountainRadius,
-    mountainHeight,
-    renderMode,
-    sunAngle,
-    elevationScale,
-    verticalExaggeration,
-    fossilScale
-  ) => {
-    const FALLOFF_STRENGTH = 2.0
-    const NOISE_AMPLITUDE = 0.6
-    const PLATE_WARP_AMPLITUDE = 1.1
-    const TERRAIN_ROUGHNESS = 0.7
-    const TERRAIN_FREQUENCY = 18.0
-
-    writeGenerateParams(
-      generateParamsBytes,
-      width,
-      height,
-      fbmBaseFrequency,
-      threshold,
-      FALLOFF_STRENGTH,
-      NOISE_AMPLITUDE,
-      edgeWarp,
-      seed
-    )
-    writePlateParams(
-      plateParamsBytes,
-      width,
-      height,
-      plateCount,
-      PLATE_WARP_AMPLITUDE,
-      plateWarpRoughness,
-      plateWarpFrequency,
-      seed
-    )
-    writeKinematicParams(kinematicParamsBytes, width, height, seed)
-    writeTopographyParams(
-      topographyParamsBytes,
-      width,
-      height,
-      seed,
-      mountainRadius,
-      mountainHeight,
-      TERRAIN_ROUGHNESS,
-      TERRAIN_FREQUENCY,
-      fossilScale
-    )
-    writeRenderParams(
-      renderParamsBytes,
-      width,
-      height,
-      renderMode,
-      sunAngle,
-      elevationScale,
-      verticalExaggeration
-    )
-    device.queue.writeBuffer(generateParamsBuffer, 0, generateParamsBytes)
-    device.queue.writeBuffer(plateParamsBuffer, 0, plateParamsBytes)
-    device.queue.writeBuffer(kinematicParamsBuffer, 0, kinematicParamsBytes)
-    device.queue.writeBuffer(topographyParamsBuffer, 0, topographyParamsBytes)
-    device.queue.writeBuffer(renderParamsBuffer, 0, renderParamsBytes)
-    const activePlateSeedData = buildActivePlateSeedData(plateCount, seed >>> 0)
-    device.queue.writeBuffer(activePlateSeedBuffer, 0, activePlateSeedData)
-    device.queue.writeBuffer(bboxBuffer, 0, bboxInit)
-
-    const pass1Encoder = device.createCommandEncoder()
-    const pass1 = pass1Encoder.beginComputePass()
-    pass1.setPipeline(pass1Pipeline)
-    pass1.setBindGroup(0, pass1BindGroup)
-    pass1.dispatchWorkgroups(dispatchGenerate)
-    pass1.end()
-    device.queue.submit([pass1Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    const pass2Start = performance.now()
-    const pass2Encoder = device.createCommandEncoder()
-    const pass2 = pass2Encoder.beginComputePass()
-    pass2.setPipeline(pass2Pipeline)
-    pass2.setBindGroup(0, pass2BindGroup)
-    pass2.dispatchWorkgroups(dispatchReduce)
-    pass2.end()
-    device.queue.submit([pass2Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-    const reductionLatencyMs = performance.now() - pass2Start
-
-    const pass3Encoder = device.createCommandEncoder()
-    const pass3 = pass3Encoder.beginComputePass()
-    pass3.setPipeline(pass3Pipeline)
-    pass3.setBindGroup(0, pass3BindGroup)
-    pass3.dispatchWorkgroups(dispatchShift)
-    pass3.end()
-    device.queue.submit([pass3Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    const pass4Encoder = device.createCommandEncoder()
-    const pass4 = pass4Encoder.beginComputePass()
-    pass4.setPipeline(pass4Pipeline)
-    pass4.setBindGroup(0, pass4BindGroup)
-    pass4.dispatchWorkgroups(dispatchPlate)
-    pass4.end()
-    device.queue.submit([pass4Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    const pass5Encoder = device.createCommandEncoder()
-    const pass5 = pass5Encoder.beginComputePass()
-    pass5.setPipeline(pass5Pipeline)
-    pass5.setBindGroup(0, pass5BindGroup)
-    pass5.dispatchWorkgroups(dispatchKinematics)
-    pass5.end()
-    device.queue.submit([pass5Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    const pass9Encoder = device.createCommandEncoder()
-    const pass9 = pass9Encoder.beginComputePass()
-    pass9.setPipeline(pass9Pipeline)
-    pass9.setBindGroup(0, pass9BindGroup)
-    pass9.dispatchWorkgroups(dispatchJfa)
-    pass9.end()
-    device.queue.submit([pass9Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    let readFromA = true
-    for (let i = 0; i < jfaPasses; i += 1) {
-      const stepSize = 2 ** (jfaPasses - i - 1)
-      writeJfaStepParams(jfaStepParamsBytes, width, height, stepSize)
-      device.queue.writeBuffer(jfaStepParamsBuffer, 0, jfaStepParamsBytes)
-
-      const pass8Encoder = device.createCommandEncoder()
-      const pass8 = pass8Encoder.beginComputePass()
-      pass8.setPipeline(pass8Pipeline)
-      pass8.setBindGroup(0, readFromA ? pass8BindGroupAB : pass8BindGroupBA)
-      pass8.dispatchWorkgroups(dispatchJfa)
-      pass8.end()
-      device.queue.submit([pass8Encoder.finish()])
-      await device.queue.onSubmittedWorkDone()
-      readFromA = !readFromA
-    }
-
-    const finalJfaIsA = readFromA
-
-    const pass6Encoder = device.createCommandEncoder()
-    const pass6 = pass6Encoder.beginComputePass()
-    pass6.setPipeline(pass6Pipeline)
-    pass6.setBindGroup(0, finalJfaIsA ? pass6BindGroupA : pass6BindGroupB)
-    pass6.dispatchWorkgroups(dispatchTopo)
-    pass6.end()
-    device.queue.submit([pass6Encoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    if (
-      renderMode === 'kinematics' ||
-      renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief' ||
-      renderMode === 'elevation'
-    ) {
-      const pass7Encoder = device.createCommandEncoder()
-      const pass7 = pass7Encoder.beginComputePass()
-      pass7.setPipeline(pass7Pipeline)
-      pass7.setBindGroup(0, finalJfaIsA ? pass7BindGroupA : pass7BindGroupB)
-      pass7.dispatchWorkgroups(dispatchShade)
-      pass7.end()
-      device.queue.submit([pass7Encoder.finish()])
-      await device.queue.onSubmittedWorkDone()
-    }
-
-    const copyEncoder = device.createCommandEncoder()
-    copyEncoder.copyBufferToBuffer(finalLandMaskBuffer, 0, pass3Readback, 0, dataByteLength)
-    if (renderMode === 'plate_id') {
-      copyEncoder.copyBufferToBuffer(plateIdBuffer, 0, plateReadback, 0, plateByteLength)
-    } else if (
-      renderMode === 'kinematics' ||
-      renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief' ||
-      renderMode === 'elevation'
-    ) {
-      copyEncoder.copyBufferToBuffer(shadedOutputBuffer, 0, shadedOutputReadback, 0, plateByteLength)
-    }
-    device.queue.submit([copyEncoder.finish()])
-    await device.queue.onSubmittedWorkDone()
-
-    await pass3Readback.mapAsync(GPUMapMode.READ)
-    const pass3Flat = new Float32Array(pass3Readback.getMappedRange())
-    const postShiftLandFraction = computeLandFraction(pass3Flat)
-
-    if (renderMode === 'plate_id') {
-      await plateReadback.mapAsync(GPUMapMode.READ)
-      const plateFlat = new Uint32Array(plateReadback.getMappedRange())
-      renderPlateIds(context, plateFlat, width, height, plateColorCache)
-      plateReadback.unmap()
-    } else if (
-      renderMode === 'kinematics' ||
-      renderMode === 'sdf_distance' ||
-      renderMode === 'shaded_relief' ||
-      renderMode === 'elevation'
-    ) {
-      await shadedOutputReadback.mapAsync(GPUMapMode.READ)
-      const shadedFlat = new Uint32Array(shadedOutputReadback.getMappedRange())
-      renderShadedRelief(context, shadedFlat, width, height)
-      shadedOutputReadback.unmap()
-    } else {
-      renderLandMask(context, pass3Flat, width, height)
-    }
-
-    console.log(
-      JSON.stringify({
-        seed: seed >>> 0,
-        post_shift_land_fraction: Number(postShiftLandFraction.toFixed(6)),
-        latency_ms: Number(reductionLatencyMs.toFixed(3)),
-      })
-    )
-
-    statusNode.textContent =
-      `Rendered ${width}x${height} @ threshold ${threshold.toFixed(2)} / edge_warp ${edgeWarp.toFixed(4)} / plate_count ${plateCount} / plate_roughness ${plateWarpRoughness.toFixed(2)} / mountain_radius ${mountainRadius.toFixed(1)} / mountain_height ${mountainHeight.toFixed(2)} / fossil_scale ${fossilScale.toFixed(2)} / sun_angle ${sunAngle.toFixed(0)} / elevation_scale ${elevationScale.toFixed(1)} / vertical_exaggeration ${verticalExaggeration.toFixed(1)} / seed ${seed >>> 0} / view ${renderMode}. Reduction pass: ${reductionLatencyMs.toFixed(2)} ms.`
-    landFractionNode.textContent =
-      `Land fraction (post-shift): ${(postShiftLandFraction * 100).toFixed(2)}%`
-
-    pass3Readback.unmap()
-  }
-
-  let queuedThreshold = normalized_land_threshold_from_slider(normalized_land_threshold())
-  let queuedEdgeWarp = normalized_edge_warp_from_input(normalized_edge_warp())
-  let queuedSeed = deterministic_seed_from_input(deterministic_seed())
-  let queuedPlateCount = normalized_plate_count_from_slider(normalized_plate_count())
-  let queuedPlateWarpRoughness = normalized_plate_warp_roughness_from_slider(
-    normalized_plate_warp_roughness()
-  )
-  let queuedMountainRadius = normalized_mountain_radius_from_slider(normalized_mountain_radius())
-  let queuedMountainHeight = normalized_mountain_height_from_slider(normalized_mountain_height())
-  let queuedFossilScale = Number.parseFloat(fossilScaleSlider.value)
-  if (!Number.isFinite(queuedFossilScale)) {
-    queuedFossilScale = 0.15
-  }
-  let queuedSunAngle = normalized_sun_angle_from_slider(normalized_sun_angle())
-  let queuedElevationScale = normalized_elevation_scale_from_slider(normalized_elevation_scale())
-  let queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
-    normalized_vertical_exaggeration()
-  )
-  let queuedRenderMode = 'shaded_relief'
-  let renderQueued = false
-  let renderInFlight = false
-
-  const processQueuedRender = async () => {
-    if (renderInFlight) {
-      return
-    }
-    renderInFlight = true
-    try {
-      while (renderQueued) {
-        renderQueued = false
-        await renderWithControls(
-          queuedThreshold,
-          queuedEdgeWarp,
-          queuedSeed,
-          queuedPlateCount,
-          queuedPlateWarpRoughness,
-          queuedMountainRadius,
-          queuedMountainHeight,
-          queuedRenderMode,
-          queuedSunAngle,
-          queuedElevationScale,
-          queuedVerticalExaggeration,
-          queuedFossilScale
-        )
-      }
-    } finally {
-      renderInFlight = false
-    }
-  }
-
-  const queueRender = (
-    rawThreshold,
-    rawEdgeWarp,
-    rawSeed,
-    rawPlateCount,
-    rawPlateWarpRoughness,
-    rawMountainRadius,
-    rawMountainHeight,
-    rawRenderMode,
-    rawSunAngle,
-    rawElevationScale,
-    rawVerticalExaggeration,
-    rawFossilScale
-  ) => {
-    const parsedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : queuedThreshold
-    const parsedEdgeWarp = Number.isFinite(rawEdgeWarp) ? rawEdgeWarp : queuedEdgeWarp
-    const parsedSeed = Number.isFinite(rawSeed) ? rawSeed : queuedSeed
-    const parsedPlateCount = Number.isFinite(rawPlateCount) ? rawPlateCount : queuedPlateCount
-    const parsedPlateWarpRoughness = Number.isFinite(rawPlateWarpRoughness)
-      ? rawPlateWarpRoughness
-      : queuedPlateWarpRoughness
-    const parsedMountainRadius = Number.isFinite(rawMountainRadius)
-      ? rawMountainRadius
-      : queuedMountainRadius
-    const parsedMountainHeight = Number.isFinite(rawMountainHeight)
-      ? rawMountainHeight
-      : queuedMountainHeight
-    const parsedFossilScale = Number.isFinite(rawFossilScale) ? rawFossilScale : queuedFossilScale
-    const parsedSunAngle = Number.isFinite(rawSunAngle) ? rawSunAngle : queuedSunAngle
-    const parsedElevationScale = Number.isFinite(rawElevationScale)
-      ? rawElevationScale
-      : queuedElevationScale
-    const parsedVerticalExaggeration = Number.isFinite(rawVerticalExaggeration)
-      ? rawVerticalExaggeration
-      : queuedVerticalExaggeration
-
-    const parsedRenderMode =
-      rawRenderMode === 'plate_id' ||
-      rawRenderMode === 'kinematics' ||
-      rawRenderMode === 'sdf_distance' ||
-      rawRenderMode === 'shaded_relief' ||
-      rawRenderMode === 'elevation'
-        ? rawRenderMode
-        : 'shaded_relief'
-
-    queuedThreshold = normalized_land_threshold_from_slider(parsedThreshold)
-    queuedEdgeWarp = normalized_edge_warp_from_input(parsedEdgeWarp)
-    queuedSeed = deterministic_seed_from_input(parsedSeed)
-    queuedPlateCount = normalized_plate_count_from_slider(parsedPlateCount)
-    queuedPlateWarpRoughness = normalized_plate_warp_roughness_from_slider(parsedPlateWarpRoughness)
-    queuedMountainRadius = normalized_mountain_radius_from_slider(parsedMountainRadius)
-    queuedMountainHeight = normalized_mountain_height_from_slider(parsedMountainHeight)
-    queuedFossilScale = Math.min(Math.max(parsedFossilScale, 0), 3)
-    queuedSunAngle = normalized_sun_angle_from_slider(parsedSunAngle)
-    queuedElevationScale = normalized_elevation_scale_from_slider(parsedElevationScale)
-    queuedVerticalExaggeration = normalized_vertical_exaggeration_from_slider(
-      parsedVerticalExaggeration
-    )
-    queuedRenderMode = parsedRenderMode
-
-    thresholdSlider.value = queuedThreshold.toFixed(2)
-    thresholdValueNode.textContent = queuedThreshold.toFixed(2)
-    edgeWarpInput.value = String(queuedEdgeWarp)
-    plateCountSlider.value = String(queuedPlateCount)
-    plateCountValueNode.textContent = String(queuedPlateCount)
-    plateRoughnessSlider.value = queuedPlateWarpRoughness.toFixed(2)
-    plateRoughnessValueNode.textContent = queuedPlateWarpRoughness.toFixed(2)
-    mountainRadiusSlider.value = queuedMountainRadius.toFixed(1)
-    mountainRadiusValueNode.textContent = queuedMountainRadius.toFixed(1)
-    mountainHeightSlider.value = queuedMountainHeight.toFixed(2)
-    mountainHeightValueNode.textContent = queuedMountainHeight.toFixed(2)
-    fossilScaleSlider.value = queuedFossilScale.toFixed(2)
-    fossilScaleValueNode.textContent = queuedFossilScale.toFixed(2)
-    sunAngleSlider.value = queuedSunAngle.toFixed(0)
-    sunAngleValueNode.textContent = queuedSunAngle.toFixed(0)
-    elevationScaleSlider.value = queuedElevationScale.toFixed(1)
-    elevationScaleValueNode.textContent = queuedElevationScale.toFixed(1)
-    verticalExaggerationSlider.value = queuedVerticalExaggeration.toFixed(1)
-    verticalExaggerationValueNode.textContent = queuedVerticalExaggeration.toFixed(1)
-    seedInput.value = String(queuedSeed >>> 0)
-    renderModeSelect.value = queuedRenderMode
-
-    renderQueued = true
-    void processQueuedRender().catch((error) => {
-      statusNode.textContent = `Pipeline failed: ${error.message}`
-      console.error(error)
+  function makeUniformBuffer(byteSize, label) {
+    return device.createBuffer({
+      label,
+      size: byteSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
   }
 
-  thresholdSlider.addEventListener('input', (event) => {
-    queueRender(
-      Number.parseFloat(event.target.value),
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
+  const plateSeedBuf      = makeStorageBuffer(MAX_PLATES * PLATE_FLOATS_PER_ENTRY * F32, 'plateSeed')
+  const plateIdBuf        = makeStorageBuffer(CELL_COUNT * U32, 'plateId')
+  const plateTypeBuf      = makeStorageBuffer(CELL_COUNT * F32, 'plateType')
+  const plateVelocityBuf  = makeStorageBuffer(CELL_COUNT * 2 * F32, 'plateVelocity')
+  const landMaskBuf       = makeStorageBuffer(CELL_COUNT * F32, 'landMask')
+  const kinematicBuf      = makeStorageBuffer(CELL_COUNT * 4 * F32, 'kinematic')
+  const jfaSeedBuf        = makeStorageBuffer(CELL_COUNT * 2 * F32, 'jfaSeed')
+  const jfaPingBuf        = makeStorageBuffer(CELL_COUNT * 2 * F32, 'jfaPing')
+  const jfaPongBuf        = makeStorageBuffer(CELL_COUNT * 2 * F32, 'jfaPong')
+  const elevationBuf      = makeStorageBuffer(CELL_COUNT * F32, 'elevation')
+  const shadedRgbaBuf     = makeStorageBuffer(CELL_COUNT * U32, 'shadedRgba')
+  const readbackBuf       = device.createBuffer({
+    label: 'readback',
+    size: CELL_COUNT * U32,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   })
 
-  edgeWarpInput.addEventListener('change', (event) => {
-    queueRender(
-      queuedThreshold,
-      Number.parseFloat(event.target.value),
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
+  // ── Uniform buffers ─────────────────────────────────────────────────────────
+  const plateUniformBuf   = makeUniformBuffer(32, 'plateUniform')   // PlateParams
+  const gridUniformBuf    = makeUniformBuffer(16, 'gridUniform')     // GridParams (pass9, pass2)
+  const kineUniformBuf    = makeUniformBuffer(16, 'kineUniform')     // KinematicParams
+  // jfaStepUniform buffers are created per-step below
+  const elevUniformBuf    = makeUniformBuffer(48, 'elevUniform')     // ElevationParams
+  const renderUniformBuf  = makeUniformBuffer(32, 'renderUniform')   // RenderParams
+
+  // ── Pipelines ────────────────────────────────────────────────────────────────
+  function makePipeline(src, label) {
+    const mod = device.createShaderModule({ label, code: src })
+    return device.createComputePipeline({
+      label,
+      layout: 'auto',
+      compute: { module: mod, entryPoint: 'main' },
+    })
+  }
+
+  const pass1Pipeline = makePipeline(pass1Src, 'pass1_generate_plates')
+  const pass2Pipeline = makePipeline(pass2Src, 'pass2_derive_land_mask')
+  const pass3Pipeline = makePipeline(pass3Src, 'pass3_boundary_stress')
+  const pass6Pipeline = makePipeline(pass6Src, 'pass6_elevation')
+  const pass7Pipeline = makePipeline(pass7Src, 'pass7_shaded_relief')
+  const pass8Pipeline = makePipeline(pass8Src, 'pass8_jfa_step')
+  const pass9Pipeline = makePipeline(pass9Src, 'pass9_jfa_init')
+
+  // ── Bind groups (created once, reused across generates) ─────────────────────
+  function bg(pipeline, ...entries) {
+    return device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: entries.map((resource, binding) => ({ binding, resource })),
+    })
+  }
+  const buf = b => ({ buffer: b })
+
+  const pass1BG = bg(pass1Pipeline,
+    buf(plateSeedBuf), buf(plateIdBuf), buf(plateTypeBuf), buf(plateVelocityBuf),
+    buf(plateUniformBuf))
+
+  const pass2BG = bg(pass2Pipeline,
+    buf(plateTypeBuf), buf(landMaskBuf), buf(gridUniformBuf))
+
+  const pass3BG = bg(pass3Pipeline,
+    buf(plateIdBuf), buf(plateVelocityBuf), buf(plateTypeBuf),
+    buf(kinematicBuf), buf(kineUniformBuf))
+
+  const pass9BG = bg(pass9Pipeline,
+    buf(kinematicBuf), buf(jfaSeedBuf), buf(gridUniformBuf))
+
+  // JFA ping-pong: even steps read ping write pong; odd steps read pong write ping
+  // JFA: pre-create per-step uniform buffers and bind groups (avoids mid-encoder writeBuffer)
+  const maxDim = Math.max(WIDTH, HEIGHT)
+  const jfaSteps = []
+  for (let s = Math.ceil(maxDim / 2); s >= 1; s = Math.floor(s / 2)) {
+    jfaSteps.push(s)
+    if (s === 1) break
+  }
+
+  const jfaStepBGs = jfaSteps.map((step, i) => {
+    const ub = makeUniformBuffer(16, `jfaStep${i}`)
+    const a = new ArrayBuffer(16)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setFloat32(8, step, true)
+    v.setFloat32(12, 0, true)
+    device.queue.writeBuffer(ub, 0, a)
+    const readBuf  = i % 2 === 0 ? jfaPingBuf : jfaPongBuf
+    const writeBuf = i % 2 === 0 ? jfaPongBuf : jfaPingBuf
+    return bg(pass8Pipeline, buf(readBuf), buf(writeBuf), buf(ub))
   })
 
-  plateCountSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      Number.parseFloat(event.target.value),
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
+  const pass6BG = bg(pass6Pipeline,
+    buf(plateTypeBuf), buf(landMaskBuf), buf(kinematicBuf),
+    buf(jfaPingBuf), buf(elevationBuf), buf(elevUniformBuf))
 
-  plateRoughnessSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      Number.parseFloat(event.target.value),
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
+  const pass7BG = bg(pass7Pipeline,
+    buf(kinematicBuf), buf(jfaPingBuf), buf(elevationBuf),
+    buf(shadedRgbaBuf), buf(renderUniformBuf))
 
-  mountainRadiusSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      Number.parseFloat(event.target.value),
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
+  // Dispatch size for full grid
+  const [dispatchX] = n_pass_dispatch(CELL_COUNT, 1)
 
-  mountainHeightSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      Number.parseFloat(event.target.value),
-      queuedRenderMode
-    )
-  })
+  // ── Uniform writers ─────────────────────────────────────────────────────────
+  function writeGridUniform(seed) {
+    const a = new ArrayBuffer(16)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setUint32(8, seed >>> 0, true)
+    v.setUint32(12, 0, true)
+    device.queue.writeBuffer(gridUniformBuf, 0, a)
+  }
 
-  fossilScaleSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      queuedSunAngle,
-      queuedElevationScale,
-      queuedVerticalExaggeration,
-      Number.parseFloat(event.target.value)
-    )
-  })
+  function writePlateUniform(plateCount, seed) {
+    const a = new ArrayBuffer(32)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setUint32(8, plateCount >>> 0, true)
+    v.setUint32(12, seed >>> 0, true)
+    v.setFloat32(16, 1 / WIDTH, true)
+    v.setFloat32(20, 1 / HEIGHT, true)
+    v.setFloat32(24, 0.6, true)   // warp_roughness
+    v.setFloat32(28, 0.0, true)   // pad
+    device.queue.writeBuffer(plateUniformBuf, 0, a)
+  }
 
-  sunAngleSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      Number.parseFloat(event.target.value),
-      queuedElevationScale
-    )
-  })
+  function writeKineUniform(seed) {
+    const a = new ArrayBuffer(16)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setUint32(8, seed >>> 0, true)
+    v.setUint32(12, 0, true)
+    device.queue.writeBuffer(kineUniformBuf, 0, a)
+  }
 
-  elevationScaleSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      queuedSunAngle,
-      Number.parseFloat(event.target.value),
-      queuedVerticalExaggeration
-    )
-  })
+function writeElevUniform(seed) {
+    // ElevationParams: width, height, seed, _pad0, terrain_freq, mountain_height, _pad1, _pad2...
+    const a = new ArrayBuffer(48)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setUint32(8, seed >>> 0, true)
+    v.setUint32(12, 0, true)
+    v.setFloat32(16, 1 / WIDTH, true)
+    v.setFloat32(20, 1 / HEIGHT, true)
+    v.setFloat32(24, 0.75, true)  // mountain_height
+    v.setFloat32(28, 35.0, true)  // mountain_radius (pixels)
+    v.setFloat32(32, 0.7, true)   // terrain_roughness
+    v.setFloat32(36, 0.0, true)
+    v.setFloat32(40, 0.0, true)
+    v.setFloat32(44, 0.0, true)
+    device.queue.writeBuffer(elevUniformBuf, 0, a)
+  }
 
-  verticalExaggerationSlider.addEventListener('input', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode,
-      queuedSunAngle,
-      queuedElevationScale,
-      Number.parseFloat(event.target.value)
-    )
-  })
+  function writeRenderUniform(seed) {
+    const a = new ArrayBuffer(32)
+    const v = new DataView(a)
+    v.setUint32(0, WIDTH, true)
+    v.setUint32(4, HEIGHT, true)
+    v.setUint32(8, 3, true)         // render_mode = shaded_relief
+    v.setUint32(12, 0, true)
+    v.setFloat32(16, 315.0, true)   // sun_angle
+    v.setFloat32(20, 10.0, true)    // elevation_scale
+    v.setFloat32(24, 7.5, true)     // vertical_exaggeration
+    v.setFloat32(28, seed >>> 0, true)
+    device.queue.writeBuffer(renderUniformBuf, 0, a)
+  }
 
-  renderModeSelect.addEventListener('change', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      queuedSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      event.target.value
-    )
-  })
+  // ── Plate story generator ──────────────────────────────────────────────────
+  // Each plate: 8 floats
+  //   [0] pos.x       (x ∈ [0,2])
+  //   [1] pos.y       (y ∈ [0,1])
+  //   [2] weight      (Voronoi bias, 0–0.5)
+  //   [3] plate_type  (0.0 = continental, 1.0 = oceanic)
+  //   [4] velocity.x
+  //   [5] velocity.y
+  //   [6] _pad
+  //   [7] _pad
 
-  seedInput.addEventListener('change', (event) => {
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      Number.parseFloat(event.target.value),
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
+  const STORY_TYPES = ['single_continent', 'collision', 'rift', 'archipelago']
+  const MAX_SPEED = 12.0
 
-  randomizeSeedButton.addEventListener('click', () => {
-    const randomSeed = crypto.getRandomValues(new Uint32Array(1))[0]
-    queueRender(
-      queuedThreshold,
-      queuedEdgeWarp,
-      randomSeed,
-      queuedPlateCount,
-      queuedPlateWarpRoughness,
-      queuedMountainRadius,
-      queuedMountainHeight,
-      queuedRenderMode
-    )
-  })
+  function buildPlateStory(seed) {
+    const plates = []
+    const storyType = STORY_TYPES[hash32(seed) % 4]
 
-  queueRender(
-    queuedThreshold,
-    queuedEdgeWarp,
-    queuedSeed,
-    queuedPlateCount,
-    queuedPlateWarpRoughness,
-    queuedMountainRadius,
-    queuedMountainHeight,
-    queuedRenderMode,
-    queuedSunAngle,
-    queuedElevationScale,
-    queuedVerticalExaggeration,
-    queuedFossilScale
-  )
+    // Deterministic random helpers scoped to this seed
+    let counter = 0
+    function rng() { return hashToUnit(hash32((seed ^ (++counter * 0x9e3779b9)) >>> 0)) }
+    function rngRange(lo, hi) { return lo + rng() * (hi - lo) }
+    function rngAngle() { return rng() * Math.PI * 2 }
+
+    function addPlate(x, y, type, vx, vy, weight) {
+      plates.push({ x, y, type, vx, vy, weight: weight ?? 0.0 })
+    }
+
+    // Place continental plates with some positional jitter in center region
+    function jitter(base, range) { return base + (rng() - 0.5) * 2 * range }
+
+    switch (storyType) {
+      case 'single_continent': {
+        // One dominant cluster of 3–4 continental plates near center
+        const cx = jitter(1.0, 0.15)
+        const cy = jitter(0.5, 0.10)
+        addPlate(cx,              cy,              0, rngRange(-2,2), rngRange(-2,2), 0.20)
+        addPlate(cx - 0.35, jitter(cy, 0.12), 0, rngRange(-2,2), rngRange(-2,2), 0.12)
+        addPlate(cx + 0.35, jitter(cy, 0.12), 0, rngRange(-2,2), rngRange(-2,2), 0.12)
+        addPlate(jitter(cx, 0.2), cy + 0.25, 0, rngRange(-1,1), rngRange(-1,1), 0.08)
+        break
+      }
+      case 'collision': {
+        // Two continental masses converging — guaranteed central orogen
+        const speed = rngRange(6, 10)
+        const leftCx  = jitter(0.60, 0.10)
+        const rightCx = jitter(1.40, 0.10)
+        const cy = jitter(0.5, 0.12)
+        // Left group moves right, right group moves left → convergent
+        addPlate(leftCx,        jitter(cy, 0.08), 0, +speed, rngRange(-1,1), 0.18)
+        addPlate(leftCx - 0.28, jitter(cy, 0.10), 0, +speed * 0.8, rngRange(-1,1), 0.10)
+        addPlate(rightCx,       jitter(cy, 0.08), 0, -speed, rngRange(-1,1), 0.18)
+        addPlate(rightCx + 0.28,jitter(cy, 0.10), 0, -speed * 0.8, rngRange(-1,1), 0.10)
+        break
+      }
+      case 'rift': {
+        // One continent pulling apart — central divergent rift
+        const speed = rngRange(4, 8)
+        const cx = jitter(1.0, 0.10)
+        const cy = jitter(0.5, 0.10)
+        // Left half moves left, right half moves right → divergent rift
+        addPlate(cx - 0.22, jitter(cy, 0.08), 0, -speed, rngRange(-1,1), 0.15)
+        addPlate(cx + 0.22, jitter(cy, 0.08), 0, +speed, rngRange(-1,1), 0.15)
+        addPlate(cx - 0.45, jitter(cy, 0.12), 0, -speed * 0.6, rngRange(-1,1), 0.10)
+        addPlate(cx + 0.45, jitter(cy, 0.12), 0, +speed * 0.6, rngRange(-1,1), 0.10)
+        break
+      }
+      case 'archipelago': {
+        // 6 smaller continental plates scattered in an oceanic field
+        const positions = [
+          [jitter(0.60, 0.12), jitter(0.35, 0.10)],
+          [jitter(1.10, 0.12), jitter(0.30, 0.10)],
+          [jitter(1.50, 0.12), jitter(0.42, 0.10)],
+          [jitter(0.75, 0.12), jitter(0.65, 0.10)],
+          [jitter(1.25, 0.12), jitter(0.70, 0.10)],
+          [jitter(0.95, 0.12), jitter(0.52, 0.10)],
+        ]
+        for (const [px, py] of positions) {
+          const a = rngAngle()
+          addPlate(px, py, 0, Math.cos(a) * rngRange(2,7), Math.sin(a) * rngRange(2,7), 0.06)
+        }
+        break
+      }
+    }
+
+    // Fill remaining slots with oceanic plates spread across canvas
+    const totalPlates = 20
+    const oceanic = totalPlates - plates.length
+    for (let i = 0; i < oceanic; i++) {
+      const px = rng() * 2.0       // x ∈ [0,2]
+      const py = rng() * 1.0       // y ∈ [0,1]
+      const a = rngAngle()
+      const spd = rngRange(1, MAX_SPEED)
+      addPlate(px, py, 1, Math.cos(a) * spd, Math.sin(a) * spd, 0.0)
+    }
+
+    return { storyType, plates }
+  }
+
+  function uploadPlateStory(story, seed) {
+    const floats = new Float32Array(MAX_PLATES * PLATE_FLOATS_PER_ENTRY)
+    story.plates.forEach((p, i) => {
+      const o = i * PLATE_FLOATS_PER_ENTRY
+      floats[o    ] = p.x
+      floats[o + 1] = p.y
+      floats[o + 2] = p.weight
+      floats[o + 3] = p.type      // 0.0 = continental, 1.0 = oceanic
+      floats[o + 4] = p.vx
+      floats[o + 5] = p.vy
+      floats[o + 6] = 0.0
+      floats[o + 7] = 0.0
+    })
+    device.queue.writeBuffer(plateSeedBuf, 0, floats)
+  }
+
+  // ── Generate pipeline ───────────────────────────────────────────────────────
+  async function generate() {
+    const seed = deterministic_seed_from_input(Number(seedInput.value))
+    statusNode.textContent = 'Generating...'
+    const t0 = performance.now()
+
+    // Build and upload plate story
+    const story = buildPlateStory(seed)
+    uploadPlateStory(story, seed)
+
+    // Write uniforms
+    writePlateUniform(story.plates.length, seed)
+    writeGridUniform(seed)
+    writeKineUniform(seed)
+    writeElevUniform(seed)
+    writeRenderUniform(seed)
+
+    const encoder = device.createCommandEncoder()
+
+    function dispatch(pipeline, bg, dx) {
+      const pass = encoder.beginComputePass()
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(0, bg)
+      pass.dispatchWorkgroups(dx)
+      pass.end()
+    }
+
+    // Pass 1: generate plates (plate_id, plate_type, plate_velocity)
+    dispatch(pass1Pipeline, pass1BG, dispatchX)
+
+    // Pass 2: derive land mask from plate types
+    dispatch(pass2Pipeline, pass2BG, dispatchX)
+
+    // Pass 3: boundary stress → kinematic_data
+    dispatch(pass3Pipeline, pass3BG, dispatchX)
+
+    // Pass 9: JFA init (seed from kinematic_data.w)
+    dispatch(pass9Pipeline, pass9BG, dispatchX)
+
+    // Copy seed → ping for first JFA step
+    encoder.copyBufferToBuffer(jfaSeedBuf, 0, jfaPingBuf, 0, CELL_COUNT * 2 * F32)
+
+    // JFA steps (bind groups pre-created with correct step sizes and ping-pong buffers)
+    for (const jfaBG of jfaStepBGs) {
+      dispatch(pass8Pipeline, jfaBG, dispatchX)
+    }
+    // Ensure result lands in jfaPingBuf for pass6
+    // Step i reads ping if i%2==0 (writes pong); after N steps, result is in pong if N is odd
+    if (jfaSteps.length % 2 === 1) {
+      encoder.copyBufferToBuffer(jfaPongBuf, 0, jfaPingBuf, 0, CELL_COUNT * 2 * F32)
+    }
+
+    // Pass 6: elevation
+    dispatch(pass6Pipeline, pass6BG, dispatchX)
+
+    // Pass 7: shaded relief
+    dispatch(pass7Pipeline, pass7BG, dispatchX)
+
+    // Readback
+    encoder.copyBufferToBuffer(shadedRgbaBuf, 0, readbackBuf, 0, CELL_COUNT * U32)
+
+    device.queue.submit([encoder.finish()])
+
+    await readbackBuf.mapAsync(GPUMapMode.READ)
+    const raw = new Uint32Array(readbackBuf.getMappedRange().slice(0))
+    readbackBuf.unmap()
+
+    renderPackedRgba(ctx, raw, WIDTH, HEIGHT)
+
+    const ms = (performance.now() - t0).toFixed(1)
+    statusNode.textContent = `${story.storyType} · ${ms} ms`
+    if (landFractionNode) landFractionNode.textContent = ''
+  }
+
+  // Wire generate button + auto-generate on load
+  generateBtn.addEventListener('click', generate)
+  seedInput.addEventListener('change', generate)
+  await generate()
 }
 
-runPipeline().catch((error) => {
-  if (statusNode) {
-    statusNode.textContent = `Pipeline failed: ${error.message}`
-  }
-  console.error(error)
+main().catch(err => {
+  console.error(err)
+  const s = document.querySelector('#status')
+  if (s) s.textContent = `Error: ${err.message}`
 })

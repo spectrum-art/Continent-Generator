@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Continent Generator Tweak 5.38</title>
+    <title>Continent Generator</title>
   </head>
   <body>
     <main class="layout">
-      <h1>Continent Generator: Tweak 5.38</h1>
-      <p id="status">Booting WebGPU compute pipeline...</p>
+      <h1>Continent Generator</h1>
+      <p id="status">Booting WebGPU pipeline...</p>
       <section class="controls" aria-label="Continent Controls">
         <label for="seed-input">Seed</label>
         <div class="control-row">
@@ -20,134 +20,14 @@
             step="1"
             value="1337"
           />
-          <button id="randomize-seed" type="button">Randomize Seed</button>
+          <button id="randomize-seed" type="button">Randomize</button>
         </div>
-        <label for="land-threshold">Land Threshold</label>
         <div class="control-row">
-          <input
-            id="land-threshold"
-            type="range"
-            min="0.2"
-            max="1.0"
-            step="0.01"
-            value="0.54"
-          />
-          <output id="land-threshold-value" for="land-threshold">0.54</output>
+          <button id="generate-btn" type="button">Generate</button>
         </div>
-        <label for="edge-warp">Edge Warp</label>
-        <div class="control-row">
-          <input id="edge-warp" type="number" step="any" value="0.18" />
-        </div>
-        <label for="plate-count">Plate Count</label>
-        <div class="control-row">
-          <input
-            id="plate-count"
-            type="range"
-            min="3"
-            max="100"
-            step="1"
-            value="15"
-          />
-          <output id="plate-count-value" for="plate-count">15</output>
-        </div>
-        <label for="plate-warp-roughness">Plate Warp Roughness</label>
-        <div class="control-row">
-          <input
-            id="plate-warp-roughness"
-            type="range"
-            min="0.3"
-            max="0.7"
-            step="0.05"
-            value="0.60"
-          />
-          <output id="plate-warp-roughness-value" for="plate-warp-roughness">0.60</output>
-        </div>
-        <label for="mountain-radius">Mountain Radius</label>
-        <div class="control-row">
-          <input
-            id="mountain-radius"
-            type="range"
-            min="20"
-            max="50"
-            step="1"
-            value="35"
-          />
-          <output id="mountain-radius-value" for="mountain-radius">35.0</output>
-        </div>
-        <label for="mountain-height">Mountain Height</label>
-        <div class="control-row">
-          <input
-            id="mountain-height"
-            type="range"
-            min="0.1"
-            max="1.0"
-            step="0.01"
-            value="0.75"
-          />
-          <output id="mountain-height-value" for="mountain-height">0.75</output>
-        </div>
-        <label for="fossil-scale">Fossil Scale</label>
-        <div class="control-row">
-          <input
-            id="fossil-scale"
-            type="range"
-            min="0"
-            max="3"
-            step="0.01"
-            value="0.35"
-          />
-          <output id="fossil-scale-value" for="fossil-scale">0.35</output>
-        </div>
-        <label for="sun-angle">Sun Angle</label>
-        <div class="control-row">
-          <input
-            id="sun-angle"
-            type="range"
-            min="0"
-            max="360"
-            step="1"
-            value="315"
-          />
-          <output id="sun-angle-value" for="sun-angle">315</output>
-        </div>
-        <label for="elevation-scale">Elevation Scale</label>
-        <div class="control-row">
-          <input
-            id="elevation-scale"
-            type="range"
-            min="1"
-            max="20"
-            step="0.1"
-            value="10.0"
-          />
-          <output id="elevation-scale-value" for="elevation-scale">10.0</output>
-        </div>
-        <label for="vertical-exaggeration">Vertical Exaggeration</label>
-        <div class="control-row">
-          <input
-            id="vertical-exaggeration"
-            type="range"
-            min="1"
-            max="20"
-            step="0.1"
-            value="7.5"
-          />
-          <output id="vertical-exaggeration-value" for="vertical-exaggeration">7.5</output>
-        </div>
-        <label for="render-mode">Render Mode</label>
-        <div class="control-row">
-          <select id="render-mode">
-            <option value="land_mask">Land Mask</option>
-            <option value="plate_id">Plate IDs</option>
-            <option value="kinematics">Kinematics</option>
-            <option value="sdf_distance">SDF Distance</option>
-            <option value="elevation">Elevation</option>
-            <option value="shaded_relief" selected>Shaded Relief</option>
-          </select>
-        </div>
-        <p id="land-fraction">Land fraction: --%</p>
+        <p id="land-fraction"></p>
       </section>
-      <canvas id="heightmap" aria-label="Generated heightmap"></canvas>
+      <canvas id="heightmap" aria-label="Generated continent"></canvas>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
