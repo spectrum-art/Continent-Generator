@@ -58,6 +58,9 @@ function renderPackedRgba(ctx, packedColor, width, height) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+const BUILD_TAG = 'v4.3 — ancient sutures, craton_factor, snow caps'
+console.log(`Continent Generator ${BUILD_TAG}`)
+
 async function main() {
   // Init WASM
   await initWasm()
@@ -303,7 +306,7 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 315.0, true)   // sun_angle
     v.setFloat32(20, 10.0, true)    // elevation_scale
-    v.setFloat32(24, 4.0, true)     // vertical_exaggeration
+    v.setFloat32(24, 5.5, true)     // vertical_exaggeration
     v.setFloat32(28, seed >>> 0, true)
     device.queue.writeBuffer(renderUniformBuf, 0, a)
   }
@@ -578,7 +581,8 @@ async function main() {
     renderPackedRgba(ctx, raw, WIDTH, HEIGHT)
 
     const ms = (performance.now() - t0).toFixed(1)
-    statusNode.textContent = `${story.storyType} · ${ms} ms`
+    statusNode.textContent = `${story.storyType} · ${ms} ms · ${BUILD_TAG}`
+    console.log(`Generated: seed=${seed} type=${story.storyType} plates=${story.plates.length} sutures=${story.sutures.length} (${ms}ms)`)
     if (landFractionNode) landFractionNode.textContent = ''
   }
 

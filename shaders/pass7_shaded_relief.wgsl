@@ -29,41 +29,47 @@ fn sample_elev(x: i32, y: i32) -> f32 {
   return elevation[u32(cy) * params.width + u32(cx)];
 }
 
-// ── USGS hypsometric land ramp ────────────────────────────────────────────────
-// Elevation range for land: ~0.28 (base continental) to ~1.0 (high peaks)
-// We map this to a cartographic colour ramp.
+// ── USGS-inspired hypsometric land ramp ──────────────────────────────────────
+// 5-stop ramp with stronger tonal breaks so mountains read clearly on screen.
+// Snow caps apply above 0.72 elevation (smoothstep blend into white).
 fn land_color(elev: f32) -> vec3<f32> {
-  // Normalise to [0,1] across the land range
+  // Normalise elevation across the full land range
   let t = clamp((elev - 0.15) / (1.0 - 0.15), 0.0, 1.0);
 
-  // 5-stop ramp: lowland green → mid tan → high stone → peak chalk
-  let c0 = vec3<f32>(0.710, 0.745, 0.573); // sage green lowland
-  let c1 = vec3<f32>(0.773, 0.718, 0.557); // warm buff
-  let c2 = vec3<f32>(0.816, 0.769, 0.620); // pale tan
-  let c3 = vec3<f32>(0.855, 0.820, 0.686); // light stone
-  let c4 = vec3<f32>(0.925, 0.910, 0.882); // near-white chalk peak
+  // Ramp: rich lowland green → warm midland buff → pale upland stone → chalk
+  let c0 = vec3<f32>(0.643, 0.694, 0.498); // rich sage green   (lowland)
+  let c1 = vec3<f32>(0.741, 0.694, 0.518); // warm straw buff   (gentle upland)
+  let c2 = vec3<f32>(0.800, 0.753, 0.600); // pale tan          (upland)
+  let c3 = vec3<f32>(0.847, 0.812, 0.682); // light stone       (high terrain)
+  let c4 = vec3<f32>(0.918, 0.902, 0.871); // chalk             (near peak)
 
-  if (t < 0.22) {
-    return mix(c0, c1, t / 0.22);
-  } else if (t < 0.45) {
-    return mix(c1, c2, (t - 0.22) / 0.23);
-  } else if (t < 0.68) {
-    return mix(c2, c3, (t - 0.45) / 0.23);
+  var base_col: vec3<f32>;
+  if (t < 0.20) {
+    base_col = mix(c0, c1, t / 0.20);
+  } else if (t < 0.42) {
+    base_col = mix(c1, c2, (t - 0.20) / 0.22);
+  } else if (t < 0.66) {
+    base_col = mix(c2, c3, (t - 0.42) / 0.24);
   } else {
-    return mix(c3, c4, (t - 0.68) / 0.32);
+    base_col = mix(c3, c4, (t - 0.66) / 0.34);
   }
+
+  // Snow caps: blend to near-white above elev 0.72
+  let snow = vec3<f32>(0.960, 0.964, 0.970);
+  let snow_t = smoothstep(0.72, 0.82, elev);
+  return mix(base_col, snow, snow_t);
 }
 
 // ── Ocean colour ──────────────────────────────────────────────────────────────
 fn ocean_color(shelf_t: f32) -> vec3<f32> {
   // shelf_t: 0 = right at coast, 1 = deep ocean
-  let shallow = vec3<f32>(0.322, 0.533, 0.647); // coastal blue
-  let mid     = vec3<f32>(0.133, 0.353, 0.506); // shelf blue
-  let deep    = vec3<f32>(0.055, 0.180, 0.310); // abyssal deep blue
-  if (shelf_t < 0.4) {
-    return mix(shallow, mid, shelf_t / 0.4);
+  let shallow = vec3<f32>(0.376, 0.600, 0.690); // bright coastal teal
+  let mid     = vec3<f32>(0.122, 0.341, 0.502); // shelf blue
+  let deep    = vec3<f32>(0.039, 0.133, 0.259); // abyssal near-black blue
+  if (shelf_t < 0.35) {
+    return mix(shallow, mid, shelf_t / 0.35);
   }
-  return mix(mid, deep, (shelf_t - 0.4) / 0.6);
+  return mix(mid, deep, (shelf_t - 0.35) / 0.65);
 }
 
 @compute @workgroup_size(256, 1, 1)
