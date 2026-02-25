@@ -250,8 +250,7 @@ async function main() {
     device.queue.writeBuffer(kineUniformBuf, 0, a)
   }
 
-function writeElevUniform(seed) {
-    // ElevationParams: width, height, seed, _pad0, terrain_freq, mountain_height, _pad1, _pad2...
+  function writeElevUniform(seed) {
     const a = new ArrayBuffer(48)
     const v = new DataView(a)
     v.setUint32(0, WIDTH, true)

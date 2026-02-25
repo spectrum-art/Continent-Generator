@@ -1,6 +1,8 @@
-# Continent Generator — CLAUDE.md
+# Continent Generator v4 — CLAUDE.md
 
-Browser-native procedural continent generator. WebGPU compute pipeline (WGSL) + Rust/WASM helpers, bundled with Vite. Fixed 2048×1024 grid. Fully deterministic from a u32 seed.
+Browser-native procedural continent generator. WebGPU compute pipeline (WGSL) +
+Rust/WASM helpers, bundled with Vite. Fixed 2048×1024 grid. Fully deterministic from
+a u32 seed. See `docs/vision.md` for the emotional core and narrative design goals.
 
 ## Commands
 
@@ -17,192 +19,170 @@ wasm-pack build wasm-core --target web --out-dir ../src/wasm --release
 
 Requires: Node.js, Rust toolchain + `wasm-pack`, Chromium-based browser with WebGPU.
 
+## Architecture Principle
+
+**Plates first. Everything flows from the plates.**
+
+The continent shape is derived from tectonic plate types — continental plates become
+land, oceanic plates become ocean. The coastline IS the plate boundary (organic shape
+comes from domain-warped Voronoi in pass1). Mountains stand at convergent margins;
+rifts open at divergent ones.
+
+v3 generated a blob, then painted plates on top (inverted, broken).
+v4 generates plates, then derives land from them (correct, narrative).
+
 ## Project Layout
 
 ```
-src/main.js               # JS orchestration: GPU init, bind groups, run loop
+src/main.js               # JS orchestration: GPU init, buildPlateStory, pipeline
 src/style.css
 shaders/                  # WGSL compute shaders (see pipeline below)
-wasm-core/src/lib.rs      # Rust: parameter normalization + dispatch sizing
-index.html                # UI controls + canvas
-docs/notes-to-self.txt    # Canonical parameter constraints
+wasm-core/src/lib.rs      # Rust: grid dimensions + dispatch helpers
+index.html                # Minimal UI: seed input, generate button, canvas
+docs/vision.md            # Emotional core and narrative design principles
 ```
 
 ## Pipeline — Runtime Execution Order
 
-Pass file numbers do NOT match run order. Actual order:
-
 | Step | File | Purpose |
 |------|------|---------|
-| 1 | `pass1_generate_land_mask.wgsl` | FBM + box-SDF falloff → binary land mask |
-| 2 | `pass2_reduce_bbox.wgsl` | Parallel reduction → land bounding box |
-| 3 | `pass3_shift_land_mask.wgsl` | Recentre land → `final_land_mask` |
-| 4 | `pass4_generate_plate_ids.wgsl` | Weighted Voronoi: active plates + fossil plates + plume mask |
-| 5 | `pass5_compute_fault_stress.wgsl` | 4-neighbour boundary scan → `kinematic_data` vec4 |
-| 6 | `pass9_jfa_init.wgsl` | Seed JFA from boundary cells (`kinematic_data.w > 0.5`) |
-| 7 | `pass8_jfa_step.wgsl` (looped) | Ping-pong Jump Flood → nearest-fault coords |
-| 8 | `pass6_generate_elevation.wgsl` | Topography synthesis |
-| 9 | `pass7_shaded_relief.wgsl` | RGBA output for all render modes |
+| 1 | `pass1_generate_plates.wgsl` | Domain-warped Voronoi → plate_id, plate_type, plate_velocity |
+| 2 | `pass2_derive_land_mask.wgsl` | Continental plate pixels → land_mask = 1.0 |
+| 3 | `pass3_boundary_stress.wgsl` | 4-neighbour scan → kinematic_data |
+| 4 | `pass9_jfa_init.wgsl` | Seed JFA from boundary cells (kinematic_data.w > 0.5) |
+| 5 | `pass8_jfa_step.wgsl` (×11) | Ping-pong Jump Flood → nearest boundary pixel |
+| 6 | `pass6_elevation.wgsl` | Narrative elevation synthesis |
+| 7 | `pass7_shaded_relief.wgsl` | USGS-inspired RGBA output |
+
+## Geological Story Generator (JS)
+
+`buildPlateStory(seed)` in `main.js` generates a structured geological narrative
+before any GPU work. Four archetypes derived from seed:
+
+| Archetype | Description | Key Effect |
+|-----------|-------------|------------|
+| `single_continent` | One dominant continental cluster | Central landmass, passive margins |
+| `collision` | Two continental masses converging | Guaranteed central orogen |
+| `rift` | One continent pulling apart | Central divergent rift valley |
+| `archipelago` | Several scattered small plates | Island chains, varied coasts |
+
+Continental plates are placed in the central UV region [0.35,1.65]×[0.25,0.75].
+Oceanic plates fill the remainder. No centering pass needed — position is by design.
+
+## Plate Buffer Layout (Host → GPU)
+
+Each plate: 8 floats / 32 bytes. Max 24 plates (typically 20 used).
+
+```
+[0] pos.x        (x ∈ [0,2])
+[1] pos.y        (y ∈ [0,1])
+[2] weight       (Voronoi bias, linear; continental 0.06–0.20, oceanic 0.0)
+[3] plate_type   (0.0 = continental, 1.0 = oceanic)
+[4] velocity.x   (m/yr convention, up to ±12)
+[5] velocity.y
+[6] _pad
+[7] _pad
+```
 
 ## Key Buffer Shapes
 
-All buffers are flat 1D, indexed `y * width + x`.
+All buffers flat 1D, indexed `y * width + x`.
 
 | Buffer | Type | Notes |
 |--------|------|-------|
-| `land_mask` / `final_land_mask` | `array<f32>` | 0.0 = ocean, 1.0 = land |
-| `plate_id` | `array<u32>` | Index into active plates (0–99) |
-| `plate_velocity` | `array<vec2<f32>>` | Per-pixel velocity (m/yr convention) |
-| `fossil_id` | `array<u32>` | Index into fossil plate array |
-| `plume_mask` | `array<f32>` | 0–1 hotspot proximity |
-| `kinematic_data` | `array<vec4<f32>>` | `.x`=normal stress, `.y`=shear, `.z`=crust_type, `.w`=valid flag |
-| `jfa_seed` / `jfa_ping` / `jfa_pong` | `array<vec2<f32>>` | Nearest boundary pixel coords; invalid = (-10000, -10000) |
-| `elevation` | `array<f32>` | [0, 1] final height |
+| `plate_id` | `array<u32>` | Voronoi cell index (0–23) |
+| `plate_type` | `array<f32>` | 0.0 = continental, 1.0 = oceanic |
+| `plate_velocity` | `array<vec2<f32>>` | Per-pixel velocity from plate |
+| `land_mask` | `array<f32>` | 1.0 = land, 0.0 = ocean |
+| `kinematic_data` | `array<vec4<f32>>` | .x=approach_speed, .y=shear, .z=boundary_type, .w=valid |
+| `jfa_seed/ping/pong` | `array<vec2<f32>>` | Nearest boundary pixel coords; invalid = (-10000,-10000) |
+| `elevation` | `array<f32>` | [0,1] final height |
 | `shaded_rgba` | `array<u32>` | Packed RGBA8 for canvas |
 
-## Active Plate Data (Host → GPU)
+## Kinematic Convention (Critical)
 
-Active plates are built in JS (`buildActivePlateSeedData`) and uploaded as a storage buffer. Layout per plate (8 floats / 32 bytes):
+In pass3, approach_speed = `dot(self_v − neighbor_v, dir_to_neighbor)`:
+- **Positive** = self approaching neighbor = **compression → mountains**
+- **Negative** = self diverging from neighbor = **extension → rift**
 
-```
-[0] pos.x   (×2.0 of norm, 0–2 range)
-[1] pos.y   (0–1 range)
-[2] weight  (pow4 curve, max 0.65)
-[3] pad
-[4] velocity.x
-[5] velocity.y
-[6] pad
-[7] pad
-```
+This is the OPPOSITE sign from v3's pass5 (which used `neighbor_v - self_v`).
 
-Fossil plates (30) and plume points (5) are generated **inside pass4** as `var<private>` arrays — they are NOT uploaded from the host.
-
-## UV Space Convention (Critical)
-
-The grid is 2048×1024 — a 2:1 aspect ratio. Throughout all shaders:
-
-```wgsl
-let sample_uv = vec2<f32>(u_norm * 2.0, v_norm);  // x ∈ [0,2], y ∈ [0,1]
-```
-
-`u_norm * 2.0` appears everywhere. When sampling noise, computing plate positions, or doing UV-space distance calculations, **always account for the 2:1 stretch**. Plate positions, fossil positions, and plume positions also use `hx * 2.0` so they span the full canvas.
-
-When converting pixel directions (across_px / along_px) to UV-space directions, you must rescale:
-```wgsl
-let across_uv = normalize(vec2<f32>(across_px.x * inv_width * 2.0, across_px.y * inv_height));
-```
-
-## Perlin Noise Implementation
-
-All shaders use a custom seeded Perlin with a **16-gradient wheel** (22.5° increments). Using fewer gradients causes visible grid artifacts. The `seeded_hash_2d` function avoids a permutation table by hashing cell coordinates with the seed directly. Different seeds per octave are mixed with `seed + octave * 0x9e3779b9u`.
-
-Pass4 applies per-corner seed XOR variants (`^ 0x9e3779b9u`, `^ 0x85ebca6bu`, etc.) for corner independence. Other shaders use the same seed for all corners (simpler variant).
-
-## JFA (Jump Flood Algorithm) for Nearest-Fault Distance
-
-- `pass9_jfa_init`: any cell with `kinematic_data.w > 0.5` becomes a seed (stores its own pixel coords)
-- `pass8_jfa_step`: 3×3 neighbourhood check at stride `step_size`; ping-pong between two buffers
-- Step sizes halve each iteration: `ceil(max_dim/2), ceil/4, ..., 1`
-- Invalid cells store `(-10000, -10000)`; check with `p.x > -9999.0`
-- `pass6` reads `jfa_nearest[flat_index]` as the nearest boundary pixel
-
-In `pass6`, the JFA result is **smoothed over a 5×5 neighbourhood** around the nearest boundary cell to reduce sub-pixel jitter from dynamic plate velocities.
+`kinematic_data.z` (boundary_type) = `plate_type[self] + plate_type[neighbor]`:
+- 0.0 = continental–continental
+- 1.0 = continental–oceanic (mixed)
+- 2.0 = oceanic–oceanic
 
 ## Elevation Synthesis (pass6)
 
-Four additive components, clamped to [0, 1] at the end:
+Base elevation (plate-type driven):
+- Continental: `0.28 + (craton_fbm − 0.5) × 0.10 + interior_swell`
+- Oceanic: `0.04 + abyssal_fbm × 0.04`
 
-```
-final_elevation = base_continent_height + active_elev + fossil_elev + plume_elev
-```
+Boundary-driven (uses JFA nearest + 5×5 smoothed kinematic sample):
+- Convergent cont-cont (kin_x > 0, btype < 1.5): anisotropic ridge mountains
+- Divergent continental (kin_x < 0, is_continental): rift valley depression
+- Divergent oceanic (kin_x < 0, oceanic): mid-ocean ridge swell
 
-**`base_continent_height`**: `mix(0.08, 0.22, mask) + base_noise_component * craton_feather`
-- Low-freq FBM lowland noise ± interior swell layer
-- Feathered near active boundaries (`craton_feather` from 0.65 → 1.0)
-
-**`active_elev`** (compression `final_kin_x > 0`):
-- `base_shape` (pow 0.7) + `peak_detail * ridge_noise` (pow 1.8) concentrated at crest
-- Slope-masked erosion incisions subtract at mid-slope (`falloff * (1 - falloff) * 4`)
-- Gated by `mountain_gate` (two-octave gap noise) — mountains do NOT span every boundary
-
-**`active_elev`** (extension `final_kin_x < 0`):
-- Low-amplitude rift depression: `final_kin_x * falloff * 0.18 * rift_fbm`
-- Rift multiplier was 0.35 before Tweak 5.36 — caused ocean-depth gashes
-
-**`fossil_elev`**: Ancient ridge terrain from `ridge_multifractal`, gated by `zone_gate` (smoothstep 0.30–0.75)
-
-**`plume_elev`**: Hotspot dome — `smoothstep(0,1, plume + snoise_perturb) * (fbm_noise + detail)`
-
-### Anisotropic Mountain Ranges (Tweak 5.36+)
-
-Mountains are aligned to tectonic boundaries using a local frame built from the JFA nearest-point direction:
-
-```wgsl
-let across_px = bp_diff / bp_len;            // perpendicular to boundary
-let along_px  = vec2(-across_px.y, across_px.x);  // tangent to boundary
-```
-
-Ridge noise is stretched 4× along the boundary tangent. `dist_warp` is projected 100% along / 25% across to keep snaking on-track. `long_mod` varies width by sampling noise along a 1D arc coordinate.
+Anisotropic mountain frame from v3 preserved: along/across boundary decomposition,
+14× stretch along boundary, mountain gate noise for non-continuous ranges.
 
 ## Shaded Relief (pass7)
 
-Render mode codes: 1=kinematics, 2=sdf_distance, 3=shaded_relief, 4=elevation.
+Ocean threshold: 0.15 (pixels below this render as water regardless of plate type).
 
-Shaded relief lighting model:
-- Main light from `sun_angle`, fill light at `sun_angle + 120°` (weight 0.22)
-- Ambient 0.18, total light clamped [0.15, 1.0] to prevent pitch-black shadows
-- Hypsometric land ramp over elevation range [0.08, 0.73] (4 colour stops)
-- Ocean: shallow/deep gradient using JFA boundary distance, crossfade over 280px
+USGS-inspired 5-stop land ramp:
+- 0.15–0.28 (t 0–0.22): sage green `#b5be92`
+- 0.28–0.42 (t 0.22–0.45): warm buff `#c5b78e`
+- 0.42–0.57 (t 0.45–0.68): pale tan `#d0c49e`
+- 0.57–0.73 (t 0.68–1.0): light stone → chalk `#dad1af → #ece8e1`
 
-## Fixed vs. Tunable Parameters
+Ocean: JFA distance → shelf crossfade from coastal blue `#527888` → abyssal `#0e2e4f`
 
-Several parameters look like sliders but are promoted to JS constants in `main.js`:
+Hillshading: primary NW (315°) + soft fill (+150°, 0.18 weight). Phase 4 will
+upgrade to multi-directional oblique (MDOW).
 
-| Parameter | Fixed Value | Clamp in WASM |
-|-----------|-------------|---------------|
-| Falloff Strength | 2.00 | — |
-| Noise Amplitude | 0.60 | — |
-| Plate Warp Amplitude | 1.10 | — |
-| Terrain Roughness | 0.70 | — |
-| Terrain Frequency | 18.0 | — |
+## UV Space Convention
 
-User-adjustable ranges (see `wasm-core/src/lib.rs` for authoritative clamps):
+Grid is 2048×1024 (2:1 aspect). Throughout all shaders:
+```wgsl
+let uv = vec2<f32>(x * inv_width * 2.0, y * inv_height);  // x ∈ [0,2], y ∈ [0,1]
+```
+Plate positions are set in this same UV space. Noise sampling always uses this
+space. If a pattern looks squashed, check the `* 2.0` factor.
 
-| Parameter | Default | Clamp |
-|-----------|---------|-------|
-| Land Threshold | 0.54 | [0.2, 1.0] |
-| Edge Warp | 0.18 | [0.0, 5.0] |
-| Plate Count | 15 | [3, 100] |
-| Plate Warp Roughness | 0.60 | [0.3, 0.70] |
-| Mountain Radius | 35.0 | [20.0, 50.0] |
-| Mountain Height | 0.75 | [0.1, 1.0] |
-| Fossil Scale | 0.15 | — |
-| Sun Angle | 315° | [0, 360] |
-| Elevation Scale | 10.0 | [1.0, 20.0] |
-| Vertical Exaggeration | 7.5 | [1.0, 20.0] |
+## JFA (Jump Flood Algorithm)
+
+- pass9: seeds from `kinematic_data.w > 0.5` (plate boundary pixels)
+- pass8: 3×3 neighbourhood at stride `step_size`; ping-pong jfaPing ↔ jfaPong
+- 11 steps for 2048-wide grid: 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1
+- After 11 steps, result is in jfaPongBuf → copied to jfaPingBuf for pass6
+- Per-step uniform buffers pre-created in JS (avoids mid-encoder writeBuffer)
+- Invalid cells: (-10000, -10000); test with `p.x > -9999.0`
 
 ## Dispatch Sizing (Rust/WASM)
 
-`wasm-core` handles workgroup math. Grid is always 2048×1024. Workgroup size = 256. The reduce pass (pass2) uses `dispatch_x.div_ceil(64)`. Use `six_pass_dispatch_sequence` for the current 6-pass land generation sequence.
+Grid: 2048×1024 = 2,097,152 cells. Workgroup size: 256. dispatch_x = 8192.
+Use `n_pass_dispatch(CELL_COUNT, 1)` for a single full-grid pass dispatch value.
+`n_pass_dispatch(CELL_COUNT, N)` returns N identical dispatch_x values.
 
-## Known Artifacts and Their Fixes
+## Road Map
 
-| Artifact | Root Cause | Fix Applied |
-|----------|-----------|-------------|
-| Perlin grid visible in terrain | Too few gradient directions | 16-gradient wheel (Tweak 5.34) |
-| Scale striation bands | snoise warp anchor offsets at same scale | Remove anchors entirely (Tweak 5.33) |
-| Comb/stripe on mountain crests | Ridge noise at 6 octaves | Reduce to 4 octaves (Tweak 5.37) |
-| Circular/radial mountain shapes | Isotropic ridge noise | Anisotropic frame + 4× along-boundary stretch (Tweak 5.36) |
-| Rift zones creating ocean-depth gashes | Rift multiplier 0.35 too strong | Reduced to 0.18 (Tweak 5.36) |
-| Interior land completely flat | base_noise amplitude too small | Amplitude 0.06→0.10 + interior swell layer (Tweak 5.37) |
-| Mountains span every boundary end-to-end | No gap gating | `mountain_gate` two-octave noise (Tweak 5.35) |
-| Regular striation in terrain warp | UV warp frequency too high (0.4) | Lowered to 0.03, centered output (Tweak 5.35) |
+| Phase | Status | Goal |
+|-------|--------|------|
+| 1 | ✅ done | Repo skeleton, archive v3 |
+| 2 | ✅ done | Plates-first pipeline, narrative story generator |
+| 3 | pending | Interior terrain richness (cratons, basins, passive margins) |
+| 4 | pending | Multi-directional hillshading + USGS palette refinement |
+| 5 | pending | Rivers (D8 flow accumulation) |
+| 6 | pending | Polish: render modes, UI, export |
 
 ## Gotchas
 
-- **Pass numbering ≠ run order.** pass6/7/8/9 run in a different order than their filenames suggest. See the pipeline table above.
+- **Pass numbering ≠ run order.** pass6/7/8/9 run in non-sequential order (see table).
 - **No WebGPU in Firefox** by default. Use Chrome/Edge with WebGPU enabled.
-- **WASM rebuild required** after any `wasm-core/src/lib.rs` change. `npm run dev` does this automatically.
-- **Uniform buffer alignment:** All param structs use explicit `_pad` fields to satisfy 16-byte alignment. When adding fields, maintain the pattern.
-- **Aspect ratio in noise coords:** If a noise pattern looks squashed/stretched, check that `sample_uv.x` uses the `* 2.0` factor.
-- **JFA requires `kinematic_data.w > 0.5`** to be set at boundary pixels — if `pass5` logic changes, verify the valid-flag write.
+- **No WebGPU in headless Chromium / WSL**. Test in a real browser window.
+- **WASM rebuild required** after any `wasm-core/src/lib.rs` change. `npm run dev` does this.
+- **Uniform buffer alignment:** All param structs are multiples of 16 bytes. Maintain this.
+- **`i++` is not valid WGSL.** Use `i += 1u` (unsigned) or `i += 1` (signed).
+- **Kinematic sign**: positive approach_speed = compression = mountains (v3 was inverted).
+- **Archive branch**: `archive/v3` on origin has the full v3 history with tweak-5.x work.

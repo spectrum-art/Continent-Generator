@@ -98,7 +98,7 @@ fn fbm(p: vec2<f32>, freq: f32, roughness: f32, octaves: u32, seed: u32) -> f32 
   var f   = freq;
   var sum = 0.0;
   var div = 0.0;
-  for (var i = 0u; i < octaves; i++) {
+  for (var i = 0u; i < octaves; i += 1u) {
     sum += (perlin(q * f, seed + i * 0x9e3779b9u) * 0.5 + 0.5) * amp;
     div += amp;
     q    = rot * q;
@@ -140,7 +140,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var i = 0u; i < count; i++) {
     let p     = plates[i];
     let diff  = warped - p.pos;
-    let score = dot(diff, diff) - p.weight * p.weight;
+    let score = dot(diff, diff) - p.weight;
     if (score < best_score) {
       best_score = score;
       best_id    = i;

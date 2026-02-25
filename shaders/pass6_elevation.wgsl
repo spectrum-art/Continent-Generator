@@ -88,7 +88,7 @@ fn fbm(p: vec2<f32>, freq: f32, roughness: f32, octaves: u32, seed: u32) -> f32 
   let rot = mat2x2<f32>(0.8, -0.6, 0.6, 0.8);
   var q   = rot * p;
   var amp = 0.5; var f = freq; var sum = 0.0; var div = 0.0;
-  for (var i = 0u; i < octaves; i++) {
+  for (var i = 0u; i < octaves; i += 1u) {
     sum += (perlin(q * f, seed + i * 0x9e3779b9u) * 0.5 + 0.5) * amp;
     div += amp;
     q = rot * q; f *= 2.0; amp *= roughness;
@@ -100,7 +100,7 @@ fn ridge_fbm(p: vec2<f32>, freq: f32, roughness: f32, octaves: u32, seed: u32) -
   let rot = mat2x2<f32>(0.8, -0.6, 0.6, 0.8);
   var q   = rot * p;
   var amp = 0.5; var f = freq; var sum = 0.0; var div = 0.0;
-  for (var i = 0u; i < octaves; i++) {
+  for (var i = 0u; i < octaves; i += 1u) {
     let n     = perlin(q * f, seed + i * 0x85ebca6bu);
     var ridge = 1.0 - abs(n);
     ridge     = ridge * ridge;
@@ -120,8 +120,8 @@ fn sample_kinematic(nearest: vec2<f32>) -> vec2<f32> {
   var sum_x     = 0.0;
   var sum_btype = 0.0;
   var cnt       = 0.0;
-  for (var dy = -2; dy <= 2; dy++) {
-    for (var dx = -2; dx <= 2; dx++) {
+  for (var dy = -2; dy <= 2; dy += 1) {
+    for (var dx = -2; dx <= 2; dx += 1) {
       let sx  = clamp(fx + dx, 0, i32(params.width)  - 1);
       let sy  = clamp(fy + dy, 0, i32(params.height) - 1);
       let k   = kinematic_data[u32(sy) * params.width + u32(sx)];
