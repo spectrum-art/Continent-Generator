@@ -1,6 +1,6 @@
 // Pass 7: Shaded relief rendering.
 // Renders elevation as a USGS-inspired hypsometric shaded relief map.
-// Phase 2: single-direction hillshading (Phase 4 will add multi-directional).
+// v4.4: multi-directional oblique weighted (MDOW) hillshading + recalibrated palette.
 
 struct RenderParams {
   width:                u32,
@@ -29,34 +29,37 @@ fn sample_elev(x: i32, y: i32) -> f32 {
   return elevation[u32(cy) * params.width + u32(cx)];
 }
 
-// ── USGS-inspired hypsometric land ramp ──────────────────────────────────────
-// 5-stop ramp with stronger tonal breaks so mountains read clearly on screen.
-// Snow caps apply above 0.72 elevation (smoothstep blend into white).
+// ── Hypsometric land ramp (USGS-inspired) ────────────────────────────────────
+// Calibrated to actual terrain output range [0.15, 0.65].
+// t = (elev − 0.15) / 0.50  maps land to [0,1].
+// Coast green → lowland green → olive-buff → warm brown → reddish mountain →
+// grey-buff peak → snow above ~0.60.
 fn land_color(elev: f32) -> vec3<f32> {
-  // Normalise elevation across the full land range
-  let t = clamp((elev - 0.15) / (1.0 - 0.15), 0.0, 1.0);
+  let t = clamp((elev - 0.15) / 0.50, 0.0, 1.0);
 
-  // Ramp: rich lowland green → warm midland buff → pale upland stone → chalk
-  let c0 = vec3<f32>(0.643, 0.694, 0.498); // rich sage green   (lowland)
-  let c1 = vec3<f32>(0.741, 0.694, 0.518); // warm straw buff   (gentle upland)
-  let c2 = vec3<f32>(0.800, 0.753, 0.600); // pale tan          (upland)
-  let c3 = vec3<f32>(0.847, 0.812, 0.682); // light stone       (high terrain)
-  let c4 = vec3<f32>(0.918, 0.902, 0.871); // chalk             (near peak)
+  let c0 = vec3<f32>(0.34, 0.50, 0.19); // coast / estuary green
+  let c1 = vec3<f32>(0.47, 0.57, 0.23); // lowland green
+  let c2 = vec3<f32>(0.64, 0.60, 0.27); // transition olive-buff
+  let c3 = vec3<f32>(0.68, 0.48, 0.22); // upland warm brown
+  let c4 = vec3<f32>(0.57, 0.35, 0.16); // mountain reddish-brown
+  let c5 = vec3<f32>(0.74, 0.68, 0.56); // high-peak grey-buff
 
   var base_col: vec3<f32>;
   if (t < 0.20) {
     base_col = mix(c0, c1, t / 0.20);
-  } else if (t < 0.42) {
-    base_col = mix(c1, c2, (t - 0.20) / 0.22);
-  } else if (t < 0.66) {
-    base_col = mix(c2, c3, (t - 0.42) / 0.24);
+  } else if (t < 0.44) {
+    base_col = mix(c1, c2, (t - 0.20) / 0.24);
+  } else if (t < 0.64) {
+    base_col = mix(c2, c3, (t - 0.44) / 0.20);
+  } else if (t < 0.82) {
+    base_col = mix(c3, c4, (t - 0.64) / 0.18);
   } else {
-    base_col = mix(c3, c4, (t - 0.66) / 0.34);
+    base_col = mix(c4, c5, (t - 0.82) / 0.18);
   }
 
-  // Snow caps: blend to near-white above elev 0.72
-  let snow = vec3<f32>(0.960, 0.964, 0.970);
-  let snow_t = smoothstep(0.72, 0.82, elev);
+  // Snow: blend to near-white above elev 0.60 (peaks now reachable)
+  let snow  = vec3<f32>(0.955, 0.958, 0.965);
+  let snow_t = smoothstep(0.60, 0.68, elev);
   return mix(base_col, snow, snow_t);
 }
 
@@ -94,7 +97,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
 
-  // ── Hillshading ─────────────────────────────────────────────────────────────
+  // ── MDOW Hillshading ────────────────────────────────────────────────────────
+  // Multi-directional oblique weighted (Patterson 2001 / USGS style).
+  // Four light azimuths at progressively steeper angles; NW primary carries
+  // the most weight and sits at a low elevation angle (~25°) for strong shadows.
+  // Additional directions fill valleys and reveal ridges at all orientations.
   let left   = sample_elev(x - 1, y);
   let right  = sample_elev(x + 1, y);
   let top    = sample_elev(x, y - 1);
@@ -105,18 +112,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dy     = (bottom - top) * relief_scale;
   let normal = normalize(vec3<f32>(-dx, -dy, 1.0));
 
-  // Primary sun — NW convention (315°)
-  let sun_rad  = radians(params.sun_angle);
-  let light    = normalize(vec3<f32>(cos(sun_rad), sin(sun_rad), 1.0));
-  let diffuse  = max(dot(normal, light), 0.0);
+  let sun = radians(params.sun_angle); // 315° NW
+  // l1: NW  at ~25° altitude  (z=0.47) — primary dramatic shadows
+  let l1 = normalize(vec3<f32>(cos(sun),           sin(sun),           0.47));
+  // l2: NE  at ~35° altitude  (z=0.70) — fills valleys NW misses
+  let l2 = normalize(vec3<f32>(cos(sun + 1.5708),  sin(sun + 1.5708),  0.70));
+  // l3: WNW at ~45° altitude  (z=1.00) — gentle cross-fill
+  let l3 = normalize(vec3<f32>(cos(sun + 0.7854),  sin(sun + 0.7854),  1.00));
+  // l4: SE  near-overhead      (z=2.50) — prevents ink-black enclosed shadows
+  let l4 = normalize(vec3<f32>(cos(sun + 3.14159), sin(sun + 3.14159), 2.50));
 
-  // Soft fill light from opposite direction at shallower angle
-  let fill_rad = radians(params.sun_angle + 150.0);
-  let fill_dir = normalize(vec3<f32>(cos(fill_rad), sin(fill_rad), 1.8));
-  let fill     = max(dot(normal, fill_dir), 0.0) * 0.18;
+  let diffuse = max(dot(normal, l1), 0.0) * 0.55
+              + max(dot(normal, l2), 0.0) * 0.25
+              + max(dot(normal, l3), 0.0) * 0.12
+              + max(dot(normal, l4), 0.0) * 0.08;
 
-  let ambient  = 0.15;
-  let illum    = clamp(ambient + diffuse * (1.0 - ambient) + fill, 0.12, 1.0);
+  let ambient = 0.10;
+  let illum   = clamp(ambient + diffuse, 0.08, 1.0);
 
   // ── Land colour × light ──────────────────────────────────────────────────────
   let base_col = land_color(h);

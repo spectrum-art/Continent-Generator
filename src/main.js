@@ -58,7 +58,7 @@ function renderPackedRgba(ctx, packedColor, width, height) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-const BUILD_TAG = 'v4.3 — ancient sutures, craton_factor, snow caps'
+const BUILD_TAG = 'v4.4 — MDOW hillshading, multi-scale interior relief, coast fix'
 console.log(`Continent Generator ${BUILD_TAG}`)
 
 async function main() {

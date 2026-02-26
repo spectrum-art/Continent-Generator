@@ -227,12 +227,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // ── Base elevation ──────────────────────────────────────────────────────────
   var base: f32;
   if (is_continental) {
-    // Continental crust: textured margins, flatter ancient craton cores
-    let craton     = fbm(uv * 3.0, 1.0, 0.55, 4u, params.seed ^ 0xb7e15162u);
-    let swell      = (fbm(uv * 1.2, 1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu) * 2.0 - 1.0) * 0.06;
-    let craton_amp = mix(0.12, 0.03, craton_factor);
-    base = CONT_ELEV_BASE + (craton - 0.5) * craton_amp
-           + swell * mix(1.0, 0.35, craton_factor);
+    // Continental crust: three-scale FBM stack so the hillshader has detail to reveal
+    // at every zoom level.  craton_factor only suppresses the large-scale undulation
+    // in ancient shields — fine erosion texture persists everywhere.
+    let coarse = fbm(uv *  2.5, 1.0, 0.55, 4u, params.seed ^ 0xb7e15162u) - 0.5;
+    let medium = fbm(uv *  7.0, 1.0, 0.58, 4u, params.seed ^ 0x3f6f6b26u) - 0.5;
+    let fine   = fbm(uv * 20.0, 1.0, 0.62, 4u, params.seed ^ 0xc17b9e4au) - 0.5;
+    let swell  = (fbm(uv *  1.0, 1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu) - 0.5) * 0.10;
+    // Margins: full variation; craton interiors: large scale subdued, fine kept
+    let amp_c = mix(0.14, 0.07, craton_factor);
+    let amp_m = mix(0.09, 0.05, craton_factor);
+    base = CONT_ELEV_BASE + coarse * amp_c + medium * amp_m + fine * 0.04 + swell;
   } else {
     // Oceanic crust: low and slightly varied
     let abyssal = fbm(uv * 4.0, 1.0, 0.50, 3u, params.seed ^ 0x4d2a7f3eu);
@@ -293,7 +298,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let mod_radius = max(params.mountain_radius * width_mod, 1.0);
 
     let dist_norm = clamp(bdist / mod_radius, 0.0, 1.0);
-    let falloff   = pow(smoothstep(1.0, 0.0, dist_norm), 1.5);
+    // Tent profile: zero right at the boundary/coast, peak at ~32% of radius,
+    // then smooth falloff to zero.  Eliminates coastal spike artifacts caused
+    // by mountains peaking exactly at the shoreline.
+    let tent_t  = 0.32;
+    let tented  = select(smoothstep(1.0, tent_t, dist_norm),
+                         dist_norm / tent_t,
+                         dist_norm < tent_t);
+    let falloff = pow(clamp(tented, 0.0, 1.0), 1.4);
 
     // ── Convergent (positive approach_speed = compression) ──────────────────
     if (kin_x > 0.0 && btype < 1.5) {
