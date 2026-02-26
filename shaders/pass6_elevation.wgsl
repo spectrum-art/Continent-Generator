@@ -201,7 +201,7 @@ fn sample_kinematic(nearest: vec2<f32>) -> vec2<f32> {
 
 const LAND_THRESHOLD: f32   = 0.5;   // plate_type threshold (0=continental)
 const OCEAN_ELEV_BASE: f32  = 0.04;
-const CONT_ELEV_BASE: f32   = 0.33;
+const CONT_ELEV_BASE: f32   = 0.28;
 
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -269,31 +269,36 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bn_across = dot(uv * 14.0, across_uv);
     let aniso_uv  = along_uv * bn_along * 0.07 + across_uv * bn_across;
 
-    // Distance from boundary (with warp for snaking)
+    // Distance from boundary (with warp for snaking).
+    // Warp noise frequency ÷3 vs original: same amplitude (1.4×radius) but
+    // slower variation → features are ~3× wider and spaced ~3× farther apart.
     let dw_raw = vec2<f32>(
-      perlin(uv * 3.5, params.seed ^ 0xa4093822u)
-        + perlin(uv * 9.0, params.seed ^ 0x5f3759dfu) * 0.4,
-      perlin(uv * 3.5 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
-        + perlin(uv * 9.0 + vec2<f32>(1.7, -2.3), params.seed ^ 0xc0b18458u) * 0.4
-    ) * (params.mountain_radius * 0.30);
+      perlin(uv * 1.2, params.seed ^ 0xa4093822u)
+        + perlin(uv * 3.0, params.seed ^ 0x5f3759dfu) * 0.4,
+      perlin(uv * 1.2 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
+        + perlin(uv * 3.0 + vec2<f32>(1.7, -2.3), params.seed ^ 0xc0b18458u) * 0.4
+    ) * (params.mountain_radius * 1.4);
     let dw_along = dot(dw_raw, along_px);
     let dw_across = dot(dw_raw, across_px);
     let dist_warp = along_px * dw_along + across_px * dw_across * 0.25;
     let bdist = length((p + dist_warp) - nearest);
 
     // Mountain gate: breaks continuous ranges into distinct segments.
+    // Frequencies ÷3 → gaps occur ~3× less often along the boundary arc.
     // Floor of 0.28 ensures no section goes completely flat.
-    let gap_a = perlin(nearest * params.inv_width * 1.8, params.seed ^ 0x3c6ef372u);
-    let gap_b = perlin(nearest * params.inv_width * 0.6, params.seed ^ 0x9e3779b9u);
+    let gap_a = perlin(nearest * params.inv_width * 0.6, params.seed ^ 0x3c6ef372u);
+    let gap_b = perlin(nearest * params.inv_width * 0.2, params.seed ^ 0x9e3779b9u);
     let mountain_gate = max(0.28, smoothstep(-0.05, 0.40, gap_a * 0.55 + gap_b * 0.45));
 
-    // Width modulation along boundary arc
+    // Width modulation along boundary arc.
+    // Frequencies ÷3, minimum raised 0.20→0.50: features taper from wide to
+    // narrower (readable triangles/spurs) rather than collapsing to needles.
     let arc_coord  = dot(nearest * params.inv_width, along_uv);
     let width_mod  = clamp(
-      perlin(along_uv * arc_coord * 2.5, params.seed ^ 0x13198a2eu) * 0.65
-      + perlin(along_uv * arc_coord * 8.0, params.seed ^ 0x27c0da8bu) * 0.40
+      perlin(along_uv * arc_coord * 0.83, params.seed ^ 0x13198a2eu) * 0.65
+      + perlin(along_uv * arc_coord * 2.67, params.seed ^ 0x27c0da8bu) * 0.40
       + 0.80,
-      0.20, 1.60
+      0.50, 1.40
     );
     let mod_radius = max(params.mountain_radius * width_mod, 1.0);
 
