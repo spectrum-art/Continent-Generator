@@ -58,7 +58,7 @@ function renderPackedRgba(ctx, packedColor, width, height) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-const BUILD_TAG = 'v4.4 — MDOW hillshading, multi-scale interior relief, coast fix'
+const BUILD_TAG = 'v4.5 — spike fix, wider mountains, richer interior'
 console.log(`Continent Generator ${BUILD_TAG}`)
 
 async function main() {
@@ -288,8 +288,8 @@ async function main() {
     v.setUint32(12, 0, true)
     v.setFloat32(16, 1 / WIDTH, true)
     v.setFloat32(20, 1 / HEIGHT, true)
-    v.setFloat32(24, 0.62, true)  // mountain_height
-    v.setFloat32(28, 90.0, true)  // mountain_radius (pixels)
+    v.setFloat32(24, 0.28, true)  // mountain_height
+    v.setFloat32(28, 180.0, true) // mountain_radius (pixels)
     v.setFloat32(32, 0.7, true)   // terrain_roughness
     v.setFloat32(36, 0.0, true)
     v.setFloat32(40, 0.0, true)

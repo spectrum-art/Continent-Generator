@@ -201,7 +201,7 @@ fn sample_kinematic(nearest: vec2<f32>) -> vec2<f32> {
 
 const LAND_THRESHOLD: f32   = 0.5;   // plate_type threshold (0=continental)
 const OCEAN_ELEV_BASE: f32  = 0.04;
-const CONT_ELEV_BASE: f32   = 0.28;
+const CONT_ELEV_BASE: f32   = 0.33;
 
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -235,8 +235,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fine   = fbm(uv * 20.0, 1.0, 0.62, 4u, params.seed ^ 0xc17b9e4au) - 0.5;
     let swell  = (fbm(uv *  1.0, 1.0, 0.50, 3u, params.seed ^ 0x9b2d4e7fu) - 0.5) * 0.10;
     // Margins: full variation; craton interiors: large scale subdued, fine kept
-    let amp_c = mix(0.14, 0.07, craton_factor);
-    let amp_m = mix(0.09, 0.05, craton_factor);
+    let amp_c = mix(0.18, 0.09, craton_factor);
+    let amp_m = mix(0.10, 0.06, craton_factor);
     base = CONT_ELEV_BASE + coarse * amp_c + medium * amp_m + fine * 0.04 + swell;
   } else {
     // Oceanic crust: low and slightly varied
@@ -275,7 +275,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         + perlin(uv * 9.0, params.seed ^ 0x5f3759dfu) * 0.4,
       perlin(uv * 3.5 + vec2<f32>(3.1, -1.2), params.seed ^ 0x299f31d0u)
         + perlin(uv * 9.0 + vec2<f32>(1.7, -2.3), params.seed ^ 0xc0b18458u) * 0.4
-    ) * (params.mountain_radius * 1.4);
+    ) * (params.mountain_radius * 0.30);
     let dw_along = dot(dw_raw, along_px);
     let dw_across = dot(dw_raw, across_px);
     let dist_warp = along_px * dw_along + across_px * dw_across * 0.25;
